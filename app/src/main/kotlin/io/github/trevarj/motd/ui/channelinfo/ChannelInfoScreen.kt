@@ -25,6 +25,7 @@ import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Notifications
@@ -35,12 +36,14 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -57,6 +60,7 @@ import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -124,11 +128,15 @@ fun ChannelInfoScreen(
     viewModel: ChannelInfoViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(bufferId) { viewModel.init(bufferId) }
+    DisposableEffect(viewModel, bufferId) {
+        onDispose { viewModel.closeBanList() }
+    }
     val state by viewModel.state.collectAsStateWithLifecycle()
     val resources = LocalResources.current
     val nickSheet by viewModel.nickSheet.collectAsStateWithLifecycle()
     val topicMutation by viewModel.topicMutation.collectAsStateWithLifecycle()
     val leaveMutation by viewModel.leaveMutation.collectAsStateWithLifecycle()
+    val banList by viewModel.banList.collectAsStateWithLifecycle()
     val inviteFeedback by viewModel.inviteFeedback.collectAsStateWithLifecycle()
     val presenceStates by viewModel.presenceStates.collectAsStateWithLifecycle()
     val notificationSummary by viewModel.notificationSummary.collectAsStateWithLifecycle()
@@ -277,6 +285,11 @@ fun ChannelInfoScreen(
         onChannelNotificationMode = viewModel::setChannelNotificationMode,
         onStartWatch = viewModel::startWatch,
         onStopWatch = viewModel::stopWatch,
+        banList = banList,
+        onOpenBanList = viewModel::openBanList,
+        onCloseBanList = viewModel::closeBanList,
+        onRefreshBanList = viewModel::refreshBanList,
+        onRemoveActiveBan = viewModel::removeActiveBan,
     )
 
     AvatarEditorSheet(
@@ -472,6 +485,11 @@ fun ChannelInfoContent(
     onChannelNotificationMode: (NotificationMode?) -> Unit = {},
     onStartWatch: (ChannelWatchDuration) -> Unit = {},
     onStopWatch: () -> Unit = {},
+    banList: ChannelBanSheetState = ChannelBanSheetState.Closed,
+    onOpenBanList: () -> Unit = {},
+    onCloseBanList: () -> Unit = {},
+    onRefreshBanList: () -> Unit = {},
+    onRemoveActiveBan: (String) -> Unit = {},
 ) {
     var showNotifyPicker by remember { mutableStateOf(false) }
     var showLeaveConfirm by remember { mutableStateOf(false) }
@@ -479,6 +497,7 @@ fun ChannelInfoContent(
     // Fools section is collapsed by default; state is local to the screen.
     var foolsExpanded by remember { mutableStateOf(false) }
     val buffer = state.buffer
+    val joinedChannel = buffer?.type == BufferType.CHANNEL && buffer.joined && buffer.pendingCloseAt == null
     // Visible query lives in local IME state so keystrokes aren't dropped and the cursor is
     // preserved; the ViewModel query drives the filter only. Seeded once from incoming state.
     var queryText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
@@ -535,6 +554,19 @@ fun ChannelInfoContent(
             if (buffer?.type == BufferType.CHANNEL) {
                 item(key = "notifications") {
                     NotificationSummaryRow(presentation = notificationSummary, onClick = { showNotifyPicker = true })
+                }
+            }
+            if (joinedChannel) {
+                item(key = "ban-list") {
+                    ListItem(
+                        colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        headlineContent = { Text(stringResource(R.string.channelinfo_ban_list)) },
+                        leadingContent = { Icon(Icons.Outlined.Block, contentDescription = null) },
+                        modifier =
+                            Modifier
+                                .testTag("channelinfo_ban_list_open")
+                                .clickable(enabled = state.connected, role = Role.Button, onClick = onOpenBanList),
+                    )
                 }
             }
             // Non-ops get no section at all rather than a wall of disabled controls; the gate
@@ -705,6 +737,17 @@ fun ChannelInfoContent(
                 }
             }
         }
+    }
+
+    if (banList != ChannelBanSheetState.Closed) {
+        ChannelBanSheet(
+            state = banList,
+            connected = state.connected && joinedChannel,
+            canModerate = state.canRemoveActiveBan,
+            onDismiss = onCloseBanList,
+            onRefresh = onRefreshBanList,
+            onRemove = onRemoveActiveBan,
+        )
     }
 
     if (showNotifyPicker && buffer?.type == BufferType.CHANNEL) {

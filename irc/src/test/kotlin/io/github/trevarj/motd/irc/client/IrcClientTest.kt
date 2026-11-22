@@ -75,6 +75,315 @@ class IrcClientTest {
             .groupValues[1]
 
     @Test
+    fun `channel bans collect exact masks for the current recipient and canonical joined channel`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 005 motd CHANTYPES=+ CASEMAPPING=rfc1459 :are supported")
+            ft.feed(":motd!u@h JOIN +Room[")
+            ft.feed(":motd!u@h NICK :Current")
+            runCurrent()
+            val unrelated = mutableListOf<IrcEvent.Raw>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.Raw>().toList(unrelated)
+            }
+
+            val bans = async { client.listChannelBans("+rOOM{") }
+            runCurrent()
+            assertEquals("MODE +Room[ +b", ft.sent.last())
+            ft.feed(":srv 367 motd +Room[ stale!*@*")
+            ft.feed(":srv 368 MOTD +Room[ :Old recipient")
+            ft.feed(":srv 368 Current +elsewhere :Another channel")
+            ft.feed(":srv 367 CURRENT +ROOM{ *!*@Example.COM Op!u@host 1712345678")
+            ft.feed(":srv 367 CURRENT +ROOM{ ${'$'}a:AnAccount")
+            runCurrent()
+            assertFalse(bans.isCompleted)
+            ft.feed(":srv 368 CURRENT +ROOM{ :End of ban list")
+            runCurrent()
+
+            assertEquals(
+                ChannelBanListResult.Complete(
+                    listOf(ChannelBanEntry("*!*@Example.COM", "Op!u@host", 1_712_345_678), ChannelBanEntry("${'$'}a:AnAccount")),
+                ),
+                bans.await(),
+            )
+            assertEquals(listOf("367", "368", "368"), unrelated.map { it.message.command })
+        }
+
+    @Test
+    fun `channel bans distinguish denial from empty without consuming another channel's terminator`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 005 motd CHANTYPES=+ :are supported")
+            ft.feed(":motd!u@h JOIN +Room")
+            ft.feed(":motd!u@h JOIN +Other")
+            runCurrent()
+
+            val denied = async { client.listChannelBans("+Room") }
+            runCurrent()
+            ft.feed(":srv 482 motd +Room :You're not channel operator")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Denied, denied.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("+Room"))
+
+            val empty = async { client.listChannelBans("+Other") }
+            runCurrent()
+            ft.feed(":srv 368 somebody +Room :End for someone else")
+            ft.feed(":srv 368 motd +Other :End of empty ban list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), empty.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("+Room"))
+            ft.feed(":srv 368 motd +Room :Late optional end")
+            runCurrent()
+
+            val refreshed = async { client.listChannelBans("+Room") }
+            runCurrent()
+            assertFalse(refreshed.isCompleted)
+            ft.feed(":srv 368 motd +Room :End of empty ban list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), refreshed.await())
+        }
+
+    @Test
+    fun `channel bans drain canceled and truncated reads before reusing their channel`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+
+            val truncated = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 367 motd #Room stale!*@*")
+            advanceTimeBy(15_001)
+            runCurrent()
+            assertEquals(ChannelBanListResult.Incomplete, truncated.await())
+            ft.feed(":srv PONG srv :not-an-upstream-fence")
+            ft.feed(":srv 368 motd #Other :Another channel")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#room"))
+            assertEquals(1, ft.sent.count { it == "MODE #Room +b" })
+            ft.feed(":srv 368 motd #ROOM :End of truncated response")
+            runCurrent()
+
+            val canceled = async { client.listChannelBans("#Room") }
+            runCurrent()
+            canceled.cancelAndJoin()
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+            ft.feed(":srv 367 motd #Room also-stale!*@*")
+            ft.feed(":srv 368 motd #Room :End of canceled response")
+            runCurrent()
+
+            val fresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 368 motd #Room :End of empty response")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), fresh.await())
+            assertEquals(3, ft.sent.count { it == "MODE #Room +b" })
+        }
+
+    @Test
+    fun `channel bans report malformed replies disconnect and lost membership as incomplete`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+
+            val malformed = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 367 motd #Room")
+            ft.feed(":srv 368 motd #Room :End after malformed row")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Incomplete, malformed.await())
+
+            val parted = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv KICK #Room motd :Left during read")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Incomplete, parted.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+            ft.feed(":srv 368 motd #Room :End after leaving")
+            runCurrent()
+
+            val disconnected = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.eof()
+            runCurrent()
+            assertEquals(ChannelBanListResult.Incomplete, disconnected.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+        }
+
+    @Test
+    fun `channel ban drain never carries over to a reconnected transport`() =
+        runTest {
+            val first = FakeTransport()
+            val second = FakeTransport()
+            val caps = "message-tags server-time batch"
+            val factory = TransportFactory { _, _, _, _, _ -> if (first.connected) second else first }
+            val client = registered(first, caps = caps, factory = factory)
+            first.feed(":srv 376 motd :End of MOTD")
+            first.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+
+            val denied = async { client.listChannelBans("#Room") }
+            runCurrent()
+            first.feed(":srv 482 motd #Room :Denied")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Denied, denied.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+
+            client.stop()
+            runCurrent()
+            client.start()
+            runCurrent()
+            second.feed(":srv CAP * LS :$caps")
+            runCurrent()
+            second.feed(":srv CAP motd ACK :$caps")
+            runCurrent()
+            second.feed(":srv 001 motd :Welcome")
+            second.feed(":srv 376 motd :End of MOTD")
+            second.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+
+            val fresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            assertEquals("MODE #Room +b", second.sent.last())
+            second.feed(":srv 368 motd #Room :End of empty list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), fresh.await())
+        }
+
+    @Test
+    fun `channel bans use labeled replies without consuming unrelated numerics or accepting ACK as empty`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+            val unrelated = mutableListOf<IrcEvent.Raw>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.Raw>().toList(unrelated)
+            }
+
+            val labeled = async { client.listChannelBans("#Room") }
+            runCurrent()
+            val firstLabel = responseLabel(ft.sent.last())
+            assertEquals("@label=$firstLabel MODE #Room +b", ft.sent.last())
+            ft.feed("@label=$firstLabel BATCH +bans labeled-response")
+            ft.feed("@batch=bans :srv 368 motd #Other :Unrelated channel")
+            ft.feed("@batch=bans :srv 368 somebody #Room :Unrelated recipient")
+            ft.feed(":srv 367 motd #Room unlabeled!*@*")
+            ft.feed("@batch=bans :srv 367 MOTD #ROOM matched!*@*")
+            ft.feed("@batch=bans :srv 368 MOTD #ROOM :End of list")
+            runCurrent()
+            assertFalse(labeled.isCompleted)
+            ft.feed("BATCH -bans")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(listOf(ChannelBanEntry("matched!*@*"))), labeled.await())
+            assertEquals(listOf("368", "368", "367"), unrelated.map { it.message.command })
+
+            val ack = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed("@label=${responseLabel(ft.sent.last())} :srv ACK")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Incomplete, ack.await())
+
+            val denied = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed("@label=${responseLabel(ft.sent.last())} :srv 482 motd #Room :Denied")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Denied, denied.await())
+
+            val canceled = async { client.listChannelBans("#Room") }
+            runCurrent()
+            val oldLabel = responseLabel(ft.sent.last())
+            canceled.cancelAndJoin()
+            val fresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            val freshLabel = responseLabel(ft.sent.last())
+            ft.feed("@label=$oldLabel :srv 368 motd #Room :End of canceled list")
+            runCurrent()
+            assertFalse(fresh.isCompleted)
+            ft.feed("@label=$freshLabel :srv 368 motd #Room :End of empty list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), fresh.await())
+        }
+
+    @Test
+    fun `raw channel ban reads still publish replies without contaminating active bans`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+            val raw = mutableListOf<IrcEvent.Raw>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.Raw>().toList(raw)
+            }
+
+            val bans = async { client.listChannelBans("#Room") }
+            runCurrent()
+            client.send(IrcMessage(command = "MODE", params = listOf("#rOOM", "+b")))
+            assertEquals("MODE #rOOM +b", ft.sent.last())
+            assertEquals(ChannelBanListResult.Incomplete, bans.await())
+            ft.feed(":srv 368 motd #Room :End of first list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+            ft.feed(":srv 367 motd #Room raw!*@*")
+            ft.feed(":srv 368 motd #Room :End of raw list")
+            runCurrent()
+            assertEquals(listOf("368", "367", "368"), raw.map { it.message.command })
+
+            val fresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 368 motd #Room :End of empty list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), fresh.await())
+        }
+
+    @Test
+    fun `channel ban removal writes one exact mask and rejects unsupported framing and oversized UTF-8`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 005 motd CHANTYPES=+ :are supported")
+            ft.feed(":motd!u@h JOIN +Room")
+            runCurrent()
+            val exactMask = "${'$'}a:User/Éxact"
+            assertTrue(client.removeChannelBan("+rOOM", exactMask))
+            assertEquals("MODE +Room -b $exactMask", ft.sent.last())
+            assertTrue(client.removeChannelBan("+Room", "é".repeat(248)))
+            val wireSize =
+                ft.sent
+                    .last()
+                    .toByteArray(Charsets.UTF_8)
+                    .size + 2
+            assertEquals(512, wireSize)
+
+            val lastWrite = ft.sent.size
+            for (mask in listOf("", ":prefix", "bad mask", "bad\tmask", "bad\u0000mask", "bad\r\nJOIN +Elsewhere", "\uD800", "é".repeat(249))) {
+                assertFalse(client.removeChannelBan("+Room", mask))
+            }
+            assertFalse(client.removeChannelBan("#Room", exactMask))
+            assertFalse(client.removeChannelBan("+Room,+Elsewhere", exactMask))
+            assertFalse(client.removeChannelBan("+Elsewhere", exactMask))
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+            assertEquals(lastWrite, ft.sent.size)
+
+            ft.feed(":motd!u@h PART +Room")
+            runCurrent()
+            assertFalse(client.removeChannelBan("+Room", exactMask))
+            assertEquals(lastWrite, ft.sent.size)
+        }
+
+    @Test
     fun guardedMessageRechecksMembershipAfterWaitingBehindAWrite() =
         runTest {
             val ft = FakeTransport()

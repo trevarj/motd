@@ -24,6 +24,9 @@ import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.di.AppClock
+import io.github.trevarj.motd.irc.client.ChannelBanEntry
+import io.github.trevarj.motd.irc.client.ChannelBanListResult
+import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
@@ -54,6 +57,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
@@ -78,6 +82,7 @@ data class ChannelInfoUiState(
     val identityRules: IrcIdentityRules = IrcIdentityRules(),
     // Round 5: true when the viewer holds op in this channel (moderation gate).
     val canModerate: Boolean = false,
+    val canRemoveActiveBan: Boolean = false,
     // Fuzzy member search. When [searchResults] is non-null the list renders a flat ranked set
     // instead of the prefix sections; null (query blank) means sectioned mode.
     val query: String = "",
@@ -90,8 +95,7 @@ data class ChannelInfoUiState(
     val sojuFileHostAvailable: Boolean = false,
     /**
      * ISUPPORT-derived mode vocabulary for this network, null until the connection is Ready. It
-     * says which modes the server *advertises*, never which modes are currently set: nothing in
-     * the app parses 324/367, so no control built on this may claim current channel state.
+     * says which modes the server *advertises*, never which modes are currently set.
      */
     val modeCatalog: ModeCatalog? = null,
     val joinedChannels: List<JoinedChannelRow> = emptyList(),
@@ -158,6 +162,24 @@ sealed interface ChannelInfoOperationEvent {
     data object NotificationSettingsWriteFailed : ChannelInfoOperationEvent
 }
 
+sealed interface ChannelBanSheetState {
+    data object Closed : ChannelBanSheetState
+
+    data object Loading : ChannelBanSheetState
+
+    data object Denied : ChannelBanSheetState
+
+    data object Incomplete : ChannelBanSheetState
+
+    data object Unavailable : ChannelBanSheetState
+
+    data class Ready(
+        val entries: List<ChannelBanEntry>,
+        val removingMask: String? = null,
+        val removalFailed: Boolean = false,
+    ) : ChannelBanSheetState
+}
+
 internal data class RosterPresentation(
     val memberCount: Int?,
     val hasStaleMembers: Boolean,
@@ -204,7 +226,10 @@ class ChannelInfoViewModel
         val muteBacklogSuppressions: SharedFlow<MuteBacklogSuppression> = _muteBacklogSuppressions.asSharedFlow()
 
         fun init(bufferId: Long) {
-            if (bufferIdFlow.value != bufferId) dismissNickSheet()
+            if (bufferIdFlow.value != bufferId) {
+                dismissNickSheet()
+                closeBanList()
+            }
             bufferIdFlow.value = bufferId
             viewModelScope.launch { connectionManager.requestMembers(bufferId) }
         }
@@ -341,6 +366,7 @@ class ChannelInfoViewModel
                     foolPreferences = derived.foolPreferences,
                     identityRules = identityRules,
                     canModerate = viewerCanModerate(buffer, members, order),
+                    canRemoveActiveBan = buffer != null && liveBanClient(buffer)?.let { hasBanRemovalRole(it, buffer.id, members) } == true,
                     query = derived.query,
                     searchResults = searchResults,
                     lagMs = runtime.lagMs,
@@ -478,6 +504,7 @@ class ChannelInfoViewModel
                         false
                     }
                 if (accepted) {
+                    closeBanList()
                     _leaveMutation.value = LeaveMutationState.Idle
                     _operationEvents.emit(ChannelInfoOperationEvent.LeaveAccepted)
                 } else {
@@ -743,6 +770,180 @@ class ChannelInfoViewModel
             mask: String,
             grant: Boolean,
         ) = setListMask('b', mask, grant)
+
+        private data class BanRoom(
+            val id: Long,
+            val networkId: Long,
+            val membershipCycle: Long,
+            val channel: String,
+            val selfNick: String,
+            val client: IrcClient,
+        )
+
+        private val _banList = MutableStateFlow<ChannelBanSheetState>(ChannelBanSheetState.Closed)
+        val banList: StateFlow<ChannelBanSheetState> = _banList
+        private var banRoom: BanRoom? = null
+        private var banRoomWatch: Job? = null
+        private var banRequest: Job? = null
+
+        fun openBanList() {
+            if (_banList.value == ChannelBanSheetState.Closed) loadBanList()
+        }
+
+        fun closeBanList() = clearBanList(ChannelBanSheetState.Closed)
+
+        fun refreshBanList() {
+            val current = _banList.value
+            if (current == ChannelBanSheetState.Closed || current == ChannelBanSheetState.Loading) return
+            if (current is ChannelBanSheetState.Ready && current.removingMask != null) return
+            loadBanList()
+        }
+
+        private fun clearBanList(state: ChannelBanSheetState) {
+            banRequest?.cancel()
+            banRequest = null
+            banRoomWatch?.cancel()
+            banRoomWatch = null
+            banRoom = null
+            _banList.value = state
+        }
+
+        private fun liveBanClient(buffer: BufferEntity): IrcClient? {
+            if (buffer.type != BufferType.CHANNEL || !buffer.joined) return null
+            val client = connectionManager.clientFor(buffer.networkId) ?: return null
+            val ready = client.state.value as? IrcClientState.Ready ?: return null
+            val networkReady = connectionManager.connectionStates.value[buffer.networkId] as? IrcClientState.Ready ?: return null
+            val support = client.isupport
+            val nick = support.normalize(ready.nick)
+            if (support.normalize(networkReady.nick) != nick) return null
+            val channel = buffer.ircTarget
+            if (!support.isChannel(channel)) return null
+            val normalized = support.normalize(channel)
+            if (client.joinedChannels.value.none { support.normalize(it) == normalized }) return null
+            return client
+        }
+
+        private fun banRoomFor(buffer: BufferEntity?): BanRoom? {
+            if (buffer == null) return null
+            val client = liveBanClient(buffer) ?: return null
+            val ready = client.state.value as? IrcClientState.Ready ?: return null
+            return BanRoom(buffer.id, buffer.networkId, buffer.membershipCycle, buffer.ircTarget, client.isupport.normalize(ready.nick), client)
+        }
+
+        private fun hasBanRemovalRole(
+            client: IrcClient,
+            bufferId: Long,
+            members: List<MemberEntity>,
+        ): Boolean {
+            if (connectionManager.rosterStates.value[bufferId] != RosterLoadState.LOADED) return false
+            val ready = client.state.value as? IrcClientState.Ready ?: return false
+            val support = client.isupport
+            val selfNick = support.normalize(ready.nick)
+            val self = members.firstOrNull { it.bufferId == bufferId && support.normalize(it.nick) == selfNick } ?: return false
+            return support.prefixModes.any { (mode, glyph) -> mode in "qao" && glyph in self.prefixes }
+        }
+
+        private fun loadBanList() {
+            val route = bufferIdFlow.value
+            _banList.value = ChannelBanSheetState.Loading
+            banRequest =
+                viewModelScope.launch {
+                    val room = route?.let { banRoomFor(bufferRepository.buffer(it)) }
+                    val previous = banRoom
+                    if (route == null || room == null || (previous != null && previous != room)) {
+                        clearBanList(ChannelBanSheetState.Unavailable)
+                        return@launch
+                    }
+                    if (previous == null) {
+                        banRoom = room
+                        banRoomWatch =
+                            viewModelScope.launch {
+                                combine(
+                                    bufferRepository.observeBuffer(route),
+                                    connectionManager.connectionStates,
+                                    room.client.state,
+                                    room.client.joinedChannels,
+                                ) { buffer, _, _, _ -> banRoomFor(buffer) == room }
+                                    .first { !it }
+                                clearBanList(ChannelBanSheetState.Unavailable)
+                            }
+                    }
+                    queryBanList(route, room)
+                }
+        }
+
+        fun removeActiveBan(mask: String) {
+            val route = bufferIdFlow.value ?: return
+            val room = banRoom ?: return
+            val ready = _banList.value as? ChannelBanSheetState.Ready ?: return
+            if (ready.removingMask != null || ready.entries.none { it.mask == mask }) return
+            _banList.value = ready.copy(removingMask = mask, removalFailed = false)
+            banRequest =
+                viewModelScope.launch {
+                    val buffer = bufferRepository.buffer(route)
+                    val members = bufferRepository.observeMembers(room.id).first()
+                    if (banRoomFor(buffer) != room) {
+                        clearBanList(ChannelBanSheetState.Unavailable)
+                        return@launch
+                    }
+                    if (!hasBanRemovalRole(room.client, room.id, members)) {
+                        _banList.value = ready.copy(removalFailed = true)
+                        return@launch
+                    }
+                    try {
+                        room.client.removeChannelBan(room.channel, mask)
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        // A failed local write still needs a fresh list, just like a server rejection.
+                    }
+                    if (banRoomFor(bufferRepository.buffer(route)) != room) {
+                        clearBanList(ChannelBanSheetState.Unavailable)
+                        return@launch
+                    }
+                    queryBanList(route, room, mask)
+                }
+        }
+
+        private suspend fun queryBanList(
+            route: Long,
+            room: BanRoom,
+            removedMask: String? = null,
+        ) {
+            val result =
+                try {
+                    room.client.listChannelBans(room.channel)
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    ChannelBanListResult.Incomplete
+                }
+            if (banRoomFor(bufferRepository.buffer(route)) != room) {
+                clearBanList(ChannelBanSheetState.Unavailable)
+                return
+            }
+            _banList.value =
+                when (result) {
+                    is ChannelBanListResult.Complete -> {
+                        ChannelBanSheetState.Ready(
+                            entries = result.entries,
+                            removalFailed = removedMask != null && result.entries.any { it.mask == removedMask },
+                        )
+                    }
+
+                    ChannelBanListResult.Denied -> {
+                        ChannelBanSheetState.Denied
+                    }
+
+                    ChannelBanListResult.Incomplete -> {
+                        ChannelBanSheetState.Incomplete
+                    }
+
+                    ChannelBanListResult.Unavailable -> {
+                        ChannelBanSheetState.Unavailable
+                    }
+                }
+        }
 
         fun invite(
             channel: JoinedChannelRow,

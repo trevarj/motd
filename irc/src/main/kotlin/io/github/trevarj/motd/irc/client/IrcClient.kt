@@ -44,10 +44,12 @@ import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.IOException
 import java.util.PriorityQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -314,6 +316,7 @@ class IrcClient(
     private val unlabeledWhoisLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
     private var unlabeledChannelListDrain: UnlabeledChannelListResponse? = null
+    private val channelBanSession = AtomicReference<ChannelBanRequests?>(null)
     private val accountRegistrationLock = Mutex()
     private val sensitiveEchoes = ConcurrentHashMap<String, Int>()
     private val outboundLock = Mutex()
@@ -381,6 +384,7 @@ class IrcClient(
         watchdog = null
         lagMonitor?.stop()
         lagMonitor = null
+        channelBanSession.getAndSet(null)?.close()
         runJob?.cancel()
         runJob = null
         criticalEventChannel.cancel(CancellationException("client stopped"))
@@ -436,6 +440,8 @@ class IrcClient(
         // proxy is null here; the app's per-network AppTransportFactory captures its own proxy.
         val t = factory.create(config.host, config.port, config.tls, config.wsUrl, null)
         transport = t
+        val banSession = ChannelBanRequests(t)
+        channelBanSession.set(banSession)
         try {
             t.connect()
         } catch (e: CancellationException) {
@@ -525,6 +531,7 @@ class IrcClient(
             }
             emitDisconnected(criticalEvents, disconnectedPublished, e.message)
         } finally {
+            if (channelBanSession.compareAndSet(banSession, null)) banSession.close()
             wd.stop()
             lm.stop()
             if (transport === t) lagMonitor = null
@@ -616,6 +623,16 @@ class IrcClient(
         if (consumeSensitiveEcho(msg)) return
         // Labeled responses are consumed by the correlator (incl. their batch contents).
         if (labels.route(msg)) return
+        when (msg.command) {
+            "367", "368", "403", "442", "482", "FAIL" -> {
+                val banSession = channelBanSession.get()
+                if (banSession != null && banSession.transport === t &&
+                    banSession.routeUnlabeled(msg, selfNick.get(), isupport.identityRules.caseMapping)
+                ) {
+                    return
+                }
+            }
+        }
         // Released soju lacks labeled-response, but its CHATHISTORY/SEARCH replies remain batched.
         if (unlabeledChatHistory.route(msg)) return
         if (unlabeledSearch.route(msg)) return
@@ -744,6 +761,9 @@ class IrcClient(
                 containsChannel -> joined.filterNotTo(linkedSetOf()) { isupport.normalize(it) == normalized }
                 else -> joined
             }
+        }
+        if (event !is IrcEvent.Joined) {
+            channelBanSession.get()?.left(channel, isupport.identityRules.caseMapping)
         }
     }
 
@@ -1063,6 +1083,7 @@ class IrcClient(
         isupport.update(msg.params.drop(1).dropLast(1))
         val removedIsupport = isupport.removedKeys
         if (isupport["CHANTYPES"] != null || "CHANTYPES" in removedIsupport) _targetClassificationReady.value = true
+        channelBanSession.get()?.updateMapping(isupport.identityRules.caseMapping)
         val current = _state.value as? IrcClientState.Ready ?: return
         val snapshot = isupportToMap(isupport)
         _state.value = current.copy(isupport = snapshot, removedIsupport = removedIsupport)
@@ -1075,6 +1096,8 @@ class IrcClient(
         reason: String?,
     ) {
         if (!disconnectedPublished.compareAndSet(false, true)) return
+        val banSession = channelBanSession.get()
+        if (criticalEvents === criticalEventChannel && channelBanSession.compareAndSet(banSession, null)) banSession?.close()
         _joinedChannels.value = emptySet()
         latestSelfMembershipEvent = null
         publish(criticalEvents, IrcEvent.Disconnected(reason))
@@ -1091,7 +1114,19 @@ class IrcClient(
     private suspend fun sendSerialized(
         t: IrcTransport,
         msg: IrcMessage,
-    ) = sendSerialized(t, msg.serialize())
+    ) {
+        val line = msg.serialize()
+        if (!msg.command.equals("MODE", ignoreCase = true) || msg.params.getOrNull(1)?.contains('b') != true) {
+            sendSerialized(t, line)
+            return
+        }
+        outboundLock.withLock {
+            if ("label" !in msg.tags || !hasCap("labeled-response")) {
+                channelBanSession.get()?.takeIf { it.transport === t }?.rawMode(msg, isupport.identityRules.caseMapping)
+            }
+            t.send(line)
+        }
+    }
 
     private suspend fun sendSerialized(
         t: IrcTransport,
@@ -1174,7 +1209,7 @@ class IrcClient(
         }
         val label = labels.next()
         val deferred = CompletableDeferred<CorrelatedResponse>()
-        labels.register(label, msg.command, deferred, consumer)
+        labels.register(label, msg.command, deferred, consumer = consumer)
         val labeled = msg.copy(tags = msg.tags + ("label" to label))
         return try {
             sendSerialized(t, labeled)
@@ -1874,6 +1909,122 @@ class IrcClient(
         return ChannelListing(channel, count, topic)
     }
 
+    /** Read a joined channel's active bans; an empty list is valid only after a matching 368. */
+    suspend fun listChannelBans(channel: String): ChannelBanListResult {
+        val session = channelBanSession.get() ?: return ChannelBanListResult.Unavailable
+        if (liveBanTarget(session, channel) == null) return ChannelBanListResult.Unavailable
+        var request: ChannelBanRequest? = null
+        var labeled: CompletableDeferred<CorrelatedResponse>? = null
+        return try {
+            withTimeoutOrNull(BAN_LIST_TIMEOUT_MS) {
+                val pending =
+                    outboundLock.withLock {
+                        val target = liveBanTarget(session, channel) ?: return@withLock null
+                        val label = if (hasCap("labeled-response")) labels.next() else null
+                        val line = channelBanModeLine(target, label = label) ?: return@withLock null
+                        val candidate = ChannelBanRequest(target, label)
+                        synchronized(session) {
+                            if (liveBanTarget(session, target) == null || !session.begin(candidate, isupport.identityRules.caseMapping)) {
+                                return@withLock null
+                            }
+                        }
+                        request = candidate
+                        if (label != null) {
+                            val response = CompletableDeferred<CorrelatedResponse>()
+                            labeled = response
+                            labels.register(
+                                label,
+                                "MODE",
+                                response,
+                                accepts = {
+                                    channelBanSession.get() === session &&
+                                        candidate.acceptsLabeled(it, selfNick.get(), isupport.identityRules.caseMapping)
+                                },
+                            )
+                        }
+                        if (!candidate.stopped.isCompleted && !writeChannelBanLine(session.transport, line)) {
+                            return@withTimeoutOrNull ChannelBanListResult.Incomplete
+                        }
+                        candidate
+                    } ?: return@withTimeoutOrNull ChannelBanListResult.Unavailable
+
+                val response = labeled ?: return@withTimeoutOrNull pending.stopped.await()
+                select<ChannelBanListResult> {
+                    pending.stopped.onAwait { it }
+                    response.onAwait { completed ->
+                        val wrapper = completed.rootBatch
+                        if (wrapper != null && !wrapper.params.getOrNull(1).equals("labeled-response", ignoreCase = true)) {
+                            ChannelBanListResult.Incomplete
+                        } else {
+                            val rows = pending.rows
+                            completed.messages.forEach(rows::accept)
+                            rows.result()
+                        }
+                    }
+                }
+            }?.let { result ->
+                if (result is ChannelBanListResult.Complete && liveBanTarget(session, channel) == null) {
+                    ChannelBanListResult.Incomplete
+                } else {
+                    result
+                }
+            } ?: ChannelBanListResult.Incomplete
+        } catch (_: IrcProtocolException) {
+            ChannelBanListResult.Incomplete
+        } catch (_: IrcDisconnectedException) {
+            ChannelBanListResult.Incomplete
+        } finally {
+            request?.let { pending ->
+                labeled?.let { labels.unregister(checkNotNull(pending.label), it) }
+                session.abandon(pending)
+            }
+        }
+    }
+
+    /** Remove this literal mask. True means the local transport accepted the write, not server success. */
+    suspend fun removeChannelBan(
+        channel: String,
+        mask: String,
+    ): Boolean {
+        val session = channelBanSession.get() ?: return false
+        return outboundLock.withLock {
+            val target = liveBanTarget(session, channel) ?: return false
+            val line = channelBanModeLine(target, mask) ?: return false
+            writeChannelBanLine(session.transport, line)
+        }
+    }
+
+    private fun liveBanTarget(
+        session: ChannelBanRequests,
+        requested: String,
+    ): String? {
+        if (channelBanSession.get() !== session || transport !== session.transport ||
+            _state.value !is IrcClientState.Ready || !_targetClassificationReady.value
+        ) {
+            return null
+        }
+        val identity = isupport.identityRules
+        if (!identity.isChannel(requested) || !requested.isBanModeParameter() || ',' in requested) return null
+        val folded = identity.normalize(requested)
+        return _joinedChannels.value.firstOrNull { identity.isChannel(it) && identity.normalize(it) == folded }
+    }
+
+    /** Called with the outbound lock held. A failed send may already have put bytes on the wire. */
+    private suspend fun writeChannelBanLine(
+        t: IrcTransport,
+        line: String,
+    ): Boolean =
+        try {
+            t.send(line)
+            true
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: IOException) {
+            false
+        } catch (_: IllegalStateException) {
+            false
+        }
+
     // -- account registration --
 
     val accountRegistrationPolicy: AccountRegistrationPolicy?
@@ -2251,6 +2402,7 @@ class IrcClient(
         // Generous enough that a slow link answering a PING is not mistaken for a dead bouncer.
         const val BOUNCER_LIST_PROBE_GRACE_MS = 5_000L
         const val LIST_TIMEOUT_MS = 15_000L
+        const val BAN_LIST_TIMEOUT_MS = 15_000L
         const val LIST_DRAIN_WAIT_MS = 15_000L
         const val ACCOUNT_REGISTRATION_TIMEOUT_MS = 30_000L
         const val SENSITIVE_ECHO_TTL_MS = 30_000L

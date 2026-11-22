@@ -7,9 +7,8 @@ package io.github.trevarj.motd.ui.channelinfo
  * `Isupport` only types CASEMAPPING/CHANTYPES/PREFIX; CHANMODES, EXCEPTS, INVEX, MAXLIST, MODES,
  * KICKLEN and TOPICLEN are reachable only as raw 005 tokens, which is what this parses.
  *
- * The catalog says which modes a network *advertises*. It never claims which modes are currently
- * set on a channel: numerics 324/329/367 are not handled anywhere in the app, so no control built
- * on this may render current server state.
+ * The catalog says which modes a network *advertises*, not which are set in a channel.
+ * Active bans are queried separately.
  */
 
 /** A PREFIX entry: the mode letter and the glyph it puts in front of a nick (e.g. `o` and `@`). */

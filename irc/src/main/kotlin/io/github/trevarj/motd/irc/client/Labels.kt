@@ -67,6 +67,7 @@ internal class LabelCorrelator(
     private class Pending(
         val ircCommand: String,
         val deferred: CompletableDeferred<CorrelatedResponse>,
+        val accepts: ((IrcMessage) -> Boolean)?,
         val consumer: ((IrcMessage) -> Unit)?,
     ) {
         // Non-null once this label opened a batch; collects everything under it.
@@ -92,10 +93,11 @@ internal class LabelCorrelator(
         label: String,
         ircCommand: String,
         deferred: CompletableDeferred<CorrelatedResponse>,
+        accepts: ((IrcMessage) -> Boolean)? = null,
         consumer: ((IrcMessage) -> Unit)? = null,
     ) {
         check(label !in byLabel) { "duplicate label: $label" }
-        byLabel[label] = Pending(ircCommand, deferred, consumer)
+        byLabel[label] = Pending(ircCommand, deferred, accepts, consumer)
     }
 
     /** Remove exactly this registration and every batch-ref alias it acquired. */
@@ -179,6 +181,8 @@ internal class LabelCorrelator(
                     refToLabel[ref] = label
                     pending.openNested.add(ref)
                     pending.nestedParents[ref] = batchTag
+                } else if (pending.accepts?.invoke(msg) == false) {
+                    return false
                 }
                 buffer(label, pending, msg)
                 return true
@@ -209,8 +213,10 @@ internal class LabelCorrelator(
             return true
         }
 
+        if (pending.accepts?.invoke(msg) == false) return false
+
         // FAIL / ERR_* -> exceptional completion.
-        if (msg.command == "FAIL" || isErrorNumeric(msg.command)) {
+        if (pending.accepts == null && (msg.command == "FAIL" || isErrorNumeric(msg.command))) {
             removePending(label, pending)
             val cmd = msg.params.getOrNull(0) ?: msg.command
             val code = if (msg.command == "FAIL") (msg.params.getOrNull(1) ?: "FAIL") else msg.command

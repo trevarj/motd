@@ -24,8 +24,12 @@ import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
 import io.github.trevarj.motd.di.AppClock
+import io.github.trevarj.motd.irc.client.ChannelBanEntry
 import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.transport.IrcTransport
+import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.CertPrompt
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.ConnectionManager
@@ -34,6 +38,7 @@ import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationScope
 import io.github.trevarj.motd.service.NotificationSettings
 import io.github.trevarj.motd.service.NotificationSettingsImpl
+import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.service.SendAcceptance
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
@@ -43,10 +48,12 @@ import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.launch
@@ -170,6 +177,136 @@ class ChannelInfoTopicMutationTest {
             gate.complete(true)
             advanceUntilIdle()
             assertEquals(TopicMutationState.Accepted, viewModel.topicMutation.value)
+        }
+
+    @Test
+    fun `active bans use the canonical live joined room without requiring op`() =
+        runTest {
+            val wire = BanTransport()
+            val client = readyBanClient(wire)
+            val manager = banManager(client)
+            val buffers = banBuffers()
+            val viewModel = viewModel(manager, buffers = buffers)
+            viewModel.init(BUFFER_ID)
+            viewModel.openBanList()
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Unavailable, viewModel.banList.value)
+            assertTrue(wire.modes.isEmpty())
+
+            wire.feed(":me!ident@host JOIN :+iN{rOOM}")
+            runCurrent()
+            manager.states.value = mapOf(OTHER_NETWORK_ID to client.state.value)
+            viewModel.refreshBanList()
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Unavailable, viewModel.banList.value)
+            assertTrue(wire.modes.isEmpty())
+
+            manager.states.value = mapOf(BAN_NETWORK_ID to client.state.value)
+            viewModel.refreshBanList()
+            runCurrent()
+            assertEquals(listOf("MODE +iN{rOOM} +b"), wire.modes)
+            wire.banList(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Ready(listOf(BAN_ENTRY)), viewModel.banList.value)
+
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(listOf("MODE +iN{rOOM} +b"), wire.modes)
+            viewModel.closeBanList()
+        }
+
+    @Test
+    fun `active ban removal rechecks op and waits for a fresh list of exact masks`() =
+        runTest {
+            val wire = BanTransport()
+            val client = readyBanClient(wire)
+            wire.feed(":me!ident@host JOIN :+In[Room]")
+            runCurrent()
+            val buffers = banBuffers("!")
+            val rosters = MutableStateFlow<Map<Long, RosterLoadState>>(emptyMap())
+            val viewModel = viewModel(banManager(client, rosters), buffers = buffers)
+            viewModel.init(BUFFER_ID)
+            viewModel.openBanList()
+            runCurrent()
+            wire.banList(BAN_ENTRY.mask)
+            runCurrent()
+            val ready = ChannelBanSheetState.Ready(listOf(BAN_ENTRY))
+            assertEquals(ready, viewModel.banList.value)
+
+            viewModel.removeActiveBan(BAN_ENTRY.mask.lowercase())
+            viewModel.removeActiveBan(" ${BAN_ENTRY.mask}")
+            assertEquals(ready, viewModel.banList.value)
+
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(ready.copy(removalFailed = true), viewModel.banList.value)
+            assertEquals(listOf("MODE +In[Room] +b"), wire.modes)
+
+            rosters.value = mapOf(CANONICAL_BAN_ID to RosterLoadState.LOADED)
+            buffers.members.value = listOf(MemberEntity(CANONICAL_BAN_ID, "ME", "+"))
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(ready.copy(removalFailed = true), viewModel.banList.value)
+            assertEquals(listOf("MODE +In[Room] +b"), wire.modes)
+
+            buffers.members.value = listOf(MemberEntity(CANONICAL_BAN_ID, "ME", "!"))
+            wire.rejectRemoval = true
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            viewModel.refreshBanList()
+            runCurrent()
+            val list = "MODE +In[Room] +b"
+            val remove = "MODE +In[Room] -b ${BAN_ENTRY.mask}"
+            assertEquals(listOf(list, remove, list), wire.modes)
+            assertEquals(ready.copy(removingMask = BAN_ENTRY.mask), viewModel.banList.value)
+            wire.banList(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(ready.copy(removalFailed = true), viewModel.banList.value)
+
+            wire.rejectRemoval = false
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(listOf(list, remove, list, remove, list), wire.modes)
+            assertEquals(ready.copy(removingMask = BAN_ENTRY.mask), viewModel.banList.value)
+            wire.banList()
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Ready(emptyList()), viewModel.banList.value)
+            viewModel.closeBanList()
+        }
+
+    @Test
+    fun `active bans discard replies after leaving the route or losing the live socket`() =
+        runTest {
+            val wire = BanTransport()
+            val client = readyBanClient(wire)
+            wire.feed(":me!ident@host JOIN :+In[Room]")
+            runCurrent()
+            val manager = banManager(client)
+            val viewModel = viewModel(manager, buffers = banBuffers("!"))
+            viewModel.init(BUFFER_ID)
+            viewModel.openBanList()
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Loading, viewModel.banList.value)
+            viewModel.init(CANONICAL_BAN_ID)
+            wire.banList(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Closed, viewModel.banList.value)
+
+            viewModel.openBanList()
+            runCurrent()
+            wire.banList(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Ready(listOf(BAN_ENTRY)), viewModel.banList.value)
+            viewModel.refreshBanList()
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Loading, viewModel.banList.value)
+            client.stop()
+            runCurrent()
+            assertEquals(ChannelBanSheetState.Unavailable, viewModel.banList.value)
+            viewModel.removeActiveBan(BAN_ENTRY.mask)
+            runCurrent()
+            assertEquals(List(3) { "MODE +In[Room] +b" }, wire.modes)
+            viewModel.closeBanList()
         }
 
     @Test
@@ -514,14 +651,79 @@ class ChannelInfoTopicMutationTest {
         clock = clock,
     )
 
+    private fun banManager(
+        client: IrcClient,
+        rosters: StateFlow<Map<Long, RosterLoadState>> = MutableStateFlow(mapOf(CANONICAL_BAN_ID to RosterLoadState.LOADED)),
+    ) = object : NoopConnectionManager(mapOf(BAN_NETWORK_ID to client.state.value)) {
+        override val rosterStates: StateFlow<Map<Long, RosterLoadState>> = rosters
+
+        override fun clientFor(networkId: Long): IrcClient? = client.takeIf { networkId == BAN_NETWORK_ID }
+    }
+
+    private fun banBuffers(prefixes: String = "") =
+        FakeBufferRepository(
+            buffer = BufferEntity(CANONICAL_BAN_ID, BAN_NETWORK_ID, "internal-room-key", "+In[Room]", BufferType.CHANNEL, joined = true),
+            members = MutableStateFlow(listOf(MemberEntity(CANONICAL_BAN_ID, "ME", prefixes))),
+        )
+
+    private suspend fun TestScope.readyBanClient(wire: BanTransport): IrcClient {
+        val client =
+            IrcClient(
+                IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
+                TransportFactory { _, _, _, _, _ -> wire },
+                backgroundScope,
+            )
+        client.start()
+        runCurrent()
+        val caps = "batch message-tags server-time"
+        wire.feed(":srv CAP * LS :$caps")
+        runCurrent()
+        wire.feed(":srv CAP me ACK :$caps")
+        wire.feed(":srv 005 me CHANTYPES=+ CASEMAPPING=rfc1459 PREFIX=(ov)!+ :supported")
+        wire.feed(":srv 001 me :Welcome")
+        runCurrent()
+        check(client.state.value is IrcClientState.Ready)
+        return client
+    }
+
+    private class BanTransport : IrcTransport {
+        private val inbound = Channel<String>(Channel.UNLIMITED)
+        val modes = mutableListOf<String>()
+        var rejectRemoval = false
+
+        override suspend fun connect() = Unit
+
+        override val incoming = inbound.consumeAsFlow()
+
+        override suspend fun send(line: String) {
+            if (!line.startsWith("MODE ")) return
+            modes += line
+            check(!rejectRemoval || " -b " !in line)
+        }
+
+        override suspend fun close() {
+            inbound.close()
+        }
+
+        suspend fun feed(line: String) {
+            inbound.send(line)
+        }
+
+        suspend fun banList(mask: String? = null) {
+            if (mask != null) feed(":srv 367 me +IN{ROOM} $mask setter 123")
+            feed(":srv 368 me +IN{ROOM} :End of channel ban list")
+        }
+    }
+
     private class FakeBufferRepository(
         private val buffer: BufferEntity = BufferEntity(BUFFER_ID, 1, "#room", "#room", BufferType.CHANNEL),
+        val members: MutableStateFlow<List<MemberEntity>> = MutableStateFlow(emptyList()),
     ) : BufferRepository {
         override fun observeChatList(): Flow<List<ChatListRow>> = flowOf(emptyList())
 
         override fun observeBuffer(id: Long): Flow<BufferEntity?> = flowOf(buffer)
 
-        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = flowOf(emptyList())
+        override fun observeMembers(bufferId: Long): Flow<List<MemberEntity>> = members
 
         override suspend fun setPinned(
             id: Long,
@@ -737,5 +939,9 @@ class ChannelInfoTopicMutationTest {
 
     private companion object {
         const val BUFFER_ID = 1L
+        const val CANONICAL_BAN_ID = 8L
+        const val BAN_NETWORK_ID = 2L
+        const val OTHER_NETWORK_ID = 3L
+        val BAN_ENTRY = ChannelBanEntry(mask = "Mixed!*@Host.Example", setter = "setter", setAtEpochSeconds = 123)
     }
 }
