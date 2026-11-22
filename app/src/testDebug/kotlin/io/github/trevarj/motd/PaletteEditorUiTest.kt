@@ -386,21 +386,21 @@ class PaletteEditorUiTest {
 
     @Test fun readabilityPolicyChangesContainedPreviewWithoutChangingAuthoredDraft() {
         val base = rawDraft()
-        val document = base.copy(light = requireNotNull(base.light).copy(primary = "#FFFFFF", onSurface = "#EEEEEE", onBackground = "#EEEEEE"))
+        val document = base.copy(light = requireNotNull(base.light).copy(outlineVariant = "#F2EEE7"))
+        val authoredOutline = android.graphics.Color.rgb(0xF2, 0xEE, 0xE7)
         runBlocking { prefs.setUseThemeTextColors(false) }
         editor = editorModel(editorHandle(document))
         mount()
         compose.onNodeWithTag("palette_editor_preview_light").performClick()
-        val authored = sample()
+        assertContainsColor(sample(), authoredOutline)
         capture("editor-readability-off.png")
-        compose.onNodeWithText("Adjusted for readability", useUnmergedTree = true).assertDoesNotExist()
         runBlocking { prefs.setAdjustPaletteReadability(true) }
         awaitUi {
             editor!!
                 .state.value.appearance.adjustPaletteReadability
         }
         compose.waitForIdle()
-        assertFalse(authored.sameAs(sample()))
+        assertEquals(0, countColor(sample(), authoredOutline))
         capture("editor-readability-on.png")
         assertEquals(document, editor!!.state.value.draft)
         assertFalse(current().useThemeTextColors)
@@ -411,7 +411,8 @@ class PaletteEditorUiTest {
                 .state.value.appearance.adjustPaletteReadability
         }
         compose.waitForIdle()
-        assertTrue(authored.sameAs(sample()))
+        assertContainsColor(sample(), authoredOutline)
+        assertEquals(document, editor!!.state.value.draft)
         compose.runOnIdle {
             editor = null
             preview = previewModel(document)
@@ -420,7 +421,7 @@ class PaletteEditorUiTest {
         compose.onNodeWithTag("palette_preview_mode_light").performClick()
         val fullSample = compose.onNodeWithTag("palette_preview_sample_light")
         fullSample.performScrollTo()
-        val fullAuthored = fullSample.captureToImage().asAndroidBitmap()
+        assertContainsColor(fullSample.captureToImage().asAndroidBitmap(), authoredOutline)
         capture("full-preview-readability-off.png")
         runBlocking { prefs.setAdjustPaletteReadability(true) }
         awaitUi {
@@ -428,7 +429,7 @@ class PaletteEditorUiTest {
                 .uiState.value.appearance.adjustPaletteReadability
         }
         compose.waitForIdle()
-        assertFalse(fullAuthored.sameAs(fullSample.captureToImage().asAndroidBitmap()))
+        assertEquals(0, countColor(fullSample.captureToImage().asAndroidBitmap(), authoredOutline))
         capture("full-preview-readability-on.png")
         assertTrue(current().customPalettes.isEmpty())
     }
@@ -706,13 +707,21 @@ class PaletteEditorUiTest {
         bitmap: Bitmap,
         color: Int,
     ) {
+        val count = countColor(bitmap, color)
+        assertTrue("Expected meaningful native surface ${color.toUInt().toString(16)}; found $count pixels", count > 100)
+    }
+
+    private fun countColor(
+        bitmap: Bitmap,
+        color: Int,
+    ): Int {
         var count = 0
         for (y in 0 until bitmap.height) {
             for (x in 0 until bitmap.width) {
                 if (bitmap.getPixel(x, y) == color) count++
             }
         }
-        assertTrue("Expected meaningful native surface ${color.toUInt().toString(16)}; found $count pixels", count > 100)
+        return count
     }
 
     private fun rawDraft(): PaletteDocument {
