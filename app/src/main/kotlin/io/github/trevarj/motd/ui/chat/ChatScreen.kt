@@ -85,6 +85,7 @@ import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.Image
+import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PeopleOutline
@@ -744,6 +745,7 @@ fun ChatScreen(
             }
         },
         onOpenSearch = onOpenSearch,
+        onOpenConversationLinks = viewModel::openConversationLinks,
         onOpenImage = { onOpenImage(it, state.buffer?.networkId) },
         onOpenPalette = onOpenPalette,
         onInviteUser = {
@@ -909,6 +911,21 @@ fun ChatScreen(
         onReadAloudSaveOptions = viewModel::saveReadAloudOptions,
         onReadAloudPreview = viewModel::previewReadAloud,
     )
+    val conversationLinks by viewModel.conversationLinks.collectAsStateWithLifecycle()
+    state.buffer?.takeIf { it.type == BufferType.CHANNEL || it.type == BufferType.QUERY }?.let { room ->
+        conversationLinks?.let { links ->
+            ConversationLinksSheet(
+                state = links,
+                networkId = room.networkId,
+                showLinkPreviews = contentPreviews.showLinkPreviews,
+                showImages = contentPreviews.showImages,
+                cachedPreview = viewModel::cachedLinkPreview,
+                onLoadOlder = viewModel::loadOlderConversationLinks,
+                onJump = viewModel::jumpToConversationLink,
+                onDismiss = viewModel::closeConversationLinks,
+            )
+        }
+    }
     AiTextSheet(
         state = aiTextState,
         styles = aiLabsState.customStyles,
@@ -1168,6 +1185,7 @@ internal fun ChatContent(
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit,
     onOpenSearch: (Long) -> Unit,
+    onOpenConversationLinks: (() -> Unit)? = null,
     onOpenImage: (String) -> Unit,
     onOpenPalette: (PaletteDocument, String) -> Unit,
     nickNormalizer: (String) -> String,
@@ -2320,6 +2338,10 @@ internal fun ChatContent(
                     is ChatUiEvent.ReplyJumpUnavailable -> {
                         jumpNotLoaded
                     }
+
+                    ChatUiEvent.ConversationLinkUnavailable -> {
+                        stringResource(R.string.chat_links_message_unavailable)
+                    }
                 }
             }
         val retryLabel = stringResource(R.string.chat_retry)
@@ -2341,11 +2363,16 @@ internal fun ChatContent(
         }
 
         val currentPresentedVisibilitySpec by rememberUpdatedState(presentedVisibilitySpec)
+        val currentVisibilityPolicy by rememberUpdatedState(visibilityPolicy)
 
         suspend fun materializeTarget(
             target: ChatPositionTarget,
             scroll: Boolean,
         ): MaterializedChatTarget? {
+            val retainedLinkJump = target.retainedLinkRoomId != null
+
+            fun canPlaceRetainedLink(row: MessageEntity): Boolean = positionTargetMatches(target, row) && currentVisibilityPolicy.allowsConversationLink(row)
+
             target.requiredVisibilitySpec?.let { required ->
                 val matched =
                     withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
@@ -2401,7 +2428,9 @@ internal fun ChatContent(
                             false
                         } else {
                             try {
-                                if (scroll && (listState.firstVisibleItemIndex != index || listState.firstVisibleItemScrollOffset != target.offset)) {
+                                if (scroll && !retainedLinkJump &&
+                                    (listState.firstVisibleItemIndex != index || listState.firstVisibleItemScrollOffset != target.offset)
+                                ) {
                                     listState.requestScrollToItem(index, target.offset)
                                 }
                                 // This is the only item access: it sends Paging a load hint for the exact target.
@@ -2435,7 +2464,8 @@ internal fun ChatContent(
                 }
             }
             return row?.let { targetRow ->
-                if (positionTargetMatches(target, targetRow) &&
+                if (retainedLinkJump && !canPlaceRetainedLink(targetRow)) return@let null
+                if (!retainedLinkJump && positionTargetMatches(target, targetRow) &&
                     (target.requestToken != 0L || target.highlightMsgid != null || target.highlightEventId != null) &&
                     visibilityPolicy.isFool(targetRow)
                 ) {
@@ -2445,12 +2475,10 @@ internal fun ChatContent(
                 if (!scroll || target.expectedEventId != targetRow.id) {
                     return@let MaterializedChatTarget(targetRow, currentIndex() ?: materializedIndex)
                 }
-                // `scrollToItem` ran before Paging loaded this placeholder. An arriving message can
-                // shift the exact row in a replacement snapshot while entry positioning is unsettled,
-                // before the normal viewport pin is allowed to run. Keep correcting that exact event
-                // across presentation changes, and settle only after LazyColumn has laid out its key.
+                // A replacement snapshot can shift the exact row while the viewport is settling.
+                // For local links, this is also the first point that may scroll the viewport.
 
-                fun exactPlacement(): ExactTargetPlacement {
+                fun exactPlacement(): ExactTargetPlacement? {
                     val snapshot = items.itemSnapshotList
                     val layout = listState.layoutInfo
                     val measured = layout.visibleItemsInfo.firstOrNull { it.key == targetRow.id }
@@ -2469,12 +2497,26 @@ internal fun ChatContent(
                                 measured.offset >= layout.viewportStartOffset + bottomHostHeightPx &&
                                 measured.offset + measured.size <= layout.viewportEndOffset - readTopHostHeightPx(),
                         eventId = targetRow.id,
-                    )
+                    ).also { placement ->
+                        if (retainedLinkJump) {
+                            val index =
+                                when (placement) {
+                                    is ExactTargetPlacement.Positioned -> placement.index
+                                    is ExactTargetPlacement.NeedsScroll -> placement.index
+                                    ExactTargetPlacement.Missing -> null
+                                }
+                            if (index != null && !canPlaceRetainedLink(snapshot.items[index - snapshot.placeholdersBefore])) return null
+                        }
+                    }
                 }
                 withTimeoutOrNull(TARGET_MATERIALIZATION_TIMEOUT_MS) {
                     var placement = exactPlacement()
                     while (true) {
                         when (placement) {
+                            null -> {
+                                return@withTimeoutOrNull null
+                            }
+
                             ExactTargetPlacement.Missing -> {
                                 // A replacement may temporarily drop the old loaded window. Wait for its
                                 // Parked(id) refresh instead of settling on whichever row took the old slot.
@@ -2582,11 +2624,23 @@ internal fun ChatContent(
                 selectingRetainedViewport = false
             }
         }
+        var retainedLinkPrepared by remember(presentationLease, jumpTarget?.requestToken) { mutableStateOf(false) }
 
         // Deep jumps request one resolved placeholder, then validate both of its exact identities.
         LaunchedEffect(jumpTarget, items, presentationLease, presentationRevision, visibleSpec) {
             val j = jumpTarget ?: return@LaunchedEffect
-            onViewportRefreshAnchor(null)
+            if (j.retainedLinkRoomId != null && presentationLease != null) {
+                if (!retainedLinkPrepared && currentPresentedVisibilitySpec == j.requiredVisibilitySpec) {
+                    val eventId = checkNotNull(j.expectedEventId)
+                    val anchor = ViewportRefreshAnchor.Parked(eventId)
+                    retainedLinkPrepared = true
+                    // Retarget the native Room source, not a remote refresh or a speculative scroll.
+                    presentationLease.prepareTarget(j.index, eventId, null, anchor)
+                    onViewportRefreshAnchor(anchor)
+                }
+            } else {
+                onViewportRefreshAnchor(null)
+            }
             AutoFollowTrace.record("deep_jump_start", traceBufferId, traceSessionId) {
                 "target_index=${j.index} item_count=${items.itemCount}"
             }
@@ -3193,7 +3247,7 @@ internal fun ChatContent(
             items = items,
             listState = listState,
             policy = visibilityPolicy,
-            enabled = initialPositionSettled && payloadAllowed,
+            enabled = initialPositionSettled && payloadAllowed && jumpTarget?.retainedLinkRoomId == null,
             scopeId = state.buffer?.id,
             followingAtBottom = autoFollow.following && atBottom,
             onAnchor = onViewportRefreshAnchor,
@@ -3615,6 +3669,17 @@ internal fun ChatContent(
                         onClick = {
                             overflowOpen = false
                             buffer?.let { onOpenSearch(it.id) }
+                        },
+                    )
+                }
+                if (onOpenConversationLinks != null && (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY)) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_open_links"),
+                        text = { Text(stringResource(R.string.chat_links_title)) },
+                        leadingIcon = { Icon(Icons.Outlined.Link, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            onOpenConversationLinks()
                         },
                     )
                 }

@@ -504,6 +504,7 @@ class ComposerSendClearUiTest {
         mentionPrefill: () -> Pair<Long, String>? = { null },
         nickSheet: @Composable () -> Unit = {},
         onOpenSearch: (Long) -> Unit = {},
+        onOpenConversationLinks: (() -> Unit)? = null,
         parted: Boolean = false,
         onInviteUser: () -> Unit = {},
         replyTo: () -> MessageEntity? = { null },
@@ -609,6 +610,7 @@ class ComposerSendClearUiTest {
                             onRemoveDccTransfer = onRemoveDccTransfer,
                             onSaveDccToDownloads = onSaveDccToDownloads,
                             onOpenSearch = onOpenSearch,
+                            onOpenConversationLinks = onOpenConversationLinks,
                             onOpenImage = {},
                             onOpenPalette = { _, _ -> },
                             onInviteUser = onInviteUser,
@@ -3861,6 +3863,48 @@ class ComposerSendClearUiTest {
         assertEquals("Latest must restore the expanded titlebar", expandedHeight, headerHeight(), 0.5f)
         assertArrayEquals("Wallpaper moved after titlebar reexpansion", expandedPixels, wallpaperPixels())
         compose.mainClock.autoAdvance = true
+    }
+
+    @Test
+    fun conversationLinksAreReachableFromBothHeadersButNotServerBuffers() {
+        var currentBuffer by mutableStateOf(buffer)
+        var linksOpened = 0
+        var searches = 0
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = flowOf(PagingData.from(headerHistory())),
+            chatBuffer = { currentBuffer },
+            onOpenSearch = { searches++ },
+            onOpenConversationLinks = { linksOpened++ },
+            onSubmit = {},
+        )
+        val search = compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_search))
+        val overflow = compose.onNodeWithTag("chat_overflow")
+        val compactActions = compose.onNodeWithTag("chat_compact_actions")
+        val links = compose.onNodeWithTag("chat_open_links")
+        val compactSearch = compose.onNodeWithTag("chat_compact_search")
+        val timeline = compose.onNodeWithTag("chat_timeline")
+
+        search.performClick()
+        overflow.performClick()
+        links.assertIsDisplayed().performClick()
+        timeline.performScrollToIndex(50)
+        compactActions.performClick()
+        compactSearch.performClick()
+        compactActions.performClick()
+        links.assertIsDisplayed().performClick()
+        timeline.performScrollToIndex(0)
+
+        compose.runOnIdle { currentBuffer = buffer.copy(type = BufferType.QUERY, displayName = "peer") }
+        overflow.performClick()
+        links.assertIsDisplayed().performClick()
+        compose.runOnIdle { currentBuffer = buffer.copy(type = BufferType.SERVER, displayName = "server") }
+        overflow.performClick()
+        links.assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(3, linksOpened)
+            assertEquals(2, searches)
+        }
     }
 
     @Test

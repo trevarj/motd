@@ -157,6 +157,31 @@ class LinkifyTest {
         assertEquals(annotated.text.lastIndexOf("@peer"), mention.start)
     }
 
+    @Test fun conversation_body_links_match_rendered_links_and_preserve_repetitions() {
+        val web = "https://Example.test/a_(b)?x=3#frag"
+        val gemini = "GeMiNi://[2001:db8::1]:1965/capsule"
+        val irc = "IRCS://chat.example/%23motd"
+        val telegram = "tg://resolve?domain=example&post=42"
+        val body =
+            "(https\u0002://Example.test/a_(b)?x=3#frag\u000f), " +
+                "[$gemini] $web ...$gemini $irc $telegram " +
+                "`\u000303https://example.test/backtick\u000f` " +
+                "javascript:https://example.test/wrapped intent://https://example.test/injected " +
+                "ftp://user@files.example/private tg://login?token=secret ssh://example.test/path " +
+                "`ircs://chat.example/#hidden'"
+
+        val occurrences = conversationBodyLinks(body)
+        assertEquals(listOf(web, gemini, web, gemini, irc, telegram), occurrences)
+        val rendered = linkifiedBody(body, Color.Blue, mentionsActive = false, includeNonWebLinks = true)
+        val webLinks =
+            rendered.getLinkAnnotations(0, rendered.length).mapNotNull { range ->
+                (range.item as? LinkAnnotation.Url)?.let { range.start to it.url }
+            }
+        val otherLinks =
+            rendered.getStringAnnotations(NON_WEB_LINK_RANGE, 0, rendered.length).map { it.start to it.item }
+        assertEquals((webLinks + otherLinks).sortedBy { it.first }.map { it.second }, occurrences)
+    }
+
     @Test fun non_web_tokens_cannot_supply_network_urls() {
         val text =
             "gemini://host/photo.jpg gopher://host/clip.mp4 ipfs://cid/track.opus " +

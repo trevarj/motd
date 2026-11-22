@@ -20,6 +20,7 @@ import androidx.compose.ui.unit.IntRect
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import coil.Coil
+import coil.EventListener
 import coil.ImageLoader
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.audio.MediaRouteResolver
@@ -218,7 +219,9 @@ class InlineMediaPreviewTest {
 }
 
 /** Real routed HTTP through an explicit proxy; only the fixture destination policy is relaxed. */
-internal class RoutedInlineMediaFixture : AutoCloseable {
+internal class RoutedInlineMediaFixture(
+    eventListener: EventListener = EventListener.NONE,
+) : AutoCloseable {
     val networkId = 41L
     val selectedNetworks = ConcurrentLinkedQueue<Long>()
     val server = MockWebServer().also { it.start() }
@@ -253,7 +256,12 @@ internal class RoutedInlineMediaFixture : AutoCloseable {
         )
     private val context = ApplicationProvider.getApplicationContext<Context>()
     private val previousImageLoader = Coil.imageLoader(context)
-    private val imageLoader = ImageLoader.Builder(context).okHttpClient(http.client).build()
+    private val imageLoader =
+        ImageLoader
+            .Builder(context)
+            .okHttpClient(http.client)
+            .eventListener(eventListener)
+            .build()
 
     init {
         Coil.setImageLoader(imageLoader)

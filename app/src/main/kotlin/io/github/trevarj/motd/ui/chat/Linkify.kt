@@ -3,6 +3,8 @@ package io.github.trevarj.motd.ui.chat
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.isImmediateAudioUrl
 import io.github.trevarj.motd.audio.parseAudioAttachments
+import io.github.trevarj.motd.irc.format.containsIrcFormatting
+import io.github.trevarj.motd.irc.format.plainIrcText
 import java.net.URI
 import java.net.URISyntaxException
 import java.util.LinkedHashMap
@@ -55,14 +57,26 @@ internal object MessageUrlCache {
 
 /** All http(s) URLs in [text], in order of appearance. */
 fun extractUrls(text: String): List<String> =
-    parseInlineCode(text)
-        .asSequence()
-        .filterIsInstance<InlineTextSegment.Plain>()
-        .flatMap { segment -> uriTokens(segment.text) }
+    plainBodyUriTokens(text)
         .mapNotNull { match ->
             val token = match.value
             if (token.isHttpLink()) trimUrl(token).takeIf(String::isHttpLink) else null
         }.toList()
+
+/** Link occurrences in the rendered conversation body, without preview or media resolution. */
+internal fun conversationBodyLinks(text: String): List<String> {
+    if (':' !in text) return emptyList()
+    val visibleText = if (containsIrcFormatting(text)) plainIrcText(text) else text
+    return plainBodyUriTokens(visibleText)
+        .mapNotNull { trimUrl(it.value).takeIf { url -> chatLinkKind(url) != null } }
+        .toList()
+}
+
+private fun plainBodyUriTokens(text: String): Sequence<MatchGroup> =
+    parseInlineCode(text)
+        .asSequence()
+        .filterIsInstance<InlineTextSegment.Plain>()
+        .flatMap { segment -> uriTokens(segment.text) }
 
 internal fun uriTokens(text: String): Sequence<MatchGroup> = URI_TOKEN.findAll(text).mapNotNull { it.groups[1]?.takeIf { token -> "://" in token.value } }
 

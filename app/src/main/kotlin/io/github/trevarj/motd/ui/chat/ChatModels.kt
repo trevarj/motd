@@ -11,10 +11,12 @@ import io.github.trevarj.motd.data.history.HistoryLadderStalled
 import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.history.seamAbove
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
+import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.sync.GapFillProgress
+import io.github.trevarj.motd.data.visibility.CONVERSATION_KINDS
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.client.HistoryAvailability
@@ -1089,6 +1091,9 @@ data class ChatPositionTarget(
     val requestToken: Long = 0,
     val highlightEventId: Long? = null,
     val requiredVisibilitySpec: MessageVisibilitySpec? = null,
+    /** Retained Links must land in the original canonical room, on a still-present conversation body. */
+    val retainedLinkRoomId: Long? = null,
+    val retainedLinkBody: String? = null,
 )
 
 internal fun messageHighlightMatches(
@@ -1427,6 +1432,13 @@ fun positionTargetMatches(
     actual ?: return false
     if (target.expectedEventId != null && actual.id != target.expectedEventId) return false
     if (target.expectedMsgid != null && actual.msgid != target.expectedMsgid) return false
+    val retainedLinkRoomId = target.retainedLinkRoomId
+    if (
+        retainedLinkRoomId != null &&
+        (actual.bufferId != retainedLinkRoomId || actual.kind !in CONVERSATION_KINDS || actual.conversationLinkBody() != target.retainedLinkBody)
+    ) {
+        return false
+    }
     return true
 }
 
@@ -1486,6 +1498,29 @@ internal suspend fun <T> requestAndAwaitTarget(
     }
 }
 
+internal fun MessageEntity.conversationLinkBody(): String = ircFormattedText ?: text
+
+internal fun MessageVisibilityPolicy.allowsConversationLink(row: MessageEntity): Boolean {
+    if (row.kind !in CONVERSATION_KINDS) return false
+    val mode = foolPreferences(row)?.visibility
+    return mode == null || mode == FoolsMode.DIMMED
+}
+
+data class ConversationLinkOccurrence(
+    val eventId: Long,
+    val urlIndex: Int,
+    val url: String,
+    val sender: String,
+    val serverTime: Long,
+)
+
+data class ConversationLinksState(
+    val occurrences: List<ConversationLinkOccurrence> = emptyList(),
+    val loading: Boolean = false,
+    val hasMore: Boolean = false,
+    val failed: Boolean = false,
+)
+
 /** A reply can identify its parent locally before a server message ID exists. */
 data class ReplyTarget(
     val msgid: String? = null,
@@ -1533,6 +1568,8 @@ sealed interface ChatUiEvent {
     data class ReplyJumpUnavailable(
         val request: ReplyTarget,
     ) : ChatUiEvent
+
+    data object ConversationLinkUnavailable : ChatUiEvent
 
     data object ConversationLayoutWriteFailed : ChatUiEvent
 

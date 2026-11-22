@@ -4259,6 +4259,145 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun retainedLinksPageThroughEmptyBatchAndDropConcealedOrDeletedRows() =
+        runTest(dispatcher) {
+            val url = "https://example.test/repeated"
+            val actionUrl = "ircs://irc.example/room"
+            val repeat = message(channel.id, "$url `https://example.test/code` $url", null, "alice", 101).copy(timelineOrder = 5, normalizedActor = "alice")
+            val dimmed =
+                message(channel.id, actionUrl, null, "dimmed", 170)
+                    .copy(timelineOrder = 4, kind = MessageKind.ACTION, normalizedActor = "dimmed")
+            val concealed =
+                listOf("blurred", "collapsed", "hidden").mapIndexed { index, sender ->
+                    message(channel.id, "https://example.test/$sender", null, sender, 171L + index)
+                        .copy(timelineOrder = index.toLong(), normalizedActor = sender)
+                }
+            val newer =
+                List(64) { index ->
+                    message(channel.id, "ordinary text", null, "alice", 200L + index)
+                        .copy(timelineOrder = 10L + index)
+                }
+            db.messageDao().insertAll(
+                newer + concealed + listOf(repeat, dimmed, message(query.id, "https://example.test/other", null, "bob", 500)),
+            )
+            val settings =
+                FakeSettingsRepository().apply {
+                    this.settings.value =
+                        Settings(
+                            fools = setOf("dimmed", "blurred", "collapsed", "hidden"),
+                            foolPreferences =
+                                mapOf(
+                                    "blurred" to FoolPreferences(FoolsMode.BLUR),
+                                    "collapsed" to FoolPreferences(FoolsMode.COLLAPSE),
+                                    "hidden" to FoolPreferences(FoolsMode.HIDE),
+                                ),
+                        )
+                }
+            val buffers = FakeBufferRepository(channel)
+            val vm = viewModel(channel, FakeConnectionManager(network.id), settings = settings, buffers = buffers)
+            try {
+                vm.state.first { it.buffer != null }
+                assertNull(vm.conversationLinks.value)
+                vm.openConversationLinks()
+                val first = vm.conversationLinks.filterNotNull().first { !it.loading }
+                assertTrue(first.hasMore)
+                assertTrue(first.occurrences.isEmpty())
+                runCurrent()
+                assertEquals(first, vm.conversationLinks.value)
+
+                vm.loadOlderConversationLinks()
+                val older = vm.conversationLinks.filterNotNull().first { !it.loading && !it.hasMore }
+                assertEquals(listOf(url, url, actionUrl), older.occurrences.map { it.url })
+                assertEquals(listOf(101L to 0, 101L to 1, 170L to 0), older.occurrences.map { it.eventId to it.urlIndex })
+
+                settings.settings.value =
+                    settings.settings.value.copy(
+                        fools = settings.settings.value.fools + "alice",
+                        foolPreferences = settings.settings.value.foolPreferences + ("alice" to FoolPreferences(FoolsMode.COLLAPSE)),
+                    )
+                vm.conversationLinks.filterNotNull().first { !it.loading && it.hasMore && it.occurrences.isEmpty() }
+                vm.loadOlderConversationLinks()
+                val filtered = vm.conversationLinks.filterNotNull().first { !it.loading && !it.hasMore }
+                assertEquals(listOf(actionUrl), filtered.occurrences.map { it.url })
+
+                db.messageDao().deleteById(dimmed.id)
+                vm.conversationLinks.filterNotNull().first { !it.loading && it.hasMore && it.occurrences.isEmpty() }
+                vm.loadOlderConversationLinks()
+                val afterDelete = vm.conversationLinks.filterNotNull().first { !it.loading && !it.hasMore }
+                assertTrue(afterDelete.occurrences.isEmpty())
+
+                buffers.update(query)
+                vm.conversationLinks.first { it == null }
+                vm.loadOlderConversationLinks()
+                assertNull(vm.conversationLinks.value)
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun retainedLinkJumpUsesExactLocalEventAndNoWireFallback() =
+        runTest(dispatcher) {
+            val url = "https://example.test/repeated"
+            val local = message(channel.id, "$url $url", null, "alice", 28).copy(timelineOrder = 10)
+            val remoteId = message(channel.id, url, "server-msgid", "alice", 18).copy(timelineOrder = 20)
+            db.messageDao().insertAll(listOf(local, remoteId))
+            val manager = FakeConnectionManager(network.id, state = IrcClientState.Disconnected)
+            val fallback = FakeMessageRepository()
+            val exactReads = mutableListOf<Pair<Long?, String?>>()
+            val messages =
+                object : MessageRepository by fallback {
+                    override fun observeReplyTarget(
+                        bufferId: Long,
+                        eventId: Long?,
+                        msgid: String?,
+                    ): Flow<MessageEntity?> {
+                        assertEquals(channel.id, bufferId)
+                        exactReads += eventId to msgid
+                        return db.messageDao().observeReplyTarget(bufferId, eventId, msgid)
+                    }
+                }
+            val vm = viewModel(channel, manager, messages = messages)
+            try {
+                vm.state.first { it.buffer != null }
+                vm.onInitialPositionHandled()
+                vm.openConversationLinks()
+                val first = vm.conversationLinks.filterNotNull().first { !it.loading }
+                val clientCalls = manager.clientForCalls
+                vm.jumpToConversationLink(first.occurrences.single { it.eventId == local.id && it.urlIndex == 1 })
+                assertNull(vm.conversationLinks.value)
+                val target = vm.jumpTarget.filterNotNull().first()
+                assertEquals(local.id, target.expectedEventId)
+                assertEquals(local.id, target.highlightEventId)
+                assertNull(target.expectedMsgid)
+                assertEquals(1, target.index)
+                assertTrue(positionTargetMatches(target, local))
+                assertFalse(positionTargetMatches(target, local.copy(bufferId = query.id)))
+                assertFalse(positionTargetMatches(target, local.copy(text = url)))
+                vm.onJumpHandled(target.requestToken)
+
+                vm.openConversationLinks()
+                val second = vm.conversationLinks.filterNotNull().first { !it.loading }
+                vm.jumpToConversationLink(second.occurrences.single { it.eventId == remoteId.id })
+                val pending = vm.jumpTarget.filterNotNull().first()
+                vm.reresolveJumpOnce(pending.requestToken)
+                db.messageDao().update(remoteId.copy(kind = MessageKind.REDACTED))
+                val events = vm.uiEvents.first { it.isNotEmpty() }
+                val event = events.single().value
+                assertEquals(ChatUiEvent.ConversationLinkUnavailable, event)
+                assertFalse(event.hasRetryAction())
+                assertNull(vm.jumpTarget.value)
+                assertEquals(EntryPositionState.Settled, vm.entryState.value)
+                assertTrue(fallback.requestedMsgids.isEmpty())
+                assertTrue(exactReads.all { it.second == null })
+                assertEquals(setOf(local.id, remoteId.id), exactReads.map { it.first }.toSet())
+                assertEquals(clientCalls, manager.clientForCalls)
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
     fun `reply jump failure queues exact retry and retry reissues opaque msgid`() =
         runTest {
             val messages = FakeMessageRepository()

@@ -628,6 +628,60 @@ class MessageVisibilityReaderTest {
         }
 
     @Test
+    fun retainedConversationLinkRowsPageCanonicalRoomWithoutWrites() =
+        runTest {
+            val query = db.bufferDao().insert(buffer(networkId, "peer", type = BufferType.QUERY))
+            val alias = db.bufferDao().insert(buffer(networkId, "old-peer", type = BufferType.QUERY))
+            val server = db.bufferDao().insert(buffer(networkId, "server", type = BufferType.SERVER))
+            val closing = db.bufferDao().insert(buffer(networkId, "#closing").copy(pendingCloseAt = 1))
+            val dao = db.messageDao()
+            val url = "https://example.test"
+            val (tiedOlder, tiedNewer, lowerOrder, olderTime, losingEvent) =
+                dao.insertAll(
+                    listOf(
+                        message(query, url, serverTime = 300, dedupKey = "first").copy(timelineOrder = 20),
+                        message(query, url, serverTime = 300, dedupKey = "action", kind = MessageKind.ACTION).copy(timelineOrder = 20),
+                        message(query, url, serverTime = 300, dedupKey = "notice", kind = MessageKind.NOTICE).copy(timelineOrder = 10),
+                        message(query, url, serverTime = 200, dedupKey = "old").copy(timelineOrder = 40),
+                        message(query, url, serverTime = 800, dedupKey = "redirected"),
+                    ),
+                )
+            val channel =
+                dao
+                    .insertAll(
+                        listOf(
+                            message(bufferId, "https://example.test/channel", serverTime = 900, dedupKey = "channel"),
+                            message(alias, "https://example.test/alias", serverTime = 900, dedupKey = "alias"),
+                            message(server, "https://example.test/server", serverTime = 900, dedupKey = "server"),
+                            message(closing, "https://example.test/closing", serverTime = 900, dedupKey = "closing"),
+                            message(query, "https://example.test/deleted", serverTime = 900, dedupKey = "deleted", kind = MessageKind.REDACTED),
+                            message(query, "https://example.test/join", serverTime = 900, dedupKey = "join", kind = MessageKind.JOIN),
+                        ),
+                    ).first()
+            db.roomAliasDao().markRedirect(alias, query)
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(losingEvent, tiedNewer))
+            observedQueries.clear()
+
+            val ordered = listOf(tiedNewer, tiedOlder, lowerOrder, olderTime)
+            assertEquals(ordered, reader.retainedConversationLinkRows(query, before = null, limit = 10).map { it.id })
+            var before: TimelineAnchor? = null
+            for (eventId in ordered) {
+                val row = reader.retainedConversationLinkRows(alias, before, limit = 1).single()
+                assertEquals(query, row.bufferId)
+                assertEquals(eventId, row.id)
+                before = TimelineAnchor(row.serverTime, row.id, row.timelineOrder)
+            }
+            assertTrue(reader.retainedConversationLinkRows(alias, before, limit = 1).isEmpty())
+            assertEquals(channel, reader.retainedConversationLinkRows(bufferId, before = null, limit = 1).single().id)
+            for (roomId in listOf(server, closing, Long.MAX_VALUE)) {
+                assertTrue(reader.retainedConversationLinkRows(roomId, before = null, limit = 10).isEmpty())
+            }
+            assertTrue(reader.retainedConversationLinkRows(query, before = null, limit = 0).isEmpty())
+            val write = Regex("(?i)^\\s*(INSERT|UPDATE|DELETE|REPLACE)\\b")
+            assertFalse(querySnapshot().any(write::containsMatchIn))
+        }
+
+    @Test
     fun msgidlessSavedAnchorFollowsRedirectAndCorrectedTimestamp() =
         runTest {
             val winnerId =

@@ -63,6 +63,41 @@ class MessageVisibilityReader
                     emitInitialState = false,
                 ).map { _: Set<String> -> }
 
+        internal fun observeRetainedConversationLinkChanges(): Flow<Unit> =
+            db.invalidationTracker
+                .createFlow("messages", "buffers", "event_redirects", "network_identity", emitInitialState = true)
+                .map { _: Set<String> -> }
+
+        /** Local candidates only; the caller applies body visibility before extracting links. */
+        internal suspend fun retainedConversationLinkRows(
+            bufferId: Long,
+            before: TimelineAnchor?,
+            limit: Int,
+        ): List<MessageEntity> {
+            if (limit <= 0) return emptyList()
+            val seek = if (before == null) "" else "AND (m.serverTime, m.timelineOrder, m.id) < (?, ?, ?) "
+            val args =
+                if (before == null) {
+                    arrayOf<Any>(bufferId, limit)
+                } else {
+                    arrayOf<Any>(bufferId, before.serverTime, before.timelineOrder, before.eventId, limit)
+                }
+            return db.messageDao().rawMessages(
+                SimpleSQLiteQuery(
+                    "SELECT m.* FROM buffers requested " +
+                        "JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id) " +
+                        "JOIN messages m ON m.bufferId = canonical.id " +
+                        "WHERE requested.id = ? AND canonical.type IN ('CHANNEL', 'QUERY') " +
+                        "AND canonical.redirectToRoomId IS NULL AND canonical.pendingCloseAt IS NULL " +
+                        "AND m.kind IN ($CONVERSATION_KIND_SQL) " +
+                        "AND NOT EXISTS (SELECT 1 FROM event_redirects WHERE losingEventId = m.id) " +
+                        seek +
+                        "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT ?",
+                    args,
+                ),
+            )
+        }
+
         suspend fun latestRawAnchor(bufferId: Long): TimelineAnchor? =
             db.messageDao().newestMessage(canonicalRoomId(bufferId))?.let {
                 TimelineAnchor(it.serverTime, it.id, it.timelineOrder)

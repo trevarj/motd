@@ -1003,6 +1003,15 @@
     <string name="chat_open_channel_info">Open channel info</string>
     <string name="chat_open_nick_details">Open nick details</string>
     <string name="chat_search">Search</string>
+    <string name="chat_links_title">Links</string>
+    <string name="chat_links_device_only">Only links in messages saved on this device are listed.</string>
+    <string name="chat_links_empty">No links found in saved messages.</string>
+    <string name="chat_links_empty_page">No links found so far. You can check older saved messages.</string>
+    <string name="chat_links_failed">Couldn’t read saved links.</string>
+    <string name="chat_links_load_older">Load older links</string>
+    <string name="chat_links_source">%1$s · %2$s</string>
+    <string name="chat_links_jump">Jump to message</string>
+    <string name="chat_links_message_unavailable">The message for this link is no longer available.</string>
     <string name="chat_jump_to_newest">Jump to newest</string>
     <string name="chat_next_unread_mention">Next unread mention</string>
     <string name="chat_new_messages">New messages</string>

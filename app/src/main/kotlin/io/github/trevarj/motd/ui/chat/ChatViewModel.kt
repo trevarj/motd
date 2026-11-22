@@ -37,6 +37,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.UserDao
 import io.github.trevarj.motd.data.db.identityRules
@@ -117,6 +118,7 @@ import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -125,6 +127,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -156,6 +159,7 @@ private const val CTCP_DELIMITER = "\u0001"
 
 private const val MAX_REPLY_PREVIEW_CACHE = 128
 private const val MAX_REACTION_WINDOW_MSGIDS = 500
+private const val CONVERSATION_LINK_PAGE_SIZE = 64
 
 /**
  * Single UI state for the chat screen. `pagingFlow` is the cached message stream;
@@ -1464,24 +1468,136 @@ class ChatViewModel
          * fill keys the server has not advertised yet, matching what EventProcessor stores. Explicit
          * removals restore defaults instead. The screen and paging entry must use the same rules.
          */
+        private fun timelineIdentityRules(
+            connection: IrcClientState?,
+            persisted: NetworkIdentityEntity?,
+        ): IrcIdentityRules =
+            if (connection is IrcClientState.Ready) {
+                IrcIdentityRules.from(
+                    connection.isupport["CASEMAPPING"]
+                        ?: persisted?.caseMapping.takeUnless { "CASEMAPPING" in connection.removedIsupport },
+                    connection.isupport["CHANTYPES"]
+                        ?: persisted?.chanTypes.takeUnless { "CHANTYPES" in connection.removedIsupport },
+                )
+            } else {
+                persisted?.identityRules ?: IrcIdentityRules()
+            }
+
         val identityRules: StateFlow<IrcIdentityRules> =
             combine(
                 buffer,
                 connState,
                 persistedIdentity,
             ) { current, connection, persisted ->
-                if (current != null && connection is IrcClientState.Ready) {
-                    IrcIdentityRules.from(
-                        connection.isupport["CASEMAPPING"]
-                            ?: persisted?.caseMapping.takeUnless { "CASEMAPPING" in connection.removedIsupport },
-                        connection.isupport["CHANTYPES"]
-                            ?: persisted?.chanTypes.takeUnless { "CHANTYPES" in connection.removedIsupport },
-                    )
-                } else {
-                    persisted?.identityRules ?: IrcIdentityRules()
-                }
+                timelineIdentityRules(connection.takeIf { current != null }, persisted)
             }.distinctUntilChanged()
                 .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), IrcIdentityRules())
+
+        private val _conversationLinks = MutableStateFlow<ConversationLinksState?>(null)
+        val conversationLinks: StateFlow<ConversationLinksState?> = _conversationLinks.asStateFlow()
+        private var conversationLinksJob: Job? = null
+        private var conversationLinkDemand: Channel<Unit>? = null
+        private var conversationLinkRoomId: Long? = null
+
+        private fun BufferEntity.conversationLinkRoom(): Long? {
+            if (type != BufferType.CHANNEL && type != BufferType.QUERY) return null
+            return id.takeIf { pendingCloseAt == null && redirectToRoomId == null }
+        }
+
+        private data class ConversationLinkContext(
+            val roomId: Long?,
+            val spec: MessageVisibilitySpec,
+            val rules: IrcIdentityRules,
+        )
+
+        private fun conversationLinkContext(): Flow<ConversationLinkContext> =
+            buffer
+                .map { room -> room?.conversationLinkRoom()?.let { it to room.networkId } }
+                .distinctUntilChanged()
+                .flatMapLatest { room ->
+                    val persisted = room?.second?.let(networkIdentityDao::observe) ?: flowOf(null)
+                    combine(pagingSpecs, persisted, connectionManager.connectionActivity) { (pagingRoom, spec), identity, activity ->
+                        ConversationLinkContext(
+                            room?.first?.takeIf { it == pagingRoom },
+                            spec,
+                            timelineIdentityRules(room?.second?.let(activity.states::get), identity),
+                        )
+                    }
+                }.distinctUntilChanged()
+
+        fun openConversationLinks() {
+            if (_conversationLinks.value != null) return
+            val roomId = buffer.value?.conversationLinkRoom() ?: return
+            val demand = Channel<Unit>(Channel.CONFLATED)
+            conversationLinkDemand = demand
+            conversationLinkRoomId = roomId
+            _conversationLinks.value = ConversationLinksState(loading = true)
+            conversationLinksJob =
+                viewModelScope.launch(start = CoroutineStart.LAZY) {
+                    combine(
+                        conversationLinkContext(),
+                        visibilityReader.observeRetainedConversationLinkChanges(),
+                        contentPreviews,
+                    ) { context, _, _ -> context }
+                        .onEach { context ->
+                            if (context.roomId == roomId) {
+                                // ponytail: restart one page on Room invalidation; never rescan older pages without demand.
+                                demand.tryReceive()
+                                _conversationLinks.value = ConversationLinksState(loading = true)
+                            } else {
+                                closeConversationLinks()
+                            }
+                        }.collectLatest { context ->
+                            var before: TimelineAnchor? = null
+                            val policy = withContext(Dispatchers.Default) { MessageVisibilityPolicy(context.spec, context.rules) }
+                            do {
+                                val current = _conversationLinks.value ?: return@collectLatest
+                                _conversationLinks.value = current.copy(loading = true, failed = false)
+                                try {
+                                    val rows = visibilityReader.retainedConversationLinkRows(roomId, before, CONVERSATION_LINK_PAGE_SIZE + 1)
+                                    val size = minOf(rows.size, CONVERSATION_LINK_PAGE_SIZE)
+                                    val page =
+                                        withContext(Dispatchers.Default) {
+                                            buildList {
+                                                for (index in 0 until size) {
+                                                    ensureActive()
+                                                    val row = rows[index]
+                                                    if (row.bufferId != roomId || !policy.allowsConversationLink(row)) continue
+                                                    conversationBodyLinks(row.conversationLinkBody()).forEachIndexed { urlIndex, url ->
+                                                        add(ConversationLinkOccurrence(row.id, urlIndex, url, row.sender, row.serverTime))
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    before = rows.getOrNull(size - 1)?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+                                    val hasMore = rows.size > size
+                                    val occurrences = if (page.isEmpty()) current.occurrences else current.occurrences + page
+                                    _conversationLinks.value = ConversationLinksState(occurrences, hasMore = hasMore)
+                                    if (!hasMore) break
+                                } catch (cancelled: CancellationException) {
+                                    throw cancelled
+                                } catch (_: Exception) {
+                                    _conversationLinks.value = current.copy(loading = false, failed = true)
+                                }
+                            } while (demand.receiveCatching().isSuccess)
+                        }
+                }
+            conversationLinksJob?.start()
+        }
+
+        fun loadOlderConversationLinks() {
+            val current = _conversationLinks.value ?: return
+            if (!current.loading && (current.hasMore || current.failed)) conversationLinkDemand?.trySend(Unit)
+        }
+
+        fun closeConversationLinks() {
+            conversationLinksJob?.cancel()
+            conversationLinksJob = null
+            conversationLinkDemand?.close()
+            conversationLinkDemand = null
+            conversationLinkRoomId = null
+            _conversationLinks.value = null
+        }
 
         val ebooksHelperRoomId: StateFlow<Long?> =
             combine(buffer, identityRules, ebooksLabsPrefs.enabled) { room, rules, enabled ->
@@ -2139,6 +2255,13 @@ class ChatViewModel
             AutoFollowTrace.record("chat_pause", operationalBufferId.value)
             foregroundBufferTracker.set(null)
             visibleSession.value = null
+            closeConversationLinks()
+            if (activeJumpRequest?.conversationLink != null) {
+                jumpResolveJob?.cancel()
+                jumpResolveJob = null
+                activeJumpRequest = null
+                _jumpTarget.value = null
+            }
             // Leaving the chat acknowledges a settled history error: the user has had the in-chat
             // detail (stale chip / retry pill) on screen, so the chat-list badge must not keep
             // nagging. Transient Queued/Syncing states are left untouched.
@@ -3310,12 +3433,18 @@ class ChatViewModel
         private val jumpTime: Long = route.jumpToTime
         private val jumpEventId: Long? = route.jumpToEventId
 
+        private data class ConversationLinkJump(
+            val roomId: Long,
+            val occurrence: ConversationLinkOccurrence,
+        )
+
         private class JumpRequest(
             val token: Long,
             val msgid: String?,
             val time: Long,
             val eventId: Long?,
             val settlesEntryPosition: Boolean,
+            val conversationLink: ConversationLinkJump? = null,
         ) {
             var reresolveUsed: Boolean = false
         }
@@ -3899,6 +4028,10 @@ class ChatViewModel
             request: JumpRequest,
         ) {
             if (activeJumpRequest?.token != request.token) return
+            request.conversationLink?.let {
+                publishConversationLinkJump(request, it)
+                return
+            }
             when (
                 val r =
                     resolver.resolve(
@@ -4084,12 +4217,105 @@ class ChatViewModel
                 }
         }
 
+        fun jumpToConversationLink(occurrence: ConversationLinkOccurrence) {
+            val roomId = conversationLinkRoomId ?: return
+            val selected = _conversationLinks.value?.occurrences?.contains(occurrence) == true
+            closeConversationLinks()
+            if (!selected) {
+                uiEventQueue.enqueue(ChatUiEvent.ConversationLinkUnavailable)
+                return
+            }
+            onTimelineInteraction()
+            val link = ConversationLinkJump(roomId, occurrence)
+            val request =
+                JumpRequest(
+                    token = ++nextJumpToken,
+                    msgid = null,
+                    time = 0,
+                    eventId = occurrence.eventId,
+                    settlesEntryPosition = _entryState.value is EntryPositionState.Pending,
+                    conversationLink = link,
+                )
+            jumpResolveJob?.cancel()
+            activeJumpRequest = request
+            _jumpTarget.value = null
+            jumpResolveJob =
+                viewModelScope.launch(start = CoroutineStart.LAZY) {
+                    publishConversationLinkJump(request, link)
+                }
+            jumpResolveJob?.start()
+        }
+
+        private suspend fun publishConversationLinkJump(
+            request: JumpRequest,
+            link: ConversationLinkJump,
+        ) {
+            combine(
+                conversationLinkContext(),
+                // A null msgid makes this an event-only Room observation, including for local echoes.
+                messageRepository
+                    .observeReplyTarget(link.roomId, link.occurrence.eventId, msgid = null)
+                    .catch { emit(null) }
+                    .distinctUntilChanged(),
+            ) { context, row -> context to row }
+                .onEach {
+                    if (activeJumpRequest?.token == request.token) _jumpTarget.value = null
+                }.collectLatest { (context, row) ->
+                    val target =
+                        try {
+                            conversationLinkPosition(link, context, row)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            null
+                        }
+                    if (activeJumpRequest?.token != request.token) return@collectLatest
+                    if (target == null) {
+                        failActiveJump(request)
+                    } else {
+                        _jumpTarget.value = target.copy(requestToken = request.token)
+                    }
+                }
+        }
+
+        private suspend fun conversationLinkPosition(
+            link: ConversationLinkJump,
+            context: ConversationLinkContext,
+            row: MessageEntity?,
+        ): ChatPositionTarget? {
+            if (context.roomId != link.roomId || row == null || row.id != link.occurrence.eventId || row.bufferId != link.roomId) return null
+            val body = row.conversationLinkBody()
+            val matches =
+                withContext(Dispatchers.Default) {
+                    MessageVisibilityPolicy(context.spec, context.rules).allowsConversationLink(row) &&
+                        conversationBodyLinks(body).getOrNull(link.occurrence.urlIndex) == link.occurrence.url
+                }
+            if (!matches || bufferRepository.buffer(bufferId)?.conversationLinkRoom() != link.roomId) return null
+            return ChatPositionTarget(
+                index = visibilityReader.countTimelineNewer(link.roomId, TimelineAnchor(row.serverTime, row.id, row.timelineOrder), context.spec),
+                expectedEventId = row.id,
+                serverTime = row.serverTime,
+                highlightEventId = row.id,
+                requiredVisibilitySpec = context.spec,
+                retainedLinkRoomId = link.roomId,
+                retainedLinkBody = body,
+            )
+        }
+
         fun retryReplyJump(target: ReplyTarget) {
             jumpToRepliedMessage(target)
         }
 
         private fun failActiveJump(request: JumpRequest) {
             if (activeJumpRequest?.token != request.token) return
+            if (request.conversationLink != null) {
+                jumpResolveJob?.cancel()
+                jumpResolveJob = null
+                activeJumpRequest = null
+                _jumpTarget.value = null
+                uiEventQueue.enqueue(ChatUiEvent.ConversationLinkUnavailable)
+                return
+            }
             jumpResolveJob = null
             activeJumpRequest = null
             // Entry may have settled while this jump resolved; the settled gate must not downgrade,
@@ -4168,6 +4394,7 @@ class ChatViewModel
             }
             request.reresolveUsed = true
             jumpResolveJob?.cancel()
+            if (request.conversationLink != null) _jumpTarget.value = null
             jumpResolveJob =
                 viewModelScope.launch {
                     publishResolve(state.value.buffer?.ircTarget, request)
