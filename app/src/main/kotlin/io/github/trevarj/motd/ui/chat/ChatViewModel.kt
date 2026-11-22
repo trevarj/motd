@@ -456,7 +456,7 @@ class ChatViewModel
                 failedGapIds,
             ) { seams, filling, unavailable, failed ->
                 TimelineSeamState(seams, filling, unavailable, failed)
-            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineSeamState())
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), TimelineSeamState(observed = false))
 
         /** The viewport's demand for history, reported by the timeline. See [setSeamPrefetch]. */
         private val seamPrefetch = MutableStateFlow(SeamPrefetch())

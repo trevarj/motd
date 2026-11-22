@@ -156,6 +156,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.ClipEntry
@@ -1977,6 +1978,32 @@ internal fun ChatContent(
 
         // ponytail: top-entry alignment needs the final viewport; settled reader transitions still animate.
         val placingTopEntry = initialTarget?.let { it.placeAtTop && it.index > 0 } == true
+        val entrySeams = timelineSeams.takeIf { placingTopEntry }
+        val entryLayoutSnapshot = if (placingTopEntry) items.itemSnapshotList else null
+        var measuredEntryLayout by remember(initialTarget, items) {
+            mutableStateOf<Pair<ItemSnapshotList<MessageEntity>, TimelineSeamState>?>(null, referentialEqualityPolicy())
+        }
+
+        fun currentTopEntryLayoutMeasured(): Boolean =
+            entrySeams?.observed == true &&
+                measuredEntryLayout?.let { (snapshot, seams) -> snapshot === items.itemSnapshotList && seams == entrySeams } == true
+
+        val entryLayoutModifier =
+            if (entrySeams != null && entryLayoutSnapshot != null) {
+                // The same Paging snapshot can grow a seam without changing item identities.
+                Modifier.layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints)
+                    layout(placeable.width, placeable.height) {
+                        placeable.place(0, 0)
+                        if (measuredEntryLayout?.first !== entryLayoutSnapshot || measuredEntryLayout?.second != entrySeams) {
+                            measuredEntryLayout = entryLayoutSnapshot to entrySeams
+                        }
+                    }
+                }
+            } else {
+                Modifier
+            }
+
         val latestCollapseTitleBar by rememberUpdatedState(collapseTitleBar)
         var topEntryClampedAtBottom by remember(initialTarget) { mutableStateOf(false) }
         var laidOutEntryHeaderExpansion by remember(initialTarget) { mutableFloatStateOf(-1f) }
@@ -2006,6 +2033,7 @@ internal fun ChatContent(
             val hostHeight = readBottomHostHeightPx()
             if (hostHeight <= 0 || layout.beforeContentPadding < hostHeight) return false
             if (target.placeAtTop && placingTopEntry) {
+                if (!currentTopEntryLayoutMeasured()) return false
                 val expansion = if (!latestCollapseTitleBar || topEntryClampedAtBottom) 1f else 0f
                 return laidOutEntryHeaderExpansion == expansion &&
                     (
@@ -2577,10 +2605,20 @@ internal fun ChatContent(
 
         // Normal entry shares the deep-link paging mechanics but has no highlight. It is separate so
         // a deep link always wins and so a completed normal entry cannot be replayed on recomposition.
-        LaunchedEffect(initialTarget, items, presentationLease, presentationRevision, visibleSpec, selectingRetainedViewport) {
+        LaunchedEffect(
+            initialTarget,
+            items,
+            presentationLease,
+            presentationRevision,
+            visibleSpec,
+            selectingRetainedViewport,
+            entrySeams,
+        ) {
             if (selectingRetainedViewport || (retainedViewportChosen && initialTarget == supersededAutomaticTarget)) return@LaunchedEffect
+            if (placingTopEntry && initialPositionSettled) return@LaunchedEffect
             recordEntryStage("initial_position_start", initialTarget, if (initialTarget == null) "no_target" else "waiting")
             val target = initialTarget ?: return@LaunchedEffect
+            if (placingTopEntry) topEntryClampedAtBottom = false
             automaticPositionJob.value = currentCoroutineContext()[Job]
             AutoFollowTrace.record("initial_position_start", traceBufferId, traceSessionId) {
                 "target_index=${target.index} target_offset=${target.offset} " +
@@ -2591,6 +2629,7 @@ internal fun ChatContent(
                     snapshotFlow {
                         (items.loadState.refresh is LoadState.NotLoading || presentationLease?.hasPublishedWindow(items.itemSnapshotList) == true) &&
                             initialPagingPage(items.itemCount, items.loadState.append) != InitialPagingPage.Pending &&
+                            entrySeams?.observed != false &&
                             (!placingTopEntry || laidOutEntryHeaderExpansion == if (latestCollapseTitleBar) 0f else 1f)
                     }.first { it }
                 } != null
@@ -2605,6 +2644,7 @@ internal fun ChatContent(
                     when {
                         items.loadState.refresh !is LoadState.NotLoading -> "refresh_not_ready"
                         initialPagingPage(items.itemCount, items.loadState.append) == InitialPagingPage.Pending -> "page_pending"
+                        entrySeams?.observed == false -> "local_seams_pending"
                         else -> "header_layout_pending"
                     },
                 )
@@ -2668,6 +2708,9 @@ internal fun ChatContent(
                             var pass = 0
                             var unconsumedPasses = 0
                             while (pass < TOP_ALIGNMENT_MAX_PASSES) {
+                                if (placingTopEntry && !currentTopEntryLayoutMeasured()) {
+                                    snapshotFlow { currentTopEntryLayoutMeasured() }.first { it }
+                                }
                                 val visible = listState.layoutInfo.visibleItemsInfo
                                 val currentIndex =
                                     materializedTargetVisibleIndex(
@@ -4515,9 +4558,10 @@ internal fun ChatContent(
                                                 items = items,
                                                 listState = listState,
                                                 modifier =
-                                                    Modifier.onGloballyPositioned {
-                                                        if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
-                                                    },
+                                                    Modifier
+                                                        .onGloballyPositioned {
+                                                            if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
+                                                        }.then(entryLayoutModifier),
                                                 pagingHintsEnabled = initialPositionSettled && payloadAllowed && entryPreparationReady,
                                                 temporaryFoolVisibilityMotion = temporaryFoolMotion,
                                                 hiddenFoolVisibility = hiddenFoolVisibility,

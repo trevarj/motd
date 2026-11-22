@@ -63,6 +63,7 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.history.TimelineSeam
 import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColor
 import io.github.trevarj.motd.data.prefs.ComfortableBubbleColorRole
@@ -96,6 +97,8 @@ import io.github.trevarj.motd.ui.chat.ChatState
 import io.github.trevarj.motd.ui.chat.ChatViewModel
 import io.github.trevarj.motd.ui.chat.ChatViewModelTest
 import io.github.trevarj.motd.ui.chat.EntryPositionState
+import io.github.trevarj.motd.ui.chat.TimelineSeamState
+import io.github.trevarj.motd.ui.components.CHAT_GAP_DIVIDER_TAG
 import io.github.trevarj.motd.ui.nav.ChatListRoute
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.nav.openChat
@@ -683,22 +686,44 @@ class ChatPresentationLifetimeUiTest {
             fixture.open(room)
             val previous = fixture.awaitReady()
             fixture.back()
+            compose.mainClock.autoAdvance = false
             compose.runOnIdle {
                 fixture.plans[room] = fixture.target(room, 450).copy(placeAtTop = true, forceScrollOnEntry = true)
+                fixture.timelineSeams = TimelineSeamState(observed = false)
             }
             fixture.open(room)
+            val pending = fixture.awaitVisit()
+            compose.waitUntil(10_000) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                pending.lease.hasPublishedWindow(pending.presentation.items.itemSnapshotList)
+            }
+            compose.mainClock.advanceTimeBy(500)
+            compose.waitForIdle()
+            assertFalse("unread placement must wait for local seam geometry", pending.ready)
+            compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertIsDisplayed()
+            compose.runOnIdle {
+                val target = fixture.plans.getValue(room)
+                val position = TimelineAnchor(checkNotNull(target.serverTime), checkNotNull(target.expectedEventId))
+                fixture.timelineSeams =
+                    TimelineSeamState(
+                        seams = listOf(TimelineSeam(1, position, recoverable = true)),
+                    )
+            }
             val changed = fixture.awaitReady()
             assertSame(previous.presentation, changed.presentation)
             assertEquals(186, changed.firstIndex)
             assertEquals(fixture.plans.getValue(room).expectedEventId, changed.measuredId)
             val layout = changed.presentation.listState.layoutInfo
             val row = layout.visibleItemsInfo.first { it.key == changed.measuredId }
-            val headerHeight =
+            val header =
                 compose
                     .onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
                     .fetchSemanticsNode()
-                    .boundsInRoot.height
-            assertTrue("fresh unread must already be at the unobscured viewport top on admission", kotlin.math.abs(layout.viewportEndOffset - headerHeight - row.offset - row.size) <= 1)
+                    .boundsInRoot
+            assertTrue("fresh unread must already be at the unobscured viewport top on admission", kotlin.math.abs(layout.viewportEndOffset - header.height - row.offset - row.size) <= 1)
+            val seam = compose.onNodeWithTag(CHAT_GAP_DIVIDER_TAG, useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("the seam must top the unobscured viewport", header.bottom, seam.top, 1f)
             assertEquals(0, changed.reads)
             compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertDoesNotExist()
             compose.onNodeWithTag("chat_message_${fixture.expectedMsgid(room)}", useUnmergedTree = true).assertIsDisplayed()
@@ -1023,6 +1048,7 @@ class ChatPresentationLifetimeUiTest {
         private var openingVisit = 0
         private lateinit var nav: NavHostController
         var holdTarget by mutableStateOf(false)
+        var timelineSeams by mutableStateOf(TimelineSeamState())
         private val cache: ChatPageCache
         private val scrollPositions = ChatScrollPositionStore()
         private val ownerStores = LinkedHashSet<androidx.lifecycle.ViewModelStore>()
@@ -1302,6 +1328,7 @@ class ChatPresentationLifetimeUiTest {
                 chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
                 initialTarget = pending,
                 entryState = entryState,
+                timelineSeams = timelineSeams,
                 viewportReadEnabled = resumed,
                 rawNewestAnchor = TimelineAnchor(900, ids.getValue(roomId).last()),
                 onInitialPositionHandled = {

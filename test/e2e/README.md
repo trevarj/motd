@@ -51,7 +51,10 @@ apply; follow the serial-targeted install workflow in the development guide.
 
 Unread entry checks the persisted boundary at the unobscured viewport top: the
 timeline extends behind the header, and the entry row can include a history seam
-before its unread divider and message. The first two unread messages must remain
+before its unread divider and message. Placement waits for the first local seam
+query and the measured row; it does not wait for remote history.
++
+The first two unread messages must remain
 visible, ordered and unique, with the divider attached to the first. Failure
 timeline snapshots include header and seam bounds alongside the divider and rows.
 

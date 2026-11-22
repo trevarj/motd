@@ -58,6 +58,8 @@ data class TimelineSeamState(
     val historyUnavailable: Boolean = true,
     /** Gaps whose last load attempt failed, rendered as a retry rather than a plain idle tap. */
     val failed: Set<Long> = emptySet(),
+    /** False until the room's first local seam query distinguishes an empty result from pending data. */
+    val observed: Boolean = true,
 ) {
     /**
      * How one seam's divider renders.
