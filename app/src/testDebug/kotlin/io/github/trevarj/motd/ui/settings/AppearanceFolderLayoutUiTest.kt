@@ -32,6 +32,7 @@ import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
@@ -71,10 +72,13 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.FontChoice
+import io.github.trevarj.motd.data.prefs.InstalledPalette
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.PaletteChoice
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.PaletteSelection
 import io.github.trevarj.motd.data.prefs.Settings
@@ -1133,7 +1137,28 @@ class AppearanceFolderLayoutUiTest {
 
     @Test
     fun bubbleColorPickerUpdatesSentAndReceivedColorsAndKeepsCustomDraftUntilApply() {
-        setContent()
+        val colors =
+            PaletteColors(
+                primary = "#CC8844",
+                secondary = "#4080CC",
+                tertiary = "#996633",
+                background = "#101010",
+                surface = "#202020",
+                surfaceContainer = "#303030",
+                onBackground = "#FFFFFF",
+                onSurface = "#FFFFFF",
+                onSurfaceVariant = "#CCCCCC",
+                outlineVariant = "#888888",
+            )
+        val palette = PaletteDocument("bubble-colors", "Bubble colors", 1, dark = colors)
+        setContent(
+            appearance =
+                AppearanceConfig(
+                    paletteMode = PaletteMode.DARK,
+                    darkPalette = PaletteChoice(installedId = palette.id),
+                    customPalettes = listOf(InstalledPalette(palette)),
+                ),
+        )
 
         compose.onNodeWithTag("settings_bubble_color_picker").performScrollTo().performClick()
         compose.onNodeWithTag("settings_bubble_color_sheet").assertIsDisplayed()
@@ -1152,10 +1177,20 @@ class AppearanceFolderLayoutUiTest {
         compose.onNodeWithTag("settings_bubble_color_apply").assertIsNotEnabled()
         compose.onNodeWithTag("settings_bubble_color_cancel").performClick()
         compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().performClick()
-        compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().performTextReplacement("#12AB34")
+        compose
+            .onNodeWithTag("theme_color_4080CC")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("settings_bubble_color_hex").performScrollTo().assertTextContains("#4080CC")
+        compose.onNodeWithTag("settings_bubble_color_brightness").assert(
+            SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, ProgressBarRangeInfo(0.8f, 0f..1f)),
+        )
         compose.onNodeWithTag("settings_bubble_color_tertiary_container").assertIsSelected()
         compose.onNodeWithTag("settings_bubble_color_apply").performClick()
         compose.onNodeWithTag("settings_bubble_color_custom").performScrollTo().assertIsSelected()
+        assertEquals(0xFF4080CC.toInt(), swatchPixel("settings_bubble_color_received_swatch"))
+        assertEquals(0xFFCC8844.toInt(), swatchPixel("settings_bubble_color_sent_swatch"))
     }
 
     @Test

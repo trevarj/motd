@@ -72,22 +72,20 @@ data class IrcEditorDocument(
         return replaceStates(start, end) { it.with(style, !enabled) }
     }
 
+    /** Colors must be ready for one IRC control: a background needs a foreground of the same type. */
     fun applyColors(
         selectionStart: Int,
         selectionEnd: Int,
-        foreground: Int?,
-        background: Int?,
+        foreground: IrcColor?,
+        background: IrcColor?,
     ): IrcEditorDocument {
-        require(foreground == null || foreground in 0..98)
-        require(background == null || background in 0..98)
         val start = minOf(selectionStart, selectionEnd).coerceIn(0, text.length)
         val end = maxOf(selectionStart, selectionEnd).coerceIn(start, text.length)
-        val readableForeground = foreground ?: background?.let(::readableForeground)
 
         fun IrcFormatState.colored() =
             copy(
-                foreground = readableForeground?.let(IrcColor::Numeric),
-                background = background?.let(IrcColor::Numeric),
+                foreground = foreground,
+                background = background,
             )
         if (start == end) return copy(pendingState = pendingState.colored())
         return replaceStates(start, end, IrcFormatState::colored)

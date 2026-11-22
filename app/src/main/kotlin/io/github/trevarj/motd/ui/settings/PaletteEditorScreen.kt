@@ -23,9 +23,11 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.*
 import io.github.trevarj.motd.ui.chat.ColorComponentSlider
+import io.github.trevarj.motd.ui.chat.ColorEditorScrollColumn
 import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
+import io.github.trevarj.motd.ui.components.ThemeColorSwatches
 import io.github.trevarj.motd.ui.theme.UiIcon
 import io.github.trevarj.motd.ui.theme.paletteColorScheme
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
@@ -337,8 +339,9 @@ private fun EditorColorDialog(
         properties = DialogProperties(usePlatformDefaultWidth = false),
         title = { Text(stringResource(R.string.palette_editor_color)) },
         text = {
-            Column(Modifier.fillMaxWidth().heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ColorEditorScrollColumn {
                 OutlinedTextField(value = value, onValueChange = { if (it != value) onChange(it) }, singleLine = true, label = { Text(stringResource(R.string.palette_editor_hex)) }, isError = invalid, supportingText = { if (invalid) Text(stringResource(R.string.palette_editor_hex_error)) }, modifier = Modifier.fillMaxWidth().testTag("palette_editor_hex"))
+                ThemeColorSwatches(selected = parsed, onSelect = { onChange(wallpaperColorHex(it)) })
                 ColorWheel(hsv[0], hsv[1], { h, s -> update(hue = h, saturation = s) }, tag = "palette_editor_wheel", label = stringResource(R.string.palette_editor_wheel))
                 ColorComponentSlider(stringResource(R.string.palette_editor_hue), hsv[0], 0f..360f, hsv[0].toInt().toString(), "palette_editor_hue") { update(hue = it) }
                 ColorComponentSlider(stringResource(R.string.palette_editor_saturation), hsv[1], 0f..1f, "${(hsv[1] * 100).toInt()}%", "palette_editor_saturation") { update(saturation = it) }

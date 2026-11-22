@@ -94,6 +94,7 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickColorOverride
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chat.ConversationLayoutSheet
@@ -311,7 +312,7 @@ class SettingsHomeAndPrimitivesUiTest {
         var picked: Int? = null
         compose.setContent {
             MotdTheme(dynamicColor = false) {
-                NickHuePickerDialog("alice", 210, { picked = it }, {})
+                NickColorPickerDialog("alice", 210, { picked = it }, {})
             }
         }
 
@@ -322,6 +323,27 @@ class SettingsHomeAndPrimitivesUiTest {
             .assert(hasClickAction())
         compose.onNodeWithTag("nick_hue_240").performClick()
         compose.runOnIdle { assertEquals(240, picked) }
+    }
+
+    @Test
+    fun nick_theme_swatch_selects_exact_color_and_auto_clears_it() {
+        val picked = mutableStateOf<Int?>(null)
+        val argb = 0xFF123456.toInt()
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                MaterialTheme(colorScheme = MaterialTheme.colorScheme.copy(primary = Color(argb))) {
+                    NickColorPickerDialog("alice", picked.value, { picked.value = it }, {})
+                }
+            }
+        }
+
+        val swatch = compose.onNodeWithTag("theme_color_123456")
+        swatch.performScrollTo().assertIsNotSelected().performClick()
+        compose.runOnIdle { assertEquals(argb, picked.value?.let(NickColorOverride::toArgb)) }
+        swatch.assertIsSelected()
+
+        compose.onNodeWithText("Auto (no override)").performScrollTo().performClick()
+        compose.runOnIdle { assertEquals(null, picked.value) }
     }
 
     @Test

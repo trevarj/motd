@@ -52,6 +52,7 @@ import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MAX_INSTALLED_PALETTE_BYTES
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.MessageSpacing
+import io.github.trevarj.motd.data.prefs.NickColorOverride
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
 import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteColors
@@ -638,6 +639,27 @@ class ConfigurationBackupRepositoryTest {
                 }
             } finally {
                 settings.setCompactNickBrackets(original)
+                db.close()
+            }
+        }
+
+    @Test
+    fun nickColorOverridesRoundTripThroughPreferencesAndBackup() =
+        runTest {
+            val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())
+            val original = settings.settings.first().nickColorOverrides
+            val selected = mapOf("theme-test" to NickColorOverride.fromArgb(0xFF123456.toInt()), "legacy-test" to 210)
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                selected.forEach { (nick, value) -> settings.setNickColorOverride(nick, value) }
+                assertEquals(original + selected, settings.settings.first().nickColorOverrides)
+                val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
+                selected.keys.forEach { settings.setNickColorOverride(it, null) }
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertEquals(original + selected, settings.settings.first().nickColorOverrides)
+            } finally {
+                selected.keys.forEach { settings.setNickColorOverride(it, original[it]) }
                 db.close()
             }
         }

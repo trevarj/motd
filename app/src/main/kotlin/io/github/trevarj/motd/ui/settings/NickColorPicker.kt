@@ -21,7 +21,6 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -30,6 +29,8 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.prefs.NickColorOverride
+import io.github.trevarj.motd.ui.components.ThemeColorSwatches
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
@@ -39,15 +40,14 @@ import io.github.trevarj.motd.ui.components.EmojiText as Text
 private val PICKER_HUES = listOf(0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330)
 
 /**
- * Hue swatch picker built from Compose primitives (no color-picker dependency). Renders 12 swatches
- * using the active palette's saturation/lightness so the preview matches how the override will
- * actually render. [onPick] receives the chosen hue, or null for "Auto" (clear the override).
+ * Offers the current theme colors and 12 fixed hues rendered through the active nickname palette.
+ * [onPick] receives the stored override (tagged exact color or hue), or null for "Auto".
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun NickHuePickerDialog(
+fun NickColorPickerDialog(
     nick: String,
-    currentHue: Int?,
+    currentColor: Int?,
     onPick: (Int?) -> Unit,
     onDismiss: () -> Unit,
 ) {
@@ -56,14 +56,18 @@ fun NickHuePickerDialog(
         onDismissRequest = onDismiss,
         title = { Text(nick) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState())) {
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                ThemeColorSwatches(
+                    selected = currentColor?.let(NickColorOverride::toArgb),
+                    onSelect = { onPick(NickColorOverride.fromArgb(it)) },
+                )
                 FlowRow(
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalArrangement = Arrangement.spacedBy(8.dp),
                     modifier = Modifier.selectableGroup(),
                 ) {
                     PICKER_HUES.forEach { hue ->
-                        val selected = hue == currentHue
+                        val selected = hue == currentColor
                         val description = stringResource(R.string.manage_color_hue, hue)
                         // Swatch filled with the resolved palette color; selected swatch gets a border.
                         Box(
@@ -103,8 +107,8 @@ fun NickHuePickerDialog(
 
 @Preview
 @Composable
-private fun NickHuePickerDialogPreview() {
+private fun NickColorPickerDialogPreview() {
     MotdTheme {
-        NickHuePickerDialog(nick = "alice", currentHue = 210, onPick = {}, onDismiss = {})
+        NickColorPickerDialog(nick = "alice", currentColor = 210, onPick = {}, onDismiss = {})
     }
 }

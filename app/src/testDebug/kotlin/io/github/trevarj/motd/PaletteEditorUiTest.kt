@@ -177,6 +177,54 @@ class PaletteEditorUiTest {
         compose.onNodeWithTag("retained_composer").assertTextEquals("unsent channel draft")
     }
 
+    @Test fun themeSwatchesCopyInstalledColors_intoOnlyTheEditedMode_untilSave() {
+        val base = rawDraft()
+        val dark = requireNotNull(base.dark)
+        val light = requireNotNull(base.light)
+        val active =
+            base.copy(
+                id = "active-editor-theme",
+                dark = dark.copy(primary = "#49A3DE", nicknameColors = listOf("#C7468B")),
+            )
+        runBlocking { prefs.savePalette(InstalledPalette(active), apply = true, mode = PaletteMode.DARK) }
+        val selection = current().paletteSelection
+        editor = editorModel(editorHandle(base))
+        mount()
+        awaitUi { rootPrimary == 0xFF49A3DE.toInt() }
+
+        compose.onNodeWithTag("palette_editor_edit_dark").performScrollTo().performClick()
+        compose.onNodeWithTag("palette_editor_primary").performScrollTo().performClick()
+        compose
+            .onNodeWithTag("theme_color_49A3DE")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("palette_editor_hex").performScrollTo().assertTextContains("#49A3DE")
+        compose.onNodeWithTag("palette_editor_color_done").performClick()
+        val editedDark = dark.copy(primary = "#49A3DE")
+        assertEquals(base.copy(dark = editedDark), editor!!.state.value.draft)
+
+        compose.onNodeWithTag("palette_editor_edit_light").performScrollTo().performClick()
+        compose.onNodeWithTag("palette_editor_nick_0").performScrollTo().performClick()
+        compose
+            .onNodeWithTag("theme_color_C7468B")
+            .performScrollTo()
+            .performClick()
+            .assertIsSelected()
+        compose.onNodeWithTag("palette_editor_hex").performScrollTo().assertTextContains("#C7468B")
+        compose.onNodeWithTag("palette_editor_color_done").performClick()
+        val editedLight = light.copy(nicknameColors = listOf("#C7468B") + light.nicknameColors.drop(1))
+        val edited = base.copy(dark = editedDark, light = editedLight)
+        assertEquals(edited, editor!!.state.value.draft)
+        assertEquals(listOf(InstalledPalette(active)), current().customPalettes)
+
+        compose.onNodeWithTag("palette_editor_save").performClick()
+        awaitUi { editor == null }
+        val saved = current()
+        assertEquals(selection, saved.paletteSelection)
+        assertEquals(edited, saved.customPalettes.single { it.document.id == base.id }.document)
+    }
+
     @Test fun dirtyBackAndModeRemoval_requireExplicitConfirmation_andLastModeSurvives() {
         editor = editorModel(editorHandle(rawDraft().copy(light = null)))
         mount()

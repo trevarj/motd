@@ -24,7 +24,7 @@ class IrcEditorDocumentTest {
         val document =
             IrcEditorDocument("abcd", List(4) { IrcFormatState() })
                 .moveCaret(2)
-                .applyColors(2, 2, foreground = 4, background = 1)
+                .applyColors(2, 2, foreground = IrcColor.Numeric(4), background = IrcColor.Numeric(1))
                 .replaceText("abXcd")
         val raw = document.toRawValue(3, 3)
         val reparsed = parseIrcFormatting(raw.text)

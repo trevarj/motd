@@ -33,6 +33,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
@@ -42,6 +43,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.NickColorOverride
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -81,7 +83,7 @@ fun ManageNicksScreen(
         onBack = onBack,
         onAdd = viewModel::add,
         onRemove = viewModel::remove,
-        onSetHue = viewModel::setHue,
+        onSetColor = viewModel::setColor,
         onUpdateFoolPreferences = viewModel::updateFoolPreferences,
     )
 }
@@ -92,7 +94,7 @@ fun ManageNicksContent(
     onBack: () -> Unit,
     onAdd: (String) -> Unit,
     onRemove: (String) -> Unit,
-    onSetHue: (String, Int) -> Unit,
+    onSetColor: (String, Int) -> Unit,
     onUpdateFoolPreferences: (String, (FoolPreferences) -> FoolPreferences) -> Unit,
 ) {
     val scheme = LocalNickColors.current
@@ -104,7 +106,7 @@ fun ManageNicksContent(
         }
 
     var input by remember { mutableStateOf("") }
-    // Nick whose hue is being edited (COLORS): existing row tap or a freshly-added nick.
+    // Nick whose color is being edited (COLORS): existing row tap or a freshly-added nick.
     var editingNick by remember { mutableStateOf<String?>(null) }
     var editingFool by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(editingFool, state.nicks, state.kind) {
@@ -121,11 +123,11 @@ fun ManageNicksContent(
     }
 
     editingNick?.let { nick ->
-        NickHuePickerDialog(
+        NickColorPickerDialog(
             nick = nick,
-            currentHue = state.overrides[nick],
-            onPick = { hue ->
-                if (hue != null) onSetHue(nick, hue) else onRemove(nick)
+            currentColor = state.overrides[nick],
+            onPick = { value ->
+                if (value != null) onSetColor(nick, value) else onRemove(nick)
                 editingNick = null
             },
             onDismiss = { editingNick = null },
@@ -245,13 +247,14 @@ fun ManageNicksContent(
                                     } else {
                                         {
                                             if (state.kind == NickListKind.COLORS) {
-                                                // Color chip previewing the resolved override color.
+                                                val value = state.overrides[nick] ?: 0
+                                                val swatch = NickColorOverride.toArgb(value)?.let { Color(it) } ?: scheme.hue(value)
                                                 Box(
                                                     modifier =
                                                         Modifier
                                                             .size(20.dp)
                                                             .clip(CircleShape)
-                                                            .background(scheme.hue(state.overrides[nick] ?: 0)),
+                                                            .background(swatch),
                                                 )
                                             } else {
                                                 Avatar(name = nick, size = 36.dp)
@@ -269,7 +272,7 @@ fun ManageNicksContent(
                                 modifier = rowModifier,
                                 colors =
                                     androidx.compose.material3.ListItemDefaults
-                                        .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                                        .colors(containerColor = Color.Transparent),
                             )
                         }
                     }
@@ -376,7 +379,7 @@ private fun ManageNicksFriendsPreview() {
             onBack = {},
             onAdd = {},
             onRemove = {},
-            onSetHue = { _, _ -> },
+            onSetColor = { _, _ -> },
             onUpdateFoolPreferences = { _, _ -> },
         )
     }
@@ -396,7 +399,7 @@ private fun ManageNicksColorsPreview() {
             onBack = {},
             onAdd = {},
             onRemove = {},
-            onSetHue = { _, _ -> },
+            onSetColor = { _, _ -> },
             onUpdateFoolPreferences = { _, _ -> },
         )
     }
@@ -411,7 +414,7 @@ private fun ManageNicksEmptyPreview() {
             onBack = {},
             onAdd = {},
             onRemove = {},
-            onSetHue = { _, _ -> },
+            onSetColor = { _, _ -> },
             onUpdateFoolPreferences = { _, _ -> },
         )
     }

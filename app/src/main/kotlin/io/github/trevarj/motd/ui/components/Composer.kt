@@ -66,6 +66,7 @@ import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.foundation.text.selection.LocalTextSelectionColors
 import androidx.compose.foundation.text.selection.TextSelectionColors
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.automirrored.filled.TextSnippet
@@ -96,6 +97,7 @@ import androidx.compose.material3.PlainTooltip
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TooltipBox
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -187,6 +189,7 @@ import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
+import io.github.trevarj.motd.irc.format.readableForeground
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.COMMAND_HINTS
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
@@ -568,8 +571,8 @@ fun Composer(
     var colorSheetVisible by remember { mutableStateOf(false) }
     var restoreFocusAfterColor by remember { mutableStateOf(false) }
     var colorSelection by remember { mutableStateOf(TextRange.Zero) }
-    var selectedForeground by remember { mutableStateOf<Int?>(null) }
-    var selectedBackground by remember { mutableStateOf<Int?>(null) }
+    var selectedForeground by remember { mutableStateOf<IrcColor?>(null) }
+    var selectedBackground by remember { mutableStateOf<IrcColor?>(null) }
     val hasDraftText = plainIrcText(editorValue.text).isNotEmpty()
     val relocatedTools = composerStyle != ComposerStyle.COMFORTABLE
     val attachmentInToolbar = onAttachment != null && (relocatedTools || hasDraftText)
@@ -701,10 +704,11 @@ fun Composer(
         currentDocument: IrcEditorDocument,
         selection: TextRange,
     ) {
-        val state = if (selection.collapsed) currentDocument.pendingState else currentDocument.stateAtCaret(selection.start)
+        val state =
+            if (selection.collapsed) currentDocument.pendingState else currentDocument.states.getOrNull(selection.min) ?: currentDocument.pendingState
         colorSelection = selection
-        selectedForeground = (state.foreground as? IrcColor.Numeric)?.code
-        selectedBackground = (state.background as? IrcColor.Numeric)?.code
+        selectedForeground = state.foreground
+        selectedBackground = state.background
         colorSheetVisible = true
     }
     val emojiQuery = activeEmojiQuery(editorValue)
@@ -1414,18 +1418,23 @@ fun Composer(
                 colorSheetVisible = false
             },
             onRemove = {
-                publishDocument(editorDocument.applyColors(colorSelection.start, colorSelection.end, null, null))
+                publishDocument(editorDocument.applyColors(colorSelection.start, colorSelection.end, null, null), colorSelection)
                 restoreFocusAfterColor = true
                 colorSheetVisible = false
             },
             onApply = {
+                val background = selectedBackground
+                val foreground = selectedForeground ?: background?.let(::composerBackgroundForeground)
+                // A single IRC color control uses one syntax for both channels.
+                val useHex = foreground is IrcColor.Hex || background is IrcColor.Hex
                 publishDocument(
                     editorDocument.applyColors(
                         colorSelection.start,
                         colorSelection.end,
-                        selectedForeground,
-                        selectedBackground,
+                        if (useHex) foreground?.toComposerHex() else foreground,
+                        if (useHex) background?.toComposerHex() else background,
                     ),
+                    colorSelection,
                 )
                 restoreFocusAfterColor = true
                 colorSheetVisible = false
@@ -1669,19 +1678,24 @@ private fun ComposerToolsToolbar(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ComposerColorSheet(
-    foreground: Int?,
-    background: Int?,
-    onForeground: (Int?) -> Unit,
-    onBackground: (Int?) -> Unit,
+    foreground: IrcColor?,
+    background: IrcColor?,
+    onForeground: (IrcColor?) -> Unit,
+    onBackground: (IrcColor?) -> Unit,
     onCancel: () -> Unit,
     onRemove: () -> Unit,
     onApply: () -> Unit,
 ) {
     var editingBackground by remember { mutableStateOf(false) }
+    val selected = if (editingBackground) background else foreground
+    val onSelect = if (editingBackground) onBackground else onForeground
+    val numericSelection = (selected as? IrcColor.Numeric)?.code
+    val onNumericSelect: (Int) -> Unit = { onSelect(IrcColor.Numeric(it)) }
     ModalBottomSheet(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onCancel,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
         modifier = Modifier.testTag("chat_composer_color_sheet"),
     ) {
         Column(
@@ -1700,66 +1714,69 @@ private fun ComposerColorSheet(
                     Text("Apply")
                 }
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(
-                    onClick = { editingBackground = false },
-                    colors =
-                        readableTextButtonColors(
-                            colors =
-                                androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                    containerColor = if (!editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                                    contentColor = if (!editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
-                                ),
-                        ),
-                ) {
-                    Text(if (editingBackground) "Text" else "Text ✓")
-                }
-                TextButton(
-                    onClick = { editingBackground = true },
-                    colors =
-                        readableTextButtonColors(
-                            colors =
-                                androidx.compose.material3.ButtonDefaults.textButtonColors(
-                                    containerColor = if (editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
-                                    contentColor = if (editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
-                                ),
-                        ),
-                ) {
-                    Text(if (editingBackground) "Background ✓" else "Background")
-                }
-                if (editingBackground) TextButton(onClick = { onBackground(null) }, colors = readableTextButtonColors()) { Text("No background") }
-            }
-            val previewBackground = background?.let(::composerPaletteColor) ?: MaterialTheme.colorScheme.surfaceContainerHigh
-            val previewForeground =
-                foreground?.let(::composerPaletteColor)
-                    ?: background?.let {
-                        composerPaletteColor(
-                            io.github.trevarj.motd.irc.format
-                                .readableForeground(it),
-                        )
+            Column(
+                Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = { editingBackground = false },
+                        colors =
+                            readableTextButtonColors(
+                                colors =
+                                    androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                        containerColor = if (!editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                        contentColor = if (!editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
+                                    ),
+                            ),
+                    ) {
+                        Text(if (editingBackground) "Text" else "Text ✓")
                     }
-                    ?: MaterialTheme.colorScheme.onSurface
-            Surface(color = previewBackground, shape = MotdShapes.card) {
-                Text(
-                    "Formatting preview",
-                    color = ensureContrast(previewForeground, listOf(previewBackground)),
-                    modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("chat_composer_color_preview"),
+                    TextButton(
+                        onClick = { editingBackground = true },
+                        colors =
+                            readableTextButtonColors(
+                                colors =
+                                    androidx.compose.material3.ButtonDefaults.textButtonColors(
+                                        containerColor = if (editingBackground) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent,
+                                        contentColor = if (editingBackground) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.primary,
+                                    ),
+                            ),
+                    ) {
+                        Text(if (editingBackground) "Background ✓" else "Background")
+                    }
+                    if (editingBackground) TextButton(onClick = { onBackground(null) }, colors = readableTextButtonColors()) { Text("No background") }
+                }
+                val previewBackground = background?.toComposerColor() ?: MaterialTheme.colorScheme.surfaceContainerHigh
+                val previewForeground =
+                    (foreground ?: background?.let(::composerBackgroundForeground))?.toComposerColor()
+                        ?: MaterialTheme.colorScheme.onSurface
+                Surface(color = previewBackground, shape = MotdShapes.card) {
+                    Text(
+                        "Formatting preview",
+                        color = ensureContrast(previewForeground, listOf(previewBackground)),
+                        modifier = Modifier.fillMaxWidth().padding(12.dp).testTag("chat_composer_color_preview"),
+                    )
+                }
+                Text("Basic 16", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
+                ColorGrid(
+                    colors = (0..15).toList(),
+                    selected = numericSelection,
+                    onSelect = onNumericSelect,
+                    modifier = Modifier.height(96.dp),
+                )
+                ThemeColorSwatches(
+                    selected = (selected as? IrcColor.Hex)?.rgb?.or(COMPOSER_OPAQUE_ALPHA),
+                    onSelect = { onSelect(IrcColor.Hex(it and 0xFFFFFF)) },
+                )
+                Text("Extended 16–98", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
+                ColorGrid(
+                    colors = (16..98).toList(),
+                    selected = numericSelection,
+                    onSelect = onNumericSelect,
+                    modifier = Modifier.height(180.dp),
                 )
             }
-            Text("Basic 16", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
-            ColorGrid(
-                colors = (0..15).toList(),
-                selected = if (editingBackground) background else foreground,
-                onSelect = if (editingBackground) onBackground else onForeground,
-                modifier = Modifier.height(96.dp),
-            )
-            Text("Extended 16–98", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
-            ColorGrid(
-                colors = (16..98).toList(),
-                selected = if (editingBackground) background else foreground,
-                onSelect = if (editingBackground) onBackground else onForeground,
-                modifier = Modifier.weight(1f).heightIn(min = 180.dp),
-            )
             Row(
                 Modifier.fillMaxWidth().padding(bottom = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
@@ -1811,7 +1828,29 @@ private fun ColorGrid(
     }
 }
 
-private fun composerPaletteColor(code: Int): Color = Color(0xFF000000 or MIRC_COLORS[code.coerceIn(MIRC_COLORS.indices)].toLong())
+private const val COMPOSER_OPAQUE_ALPHA = 0xFF000000.toInt()
+
+private fun composerPaletteColor(code: Int): Color = Color(COMPOSER_OPAQUE_ALPHA or MIRC_COLORS[code])
+
+private fun IrcColor.toComposerHex(): IrcColor.Hex =
+    when (this) {
+        is IrcColor.Hex -> this
+        is IrcColor.Numeric -> IrcColor.Hex(MIRC_COLORS[code])
+    }
+
+private fun IrcColor.toComposerColor(): Color =
+    when (this) {
+        is IrcColor.Hex -> Color(COMPOSER_OPAQUE_ALPHA or rgb)
+        is IrcColor.Numeric -> composerPaletteColor(code)
+    }
+
+private fun composerBackgroundForeground(background: IrcColor): IrcColor =
+    when (background) {
+        is IrcColor.Numeric -> IrcColor.Numeric(readableForeground(background.code))
+
+        // The black/white WCAG contrast ratios cross at luminance 0.179.
+        is IrcColor.Hex -> IrcColor.Hex(if (background.toComposerColor().luminance() >= 0.179f) 0 else 0xFFFFFF)
+    }
 
 @Composable
 private fun VoiceRecordButton(

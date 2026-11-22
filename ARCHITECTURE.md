@@ -92,6 +92,10 @@ flowchart TD
   Save/Apply/Update writes appearance preferences. Preview chrome reserves status
   and navigation bar insets so its actions remain reachable edge-to-edge.
   Palette screens share standard back-arrow bars and inline community-card actions.
+- Color pickers share swatches from the active Material scheme and the theme's
+  identity palette. Swatches copy exact RGB; existing adaptive bubble roles and
+  wallpaper defaults still follow the theme. IRC numeric codes keep their
+  standard colors; theme swatches in message formatting use IRC hex colors.
 - File intake classifies bounded owned bytes before ordinary chat sharing. Latest
   delivery ownership and source-matched consumption survive recreation; generic
   unmarked JSON shares remain attachments. SAF and narrow FileProvider exports

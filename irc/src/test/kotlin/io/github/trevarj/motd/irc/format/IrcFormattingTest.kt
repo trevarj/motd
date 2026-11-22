@@ -179,7 +179,7 @@ class IrcFormattingTest {
     @Test
     fun editorAndSplitSerializersPreserveLiteralColorArguments() {
         val text = "abc,05"
-        val document = IrcEditorDocument(text, List(text.length) { IrcFormatState() }).applyColors(3, text.length, 4, null)
+        val document = IrcEditorDocument(text, List(text.length) { IrcFormatState() }).applyColors(3, text.length, IrcColor.Numeric(4), null)
         val serialized = document.toRawValue(3, 3)
         val parsed = parseIrcFormatting(serialized.text)
 

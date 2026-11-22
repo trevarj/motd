@@ -22,10 +22,18 @@ Turning it on uses palette text hues instead, including Device colors. Turning a
 uses authored ink without overwriting that saved choice. Both preferences apply live to native
 previews, persist across restarts and travel with configuration backups.
 
-Classic/Vivid, generated nickname fallbacks and explicit nickname hue overrides remain fitted.
+Classic/Vivid, generated nickname fallbacks and explicit nickname overrides remain fitted.
 Explicit dimming, IRC formatting, nickname-chip foregrounds and search-highlight ink retain
 readability protections in either mode. Filled and inverse controls keep foregrounds matched
 to their actual backgrounds; disabled styling and fonts are unchanged.
+
+**Current theme colors** offers swatches in the wallpaper workshop, custom bubble colors,
+palette editor, nickname editor and IRC formatting. A swatch copies the current RGB value;
+adaptive bubble roles and wallpaper defaults still follow future theme changes. Nickname
+swatches keep the chosen value for avatar fills while fitting nickname text for contrast.
+IRC formatting sends theme swatches as hex colors alongside the standard numbered palette.
+Tap or drag in any direction on the color wheel. To scroll, start beside the wheel
+or swipe vertically over a slider. Drag a slider horizontally to adjust it.
 
 Composer fields and toolbars, ordinary Comfortable incoming bubbles, autocomplete,
 system-event pills, history overlays and voice panels use the selected palette's

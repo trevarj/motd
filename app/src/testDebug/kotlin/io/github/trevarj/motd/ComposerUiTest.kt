@@ -82,6 +82,8 @@ import io.github.trevarj.motd.data.prefs.SurfaceEffects
 import io.github.trevarj.motd.data.prefs.UiCornerStyle
 import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.irc.format.IRC_BOLD
+import io.github.trevarj.motd.irc.format.IRC_COLOR
+import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -1687,6 +1689,7 @@ class ComposerUiTest {
         compose.onNodeWithTag("chat_color_1").performClick()
         compose.onNodeWithTag("chat_composer_color_apply").assertIsDisplayed().performClick()
         compose.runOnIdle {
+            assertTrue(draft.value.text.startsWith("${IRC_COLOR}04,01"))
             val state = parseIrcFormatting(draft.value.text).runs.single().state
             assertEquals(IrcColor.Numeric(4), state.foreground)
             assertEquals(IrcColor.Numeric(1), state.background)
@@ -1694,6 +1697,86 @@ class ComposerUiTest {
 
         compose.runOnIdle { draft.value = TextFieldValue("$IRC_BOLD$IRC_BOLD") }
         compose.onNodeWithTag("chat_composer_send").assertIsNotEnabled()
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h460dp")
+    fun themeColorSheetKeepsMixedRgbAndSendsReadableBackgroundOnlyColor() {
+        val draft = mutableStateOf(TextFieldValue("pre sample", TextRange(4, 10)))
+        var sent: String? = null
+        val palette =
+            PaletteColors(
+                primary = "#123456",
+                secondary = "#DDEEFF",
+                tertiary = "#556677",
+                background = "#FFFFFF",
+                surface = "#FFFFFF",
+                surfaceContainer = "#EEEEEE",
+                onBackground = "#121212",
+                onSurface = "#121212",
+                onSurfaceVariant = "#333333",
+                outlineVariant = "#999999",
+            )
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                customPalette = PaletteDocument("composer-colors", "Composer colors", 1, light = palette),
+                paletteMode = PaletteMode.LIGHT,
+                adjustPaletteReadability = false,
+            ) {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = { sent = draft.value.text },
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        val paletteTitle = ApplicationProvider.getApplicationContext<Context>().getString(R.string.theme_color_swatches)
+        val apply = compose.onNodeWithTag("chat_composer_color_apply")
+        val formatColor = compose.onNodeWithTag("chat_format_color")
+        val themeInk = compose.onNodeWithTag("theme_color_123456")
+        val themeFill = compose.onNodeWithTag("theme_color_DDEEFF")
+        val background = compose.onNodeWithText("Background")
+
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        formatColor.performScrollTo().performClick()
+        compose.onNodeWithText(paletteTitle).performScrollTo()
+        themeInk.assertIsDisplayed().performClick().assertIsSelected()
+        background.performScrollTo().performClick()
+        compose.onNodeWithTag("chat_color_4").performClick()
+        apply.assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            val raw = draft.value
+            val parsed = parseIrcFormatting(raw.text)
+            assertTrue(raw.text.contains("${IRC_HEX_COLOR}123456,ff0000"))
+            assertEquals("pre sample", parsed.visibleText)
+            assertTrue(parsed.stateAtVisible(3).isDefault)
+            assertEquals(IrcColor.Hex(0x123456), parsed.stateAtVisible(4).foreground)
+            assertEquals(IrcColor.Hex(0xFF0000), parsed.stateAtVisible(4).background)
+            assertEquals(TextRange(4, 10), TextRange(parsed.visibleOffset(raw.selection.start), parsed.visibleOffset(raw.selection.end)))
+        }
+
+        formatColor.performScrollTo().performClick()
+        compose.onNodeWithText(paletteTitle).performScrollTo()
+        themeInk.assertIsSelected()
+        compose.onNodeWithText("Remove colors").performClick()
+        compose.runOnIdle { assertEquals("pre sample", draft.value.text) }
+
+        formatColor.performScrollTo().performClick()
+        background.performScrollTo().performClick()
+        compose.onNodeWithText(paletteTitle).performScrollTo()
+        themeFill.assertIsDisplayed().performClick()
+        apply.assertIsDisplayed().performClick()
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.runOnIdle {
+            val parsed = parseIrcFormatting(checkNotNull(sent))
+            assertEquals("pre sample", parsed.visibleText)
+            assertEquals(IrcColor.Hex(0x000000), parsed.stateAtVisible(4).foreground)
+            assertEquals(IrcColor.Hex(0xDDEEFF), parsed.stateAtVisible(4).background)
+        }
     }
 
     @Test

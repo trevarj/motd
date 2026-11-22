@@ -994,7 +994,7 @@ class ConfigurationBackupRepositoryImpl
                 current.nickColorOverrides.keys
                     .filter { nick -> nick !in it.nickColorOverrides }
                     .forEach { nick -> settingsRepository.setNickColorOverride(nick, null) }
-                it.nickColorOverrides.forEach { (nick, hue) -> settingsRepository.setNickColorOverride(nick, hue) }
+                it.nickColorOverrides.forEach { (nick, value) -> settingsRepository.setNickColorOverride(nick, value) }
                 current.friends
                     .filter { nick -> nick !in it.friends }
                     .forEach { nick -> settingsRepository.setFriend(nick, false) }

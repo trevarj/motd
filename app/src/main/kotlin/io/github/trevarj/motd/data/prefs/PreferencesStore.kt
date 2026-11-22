@@ -87,8 +87,7 @@ internal object PrefKeys {
     val AUTO_AWAY_MESSAGE = stringPreferencesKey("auto_away_message")
 }
 
-// -- Round 4 nick-set / hue-override JSON codecs (top-level + internal so they are unit-testable
-// without a DataStore instance). Same manual-JSON style as the endpoint/cert-pin helpers. --
+// Nick settings JSON codecs, independently testable without DataStore.
 
 private val nickJson = Json { ignoreUnknownKeys = true }
 
@@ -104,17 +103,16 @@ internal fun decodeNickSet(raw: String?): Set<String> {
 /** Encode a set of nicks as a JSON array (insertion order). */
 internal fun encodeNickSet(nicks: Set<String>): String = buildJsonArray { for (n in nicks) add(JsonPrimitive(n)) }.toString()
 
-/** Decode a JSON object {"nick": hue} into a map; hues coerced into 0..359, garbage -> empty. */
-internal fun decodeHueOverrides(raw: String?): Map<String, Int> {
+/** Decode legacy hues and tagged exact colors; garbage -> empty. */
+internal fun decodeNickColorOverrides(raw: String?): Map<String, Int> {
     if (raw == null) return emptyMap()
     return runCatching {
         val obj = nickJson.parseToJsonElement(raw) as JsonObject
-        obj.entries.associate { (k, v) -> k to v.jsonPrimitive.int.coerceIn(0, 359) }
+        obj.entries.associate { (k, v) -> k to NickColorOverride.normalize(v.jsonPrimitive.int) }
     }.getOrDefault(emptyMap())
 }
 
-/** Encode a nick->hue map as a JSON object (hues coerced into 0..359). */
-internal fun encodeHueOverrides(map: Map<String, Int>): String = buildJsonObject { for ((k, v) in map) put(k, v.coerceIn(0, 359)) }.toString()
+internal fun encodeNickColorOverrides(map: Map<String, Int>): String = buildJsonObject { map.forEach { (nick, value) -> put(nick, NickColorOverride.normalize(value)) } }.toString()
 
 /** Fail closed per record; unknown visibility is inheritance, not a lost valid permission. */
 internal fun decodeFoolPreferences(
@@ -207,7 +205,7 @@ class DataStoreSettingsRepository
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
                     nickMentionStyle = nickMentionStyleFromPreference(prefs[PrefKeys.NICK_MENTION_STYLE]),
                     nicknameTapAction = nicknameTapActionFromPreference(prefs[PrefKeys.NICKNAME_TAP_ACTION]),
-                    nickColorOverrides = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
+                    nickColorOverrides = decodeNickColorOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
                     friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
                     fools = fools,
                     foolPreferences = decodeFoolPreferences(prefs[PrefKeys.FOOL_PREFERENCES], fools, foolsMode),
@@ -341,12 +339,12 @@ class DataStoreSettingsRepository
         ) {
             val key = normalizeNick(nick)
             store.edit { prefs ->
-                val current = decodeHueOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]).toMutableMap()
-                if (hue == null) current.remove(key) else current[key] = hue.coerceIn(0, 359)
+                val current = decodeNickColorOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]).toMutableMap()
+                if (hue == null) current.remove(key) else current[key] = NickColorOverride.normalize(hue)
                 if (current.isEmpty()) {
                     prefs.remove(PrefKeys.NICK_COLOR_OVERRIDES)
                 } else {
-                    prefs[PrefKeys.NICK_COLOR_OVERRIDES] = encodeHueOverrides(current)
+                    prefs[PrefKeys.NICK_COLOR_OVERRIDES] = encodeNickColorOverrides(current)
                 }
             }
         }

@@ -55,11 +55,13 @@ import io.github.trevarj.motd.data.prefs.customPalette
 import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.ui.chat.ColorComponentSlider
+import io.github.trevarj.motd.ui.chat.ColorEditorScrollColumn
 import io.github.trevarj.motd.ui.chat.ColorWheel
 import io.github.trevarj.motd.ui.chat.parseColorHex
 import io.github.trevarj.motd.ui.chat.wallpaperColorHex
 import io.github.trevarj.motd.ui.components.ChatLayoutPreview
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.components.ThemeColorSwatches
 import io.github.trevarj.motd.ui.components.messageBubbleRoleColors
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -427,12 +429,27 @@ private fun ComfortableBubbleCustomColorDialog(
     fun updateHex() {
         hex = wallpaperColorHex(AndroidColor.HSVToColor(floatArrayOf(hue, saturation, brightness)))
     }
+
+    fun updateHsv(color: Int) {
+        val hsv = FloatArray(3)
+        AndroidColor.colorToHSV(color, hsv)
+        hue = hsv[0]
+        saturation = hsv[1]
+        brightness = hsv[2]
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.testTag("settings_bubble_color_dialog"),
         title = { Text(stringResource(R.string.settings_bubble_color_custom)) },
         text = {
-            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            ColorEditorScrollColumn {
+                ThemeColorSwatches(
+                    selected = parsed,
+                    onSelect = { color ->
+                        hex = wallpaperColorHex(color)
+                        updateHsv(color)
+                    },
+                )
                 previewContent(draft)
                 ColorWheel(hue, saturation, { nextHue, nextSaturation ->
                     hue = nextHue
@@ -455,13 +472,7 @@ private fun ComfortableBubbleCustomColorDialog(
                     value = hex,
                     onValueChange = { value ->
                         hex = value
-                        parseColorHex(value)?.let { parsedColor ->
-                            val hsv = FloatArray(3)
-                            AndroidColor.colorToHSV(parsedColor, hsv)
-                            hue = hsv[0]
-                            saturation = hsv[1]
-                            brightness = hsv[2]
-                        }
+                        parseColorHex(value)?.let(::updateHsv)
                     },
                     label = { Text(stringResource(R.string.settings_wallpaper_color_hex)) },
                     isError = parsed == null,

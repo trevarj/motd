@@ -38,6 +38,7 @@ import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -48,6 +49,7 @@ import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
@@ -68,6 +70,9 @@ import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.CustomWallpaperStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.PaletteColors
+import io.github.trevarj.motd.data.prefs.PaletteDocument
+import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.WallpaperSelection
 import io.github.trevarj.motd.data.prefs.WallpaperWorkshopStore
 import io.github.trevarj.motd.data.prefs.resolveWallpaper
@@ -234,6 +239,39 @@ class ChatWallpaperPickerUiTest {
     }
 
     @Test
+    fun wallpaperDialogUsesTheActiveThemeVariantAndAppliesTheExactSwatch() {
+        val light = PaletteColors("#123ABC", "#223344", "#335577", "#FAFAFA", "#FFFFFF", "#EEEEEE", "#222222", "#222222", "#333333", "#666666")
+        val palette = PaletteDocument("wallpaper-swatch-test", "Wallpaper swatches", 1, light, light.copy(primary = "#F1C192"))
+        var dark by mutableStateOf(false)
+        var applied: Int? = null
+        compose.setContent {
+            MotdTheme(customPalette = palette, paletteMode = if (dark) PaletteMode.DARK else PaletteMode.LIGHT) {
+                WallpaperColorDialog(
+                    label = "Default ink",
+                    defaultLabel = "Theme",
+                    defaultColor = android.graphics.Color.BLACK,
+                    value = null,
+                    onApply = { applied = it },
+                    onDismiss = {},
+                    preview = { color, modifier -> Box(modifier.background(color?.let(::Color) ?: Color.Black)) },
+                )
+            }
+        }
+
+        compose.onNodeWithTag("theme_color_123ABC").assertIsDisplayed()
+        compose.runOnIdle { dark = true }
+        compose.onNodeWithTag("theme_color_123ABC").assertDoesNotExist()
+        compose.onNodeWithTag("theme_color_F1C192").performClick().assertIsSelected()
+        compose
+            .onNodeWithTag("settings_wallpaper_color_hex")
+            .performScrollTo()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#F1C192")))
+        assertNull(applied)
+        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
+        assertEquals(0xfff1c192.toInt(), applied)
+    }
+
+    @Test
     fun blackInkKeepsWheelSpectrumVisibleAndRecoversColorWithBrightness() {
         var applied: Int? = null
         compose.setContent {
@@ -286,6 +324,74 @@ class ChatWallpaperPickerUiTest {
             .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#FF0000")))
         compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
         assertEquals(android.graphics.Color.RED, applied)
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h480dp")
+    fun wheelTracksVerticallyWhileTheGutterAndSlidersStillScroll() {
+        var applied: Int? = null
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                WallpaperColorDialog(
+                    label = "Default ink",
+                    defaultLabel = "Theme",
+                    defaultColor = android.graphics.Color.WHITE,
+                    value = 0xff804020.toInt(),
+                    onApply = { applied = it },
+                    onDismiss = {},
+                    preview = { color, modifier -> Box(modifier.background(Color(color ?: android.graphics.Color.WHITE))) },
+                )
+            }
+        }
+
+        val wheel = compose.onNodeWithTag("settings_wallpaper_color_wheel").performScrollTo()
+        val wheelTop = wheel.getUnclippedBoundsInRoot().top
+        val wheelState = wheel.fetchSemanticsNode().config[SemanticsProperties.StateDescription]
+        compose.onNodeWithTag("settings_wallpaper_color_list").performTouchInput {
+            val gutter = Offset(2f, center.y)
+            swipe(gutter, gutter - Offset(0f, height * 0.35f))
+        }
+        assertTrue("swiping beside the wheel should scroll", wheel.getUnclippedBoundsInRoot().top < wheelTop)
+        wheel.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, wheelState))
+
+        val slider = compose.onNodeWithTag("settings_wallpaper_color_saturation").performScrollTo()
+        val sliderTop = slider.getUnclippedBoundsInRoot().top
+        val sliderState = slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo]
+        slider.performTouchInput { swipe(center, center + Offset(width * 0.05f, height * 2.5f)) }
+        assertTrue("swiping over the slider should scroll", slider.getUnclippedBoundsInRoot().top > sliderTop)
+        slider.assert(SemanticsMatcher.expectValue(SemanticsProperties.ProgressBarRangeInfo, sliderState))
+        compose
+            .onNodeWithTag("settings_wallpaper_color_hex")
+            .performScrollTo()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString("#804020")))
+
+        slider.performScrollTo().performTouchInput {
+            swipe(Offset(width * 0.65f, center.y), Offset(width * 0.25f, center.y))
+        }
+        val adjusted = slider.fetchSemanticsNode().config[SemanticsProperties.ProgressBarRangeInfo].current
+        assertTrue("horizontal dragging should still adjust the slider", adjusted < sliderState.current)
+
+        wheel.performScrollTo()
+        val topBeforeDrag = wheel.getUnclippedBoundsInRoot().top
+        wheel.performTouchInput {
+            val radius = minOf(width, height) / 2f
+            down(center + Offset(0f, radius * 0.25f))
+        }
+        wheel.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "90 degrees, 25%"))
+        wheel.performTouchInput {
+            val radius = minOf(width, height) / 2f
+            moveTo(center - Offset(0f, radius * 0.5f))
+        }
+        wheel.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "270 degrees, 50%"))
+        wheel.performTouchInput {
+            val radius = minOf(width, height) / 2f
+            moveTo(center - Offset(0f, radius * 1.1f))
+            up()
+        }
+        wheel.assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "270 degrees, 100%"))
+        assertEquals("dragging the wheel should not scroll", topBeforeDrag, wheel.getUnclippedBoundsInRoot().top)
+        compose.onNodeWithTag("settings_wallpaper_color_apply").performClick()
+        assertEquals(0xff400080.toInt(), applied)
     }
 
     @Test

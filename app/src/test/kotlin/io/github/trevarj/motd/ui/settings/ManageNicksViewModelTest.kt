@@ -295,7 +295,7 @@ class ManageNicksViewModelTest {
             runCurrent()
             assertEquals(emptyMap<String, Int>(), repo.settings.value.nickColorOverrides)
 
-            vm.setHue("carol", 210)
+            vm.setColor("carol", 210)
             runCurrent()
             assertEquals(mapOf("carol" to 210), repo.settings.value.nickColorOverrides)
         }

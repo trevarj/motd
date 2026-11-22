@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.theme
 import androidx.compose.material3.ColorScheme
 import androidx.compose.ui.graphics.Color
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.data.prefs.NickColorOverride
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.isDark
@@ -452,6 +453,29 @@ class NickColorResolveTest {
                 val disabled = nickScheme(f, palette, mapOf("alice" to 210), enabled = false)
                 assertEquals(fallback, disabled.nick("alice", fallback))
                 assertEquals(overridden.avatar("alice"), disabled.avatar("alice"))
+            }
+        }
+    }
+
+    @Test
+    fun exactOverrideUsesChosenAvatarColorAndReadableTextInEachMode() {
+        for (dark in listOf(false, true)) {
+            val background = if (dark) Color(0xFF303840) else Color(0xFFE7EDF3)
+            val argb = if (dark) 0xFF384C60.toInt() else 0xFFC6D6E6.toInt()
+            val backgrounds = listOf(background)
+            val overrides = mapOf("alice" to NickColorOverride.fromArgb(argb))
+            for (palette in NickColorPalette.entries) {
+                val scheme = NickColorScheme(true, palette, overrides, dark, backgrounds, themeColors, listOf(Color.Red))
+                assertEquals(Color(argb), scheme.avatar(" Alice "))
+                val text = scheme.nick(" Alice ", fallback)
+                assertEquals(text, scheme.mention("alice"))
+                assertTrue(contrastRatio(text, background) >= 4.49)
+                assertTrue(contrastRatio(scheme.nick("alice", fallback, backgrounds), background) >= 6.99)
+                assertEquals(text, resolveNickColor("alice", dark, true, palette, overrides, fallback, themeColors, backgrounds))
+
+                val disabled = NickColorScheme(false, palette, overrides, dark, backgrounds)
+                assertEquals(fallback, disabled.nick("alice", fallback))
+                assertEquals(Color(argb), disabled.avatar("alice"))
             }
         }
     }

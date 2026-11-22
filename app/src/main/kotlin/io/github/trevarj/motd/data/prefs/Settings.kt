@@ -302,6 +302,20 @@ val ThemeMode.isTerminalTheme: Boolean
             else -> true
         }
 
+/** Stores an opaque color alongside legacy 0..359 hues without changing the backup format. */
+internal object NickColorOverride {
+    private const val RGB_MASK = 0x00FFFFFF
+    private const val EXACT_TAG = 0x4E000000
+
+    fun fromArgb(argb: Int): Int = EXACT_TAG or (argb and RGB_MASK)
+
+    fun toArgb(value: Int): Int? = if (isExact(value)) value or 0xFF000000.toInt() else null
+
+    fun normalize(value: Int): Int = if (isExact(value)) value else value.coerceIn(0, 359)
+
+    private fun isExact(value: Int): Boolean = value ushr 24 == EXACT_TAG ushr 24
+}
+
 @Serializable
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -315,7 +329,7 @@ data class Settings(
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     val nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
-    /** Normalized nick -> hue/position 0..359, rendered through the active palette. */
+    /** Normalized nick -> a legacy hue/position 0..359 or a tagged exact color. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
     /** Normalized nicks. friends and fools are kept disjoint by the repository. */
     val friends: Set<String> = emptySet(),
@@ -438,7 +452,7 @@ interface SettingsRepository {
 
     suspend fun setNicknameTapAction(action: NicknameTapAction)
 
-    /** hue 0..359 (coerced); null removes. [nick] is normalized internally. */
+    /** [hue] is a palette position 0..359 (coerced) or a tagged exact color; null removes. */
     suspend fun setNickColorOverride(
         nick: String,
         hue: Int?,

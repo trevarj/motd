@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.ProvidableCompositionLocal
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.graphics.Color
+import io.github.trevarj.motd.data.prefs.NickColorOverride
 import io.github.trevarj.motd.data.prefs.NickColorPalette
 import io.github.trevarj.motd.data.prefs.normalizeNick
 import kotlin.math.abs
@@ -235,6 +236,16 @@ private fun contrastSafe(
     return contrastSafeIdentity(lch.lightness, color.relativeChroma(), lch.hue, backgrounds, isDark)
 }
 
+private fun overrideNickColor(
+    value: Int,
+    isDark: Boolean,
+    palette: NickColorPalette,
+    themeColors: List<Color>,
+    backgrounds: List<Color>,
+): Color =
+    NickColorOverride.toArgb(value)?.let { contrastSafe(Color(it), backgrounds, isDark) }
+        ?: hueColor(value, isDark, palette, themeColors, backgrounds)
+
 /**
  * Per-nick color scheme resolved once per theme and passed via [LocalNickColors]. Wraps the pure
  * resolvers so components only need `LocalNickColors.current.nick(...)` / `.avatar(...)`.
@@ -243,12 +254,12 @@ private fun contrastSafe(
 class NickColorScheme(
     val enabled: Boolean,
     val palette: NickColorPalette,
-    val overrides: Map<String, Int>, // normalized nick -> hue
+    val overrides: Map<String, Int>, // normalized nick -> hue or tagged exact color
     val isDark: Boolean,
     private val textBackgrounds: List<Color> = emptyList(),
     private val themeColors: List<Color> = emptyList(),
     /** The active theme's published accent palette; empty for schemes that declare none. */
-    private val identityPalette: List<Color> = emptyList(),
+    internal val identityPalette: List<Color> = emptyList(),
     private val adjustPaletteReadability: Boolean = false,
 ) {
     // Memoize per nick: a new scheme instance is created whenever palette/overrides/theme change,
@@ -261,7 +272,7 @@ class NickColorScheme(
         fillCache.getOrPut(nick) {
             val override = overrides[normalizeNick(nick)]
             if (override != null) {
-                hueFill(override, isDark, palette, themeColors)
+                NickColorOverride.toArgb(override)?.let { Color(it) } ?: hueFill(override, isDark, palette, themeColors)
             } else {
                 paletteNickFill(nick, isDark, palette, themeColors, identityPalette)
             }
@@ -271,7 +282,7 @@ class NickColorScheme(
         textCache.getOrPut(nick) {
             val override = overrides[normalizeNick(nick)]
             if (override != null) {
-                hueColor(override, isDark, palette, themeColors, textBackgrounds)
+                overrideNickColor(override, isDark, palette, themeColors, textBackgrounds)
             } else {
                 paletteNickColor(nick, isDark, palette, themeColors, textBackgrounds, identityPalette, adjustPaletteReadability)
             }
@@ -326,7 +337,7 @@ val LocalNickColors: ProvidableCompositionLocal<NickColorScheme> =
         )
     }
 
-/** Resolution order: disabled -> fallback; override hue -> hueColor; else palette hash. Pure. */
+/** Resolution order: disabled -> fallback; explicit override -> readable color; else palette hash. */
 fun resolveNickColor(
     nick: String,
     isDark: Boolean,
@@ -342,7 +353,7 @@ fun resolveNickColor(
     if (!enabled) return fallback
     val override = overrides[normalizeNick(nick)]
     return if (override != null) {
-        hueColor(override, isDark, palette, themeColors, backgrounds)
+        overrideNickColor(override, isDark, palette, themeColors, backgrounds)
     } else {
         paletteNickColor(nick, isDark, palette, themeColors, backgrounds, identityPalette, adjustPaletteReadability)
     }

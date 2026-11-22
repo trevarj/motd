@@ -22,7 +22,7 @@ enum class NickListKind { FRIENDS, FOOLS, COLORS }
 data class ManageNicksUiState(
     val kind: NickListKind = NickListKind.FRIENDS,
     val nicks: List<String> = emptyList(), // sorted ascending
-    val overrides: Map<String, Int> = emptyMap(), // COLORS: nick -> hue
+    val overrides: Map<String, Int> = emptyMap(), // COLORS: nick -> hue or tagged exact color
     val foolsMode: FoolsMode = FoolsMode.DIMMED,
     val foolPreferences: Map<String, FoolPreferences> = emptyMap(),
 )
@@ -84,7 +84,7 @@ class ManageNicksViewModel
                 when (kind.value) {
                     NickListKind.FRIENDS -> settingsRepository.setFriend(nick, true)
                     NickListKind.FOOLS -> settingsRepository.setFool(nick, true)
-                    NickListKind.COLORS -> Unit // hue set via setHue once a swatch is picked
+                    NickListKind.COLORS -> Unit // override set once a swatch is picked
                 }
             }
 
@@ -97,11 +97,11 @@ class ManageNicksViewModel
                 }
             }
 
-        fun setHue(
+        fun setColor(
             nick: String,
-            hue: Int,
+            value: Int,
         ) = viewModelScope.launch {
-            settingsRepository.setNickColorOverride(nick, hue)
+            settingsRepository.setNickColorOverride(nick, value)
         }
 
         fun updateFoolPreferences(

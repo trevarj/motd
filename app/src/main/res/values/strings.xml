@@ -2149,6 +2149,8 @@
     <string name="settings_wallpaper_color_invalid">Enter six hexadecimal digits, for example #FFFFFF.</string>
     <string name="settings_wallpaper_color_preview">Wallpaper preview</string>
     <string name="settings_wallpaper_color_apply">Apply</string>
+    <string name="theme_color_swatches">Current theme colors</string>
+    <string name="theme_color_swatch_description">%1$s, %2$s</string>
 
     <string name="settings_app_icon_section">App icon</string>
     <string name="settings_app_icon_default">Teal ceramic</string>

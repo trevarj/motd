@@ -6,7 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** Round-4 nick-set / hue-override JSON codecs + normalizeNick (pure, no DataStore). */
+/** Nick list and color override JSON codecs + normalizeNick (pure, no DataStore). */
 class NickJsonCodecTest {
     @Test
     fun nickSet_roundTrips() {
@@ -27,29 +27,33 @@ class NickJsonCodecTest {
     }
 
     @Test
-    fun hueOverrides_roundTrips() {
-        val map = mapOf("alice" to 0, "bob" to 210, "carol" to 359)
-        assertEquals(map, decodeHueOverrides(encodeHueOverrides(map)))
+    fun nickColorOverrides_roundTripHuesAndExactColors() {
+        val argb = 0xFF123456.toInt()
+        val exact = NickColorOverride.fromArgb(argb)
+        val map = mapOf("alice" to 0, "bob" to 210, "carol" to 359, "dave" to exact)
+        val decoded = decodeNickColorOverrides(encodeNickColorOverrides(map))
+        assertEquals(map, decoded)
+        assertEquals(argb, decoded["dave"]?.let(NickColorOverride::toArgb))
     }
 
     @Test
-    fun hueOverrides_nullAndGarbage_giveEmpty() {
-        assertEquals(emptyMap<String, Int>(), decodeHueOverrides(null))
-        assertEquals(emptyMap<String, Int>(), decodeHueOverrides("[]")) // array, not object
-        assertEquals(emptyMap<String, Int>(), decodeHueOverrides("garbage"))
+    fun nickColorOverrides_nullAndGarbage_giveEmpty() {
+        assertEquals(emptyMap<String, Int>(), decodeNickColorOverrides(null))
+        assertEquals(emptyMap<String, Int>(), decodeNickColorOverrides("[]")) // array, not object
+        assertEquals(emptyMap<String, Int>(), decodeNickColorOverrides("garbage"))
     }
 
     @Test
-    fun hueOverrides_coerceIntoRange() {
+    fun nickColorOverrides_clampUntaggedValues() {
         // Encoding clamps; decoding also clamps so stray out-of-range JSON is tolerated.
-        val encoded = encodeHueOverrides(mapOf("a" to 400, "b" to -30, "c" to 180))
-        val decoded = decodeHueOverrides(encoded)
+        val encoded = encodeNickColorOverrides(mapOf("a" to 400, "b" to -30, "c" to 180))
+        val decoded = decodeNickColorOverrides(encoded)
         assertEquals(359, decoded["a"])
         assertEquals(0, decoded["b"])
         assertEquals(180, decoded["c"])
 
         // Direct decode of hand-written out-of-range hues also coerces.
-        val raw = decodeHueOverrides("{\"x\":500,\"y\":-5}")
+        val raw = decodeNickColorOverrides("{\"x\":500,\"y\":-5}")
         assertEquals(359, raw["x"])
         assertEquals(0, raw["y"])
     }

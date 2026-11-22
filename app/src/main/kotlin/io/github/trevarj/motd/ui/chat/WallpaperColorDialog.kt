@@ -9,6 +9,7 @@ import androidx.compose.foundation.gestures.drag
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,6 +49,7 @@ import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.DialogProperties
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.ui.components.ThemeColorSwatches
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import java.util.Locale
 import kotlin.math.PI
@@ -95,20 +97,25 @@ internal fun WallpaperColorDialog(
         hex = wallpaperColorHex(AndroidColor.HSVToColor(floatArrayOf(hue, saturation, brightness)))
     }
 
+    fun setHex(value: String) {
+        hex = value
+        useDefault = false
+        parseColorHex(value)?.let { parsedColor ->
+            val hsv = FloatArray(3)
+            AndroidColor.colorToHSV(parsedColor, hsv)
+            hue = hsv[0]
+            saturation = hsv[1]
+            brightness = hsv[2]
+        }
+    }
+
     AlertDialog(
         onDismissRequest = onDismiss,
         modifier = Modifier.padding(horizontal = 16.dp).testTag("settings_wallpaper_color_dialog"),
         title = { Text(label) },
         properties = DialogProperties(usePlatformDefaultWidth = false),
         text = {
-            Column(
-                Modifier
-                    .fillMaxWidth()
-                    .heightIn(max = 520.dp)
-                    .verticalScroll(rememberScrollState())
-                    .testTag("settings_wallpaper_color_list"),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
+            ColorEditorScrollColumn(Modifier.testTag("settings_wallpaper_color_list")) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     Box(Modifier.size(32.dp).background(Color(draft ?: defaultColor), CircleShape).border(1.dp, MaterialTheme.colorScheme.outline, CircleShape))
                     Text(if (useDefault) defaultLabel else wallpaperColorHex(draft ?: color))
@@ -119,6 +126,7 @@ internal fun WallpaperColorDialog(
                         contentDescription = previewLabel
                     },
                 )
+                ThemeColorSwatches(selected = parsed.takeUnless { useDefault }, onSelect = { setHex(wallpaperColorHex(it)) })
                 ColorWheel(hue, saturation, onChange = { nextHue, nextSaturation ->
                     hue = nextHue
                     saturation = nextSaturation
@@ -156,17 +164,7 @@ internal fun WallpaperColorDialog(
                 }
                 OutlinedTextField(
                     value = hex,
-                    onValueChange = { value ->
-                        hex = value
-                        useDefault = false
-                        parseColorHex(value)?.let { parsedColor ->
-                            val hsv = FloatArray(3)
-                            AndroidColor.colorToHSV(parsedColor, hsv)
-                            hue = hsv[0]
-                            saturation = hsv[1]
-                            brightness = hsv[2]
-                        }
-                    },
+                    onValueChange = ::setHex,
                     label = { Text(stringResource(R.string.settings_wallpaper_color_hex)) },
                     isError = parsed == null,
                     supportingText = { if (parsed == null) Text(stringResource(R.string.settings_wallpaper_color_invalid)) },
@@ -211,6 +209,22 @@ internal fun WallpaperColorDialog(
                 Text(stringResource(R.string.settings_wallpaper_color_apply))
             }
         },
+    )
+}
+
+@Composable
+internal fun ColorEditorScrollColumn(
+    modifier: Modifier = Modifier,
+    content: @Composable ColumnScope.() -> Unit,
+) {
+    Column(
+        modifier
+            .fillMaxWidth()
+            .heightIn(max = 520.dp)
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+        content = content,
     )
 }
 
@@ -262,20 +276,23 @@ internal fun ColorWheel(
                 contentDescription = wheelLabel
                 stateDescription = "$hueState, $saturationState"
             }.pointerInput(Unit) {
-                fun select(position: Offset) {
-                    val center = Offset(size.width / 2f, size.height / 2f)
-                    val offset = position - center
-                    val radius = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
-                    val degrees = ((atan2(offset.y, offset.x) * 180f / PI.toFloat()) + 360f) % 360f
-                    change(degrees, (offset.getDistance() / radius).coerceIn(0f, 1f))
-                }
                 awaitEachGesture {
                     val down = awaitFirstDown()
-                    select(down.position)
+                    val center = Offset(size.width / 2f, size.height / 2f)
+                    val radius = (minOf(size.width, size.height) / 2f).coerceAtLeast(1f)
+                    if ((down.position - center).getDistance() > radius) return@awaitEachGesture
+
+                    fun select(position: Offset) {
+                        val offset = position - center
+                        val degrees = ((atan2(offset.y, offset.x) * 180f / PI.toFloat()) + 360f) % 360f
+                        change(degrees, (offset.getDistance() / radius).coerceIn(0f, 1f))
+                    }
+
                     down.consume()
+                    select(down.position)
                     drag(down.id) {
-                        select(it.position)
                         it.consume()
+                        select(it.position)
                     }
                 }
             },
