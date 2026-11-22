@@ -5,8 +5,10 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.view.Window
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -73,6 +75,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
 import androidx.core.graphics.Insets
 import androidx.core.view.ViewCompat
+import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
@@ -121,6 +124,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
+import org.robolectric.shadows.ShadowDialog
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -1336,6 +1340,65 @@ class ComposerUiTest {
             assertEquals("first\nx", formatted.visibleText)
             assertEquals(IrcColor.Numeric(4), formatted.stateAtVisible(6).foreground)
         }
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "en-w411dp-h891dp-night")
+    fun colorSheetUpdatesItsOwnSystemBarsWhenPaletteChanges() {
+        val theme = mutableStateOf(ColorThemePreset.LIGHT)
+        lateinit var host: Window
+        compose.setContent {
+            host = requireNotNull(LocalActivity.current).window
+            MotdTheme(themePreset = theme.value, dynamicColor = false) {
+                Composer(
+                    value = TextFieldValue("draft", TextRange(5)),
+                    onValueChange = {},
+                    onSend = {},
+                    enabled = true,
+                    ircFormattingEnabled = true,
+                )
+            }
+        }
+
+        fun assertHostBarsUnchanged() {
+            val bars = WindowCompat.getInsetsController(host, host.decorView)
+            assertEquals(false, bars.isAppearanceLightStatusBars)
+            assertEquals(true, bars.isAppearanceLightNavigationBars)
+            assertEquals(true, host.isNavigationBarContrastEnforced)
+        }
+
+        compose.runOnIdle {
+            val bars = WindowCompat.getInsetsController(host, host.decorView)
+            bars.isAppearanceLightStatusBars = false
+            bars.isAppearanceLightNavigationBars = true
+            host.isNavigationBarContrastEnforced = true
+        }
+        compose.onNodeWithTag("chat_composer_format_expand").performClick()
+        compose.onNodeWithTag("chat_format_color").performScrollTo().performClick()
+        val sheet = compose.onNodeWithTag("chat_composer_color_sheet").assertIsDisplayed()
+        val dialog = compose.runOnIdle { checkNotNull(ShadowDialog.getLatestDialog()) }
+        val window = checkNotNull(dialog.window)
+
+        fun assertDialogBars(light: Boolean) {
+            assertTrue(dialog.isShowing)
+            assertSame(window, ShadowDialog.getLatestDialog().window)
+            assertNotSame(host, window)
+            val bars = WindowCompat.getInsetsController(window, window.decorView)
+            assertEquals(light, bars.isAppearanceLightStatusBars)
+            assertEquals(light, bars.isAppearanceLightNavigationBars)
+            assertEquals(false, window.isNavigationBarContrastEnforced)
+            assertHostBarsUnchanged()
+        }
+
+        compose.runOnIdle {
+            assertDialogBars(light = true)
+            theme.value = ColorThemePreset.DARK
+        }
+        sheet.assertIsDisplayed()
+        compose.runOnIdle { assertDialogBars(light = false) }
+        compose.onNodeWithTag("chat_composer_color_apply").performClick()
+        sheet.assertDoesNotExist()
+        compose.runOnIdle { assertHostBarsUnchanged() }
     }
 
     @Test

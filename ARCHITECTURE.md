@@ -423,6 +423,8 @@ flowchart TD
   A zero-height sheet marker resolves the native moving Surface so backing includes handle/insets,
   while M3 retains all placement, IME, focus, scrim and gesture behavior. Cross-window consumers
   invalidate only after producer frame commits; no idle redraw loop or bitmap copies are used.
+  The composer color sheet applies the app palette's system-bar policy inside
+  its own dialog window, including when the palette changes while open.
   Appearance also selects Material (the exact existing Filled/Outlined/AutoMirrored
   variants) or Lucide UI icons. The shared native `UiIcon` leaf resolves cached vectors
   at composition time, so remembered action descriptors and persisted gesture icon
