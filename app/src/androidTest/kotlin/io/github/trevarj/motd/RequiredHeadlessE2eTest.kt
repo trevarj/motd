@@ -5,6 +5,8 @@ import android.app.Notification
 import android.app.NotificationManager
 import android.app.RemoteInput
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import androidx.compose.ui.geometry.Offset
@@ -35,6 +37,7 @@ import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.dp
 import androidx.core.app.NotificationCompat
+import androidx.core.content.FileProvider
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -469,6 +472,45 @@ class RequiredHeadlessE2eTest {
                     ),
             )
             milestones.record("filehost_audio_rendered", "buffer=$bufferId")
+        } finally {
+            fixture.delete()
+        }
+        assertSharedImageReviewReturnsToUpload(bufferId)
+    }
+
+    private fun assertSharedImageReviewReturnsToUpload(bufferId: Long) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val directory = File(context.cacheDir, "camera").apply { mkdirs() }
+        val fixture = File.createTempFile("required-review-", ".png", directory)
+        try {
+            val bitmap = Bitmap.createBitmap(96, 54, Bitmap.Config.ARGB_8888)
+            try {
+                bitmap.eraseColor(Color.BLUE)
+                fixture.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+            } finally {
+                bitmap.recycle()
+            }
+            val source = FileProvider.getUriForFile(context, "${context.packageName}.camera", fixture)
+            checkNotNull(scenario.scenario).onActivity { activity ->
+                activity.startActivity(
+                    Intent(Intent.ACTION_SEND)
+                        .setClass(activity, MainActivity::class.java)
+                        .setType("image/png")
+                        .putExtra(Intent.EXTRA_STREAM, source)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                )
+            }
+            val chat = ChatRobot(compose)
+            chat.awaitTag("share_picker_list")
+            ChatListRobot(compose).open(bufferId)
+            chat.click("attachment_thumbnail")
+            chat.assertDisplayed("image_viewer_image")
+            chat.click("attachment_review_close")
+            chat.awaitTagGone("attachment_review_dialog")
+            chat.assertDisplayed("attachment_thumbnail")
+            chat.assertDisplayed("attachment_upload")
+            compose.onNodeWithTag("chat_composer_upload_preview", useUnmergedTree = true).assertDoesNotExist()
+            milestones.record("attachment_image_review_returned", "buffer=$bufferId")
         } finally {
             fixture.delete()
         }

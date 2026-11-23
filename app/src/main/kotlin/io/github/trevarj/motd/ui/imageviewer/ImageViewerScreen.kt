@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.imageviewer
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
 import android.os.Build
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -10,8 +11,11 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawingPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Share
@@ -35,6 +39,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -42,11 +47,18 @@ import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.SemanticsPropertyReceiver
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.compose.ui.window.DialogWindowProvider
+import androidx.core.view.WindowCompat
 import coil.imageLoader
+import coil.request.CachePolicy
 import coil.request.ImageRequest
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.audio.networkMediaData
 import io.github.trevarj.motd.ui.components.LocalNetworkMediaHttp
 import io.github.trevarj.motd.ui.theme.MotdMotion
@@ -182,27 +194,6 @@ internal fun ImageViewerContent(
     var feedback by remember { mutableStateOf<Int?>(null) }
     var feedbackTag by remember { mutableStateOf(IMAGE_VIEWER_SAVE_FEEDBACK_TAG) }
     var mediaInProgress by remember { mutableStateOf(false) }
-    // Telephoto reports when an image is displayed but not why one failed, so the request listener
-    // is the only signal for the error affordance. Both reset whenever the request changes.
-    var loadFailed by remember(context, model) { mutableStateOf(false) }
-    val request =
-        remember(context, model) {
-            model
-                .newBuilder(context)
-                .crossfade(true)
-                .listener(
-                    onError = { _, _ -> loadFailed = true },
-                    onSuccess = { _, _ -> loadFailed = false },
-                ).build()
-        }
-    val zoomableState = state.zoomableState
-
-    // Coil can report success while Telephoto's sub-sampling decode still fails silently, leaving
-    // the spinner up forever. Bound the wait so the error affordance is always reachable.
-    LaunchedEffect(request) {
-        delay(IMAGE_DISPLAY_TIMEOUT_MS)
-        if (!state.isImageDisplayed) loadFailed = true
-    }
 
     Box(
         modifier =
@@ -211,38 +202,7 @@ internal fun ImageViewerContent(
                 .background(Color.Black),
         contentAlignment = Alignment.Center,
     ) {
-        ZoomableAsyncImage(
-            model = request,
-            contentDescription = stringResource(R.string.image_viewer_content_description),
-            state = state,
-            // The app-wide loader carries the GIF decoders registered in MotdApplication.
-            imageLoader = context.imageLoader,
-            contentScale = ContentScale.Fit,
-            onClick = { chromeVisible = !chromeVisible },
-            onDoubleClick = doubleTapZoom,
-            modifier =
-                Modifier
-                    .fillMaxSize()
-                    // Read inside the semantics lambda so gesture frames invalidate semantics only,
-                    // instead of recomposing the whole screen.
-                    .semantics { imageViewerTransform = zoomableState.currentTransform() }
-                    .testTag(IMAGE_VIEWER_IMAGE_TAG),
-        )
-
-        // Loading / error affordances.
-        when {
-            loadFailed -> {
-                Text(
-                    text = stringResource(R.string.image_viewer_load_failed),
-                    color = Color.White,
-                    style = MaterialTheme.typography.bodyMedium,
-                )
-            }
-
-            !state.isImageDisplayed -> {
-                CircularProgressIndicator(color = Color.White)
-            }
-        }
+        FittedZoomableImage(model, state, onClick = { chromeVisible = !chromeVisible })
 
         // Fade only: the chrome overlays the image, so the default expand/shrink would clip the
         // bar diagonally toward its top-start corner instead of dissolving in place.
@@ -369,6 +329,126 @@ internal fun ImageViewerContent(
                             .testTag(feedbackTag),
                 )
             }
+        }
+    }
+}
+
+@Composable
+internal fun LocalImageReviewDialog(
+    uri: Uri,
+    onDismiss: () -> Unit,
+) {
+    require(uri.isLocalMediaUri())
+    val context = LocalContext.current
+    val request =
+        remember(context, uri) {
+            ImageRequest
+                .Builder(context)
+                .data(uri)
+                .networkCachePolicy(CachePolicy.DISABLED)
+                .build()
+        }
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false, decorFitsSystemWindows = false),
+    ) {
+        val view = LocalView.current
+        LaunchedEffect(view) {
+            val window = (view.parent as? DialogWindowProvider)?.window ?: return@LaunchedEffect
+            @Suppress("DEPRECATION")
+            window.statusBarColor = android.graphics.Color.TRANSPARENT
+            @Suppress("DEPRECATION")
+            window.navigationBarColor = android.graphics.Color.TRANSPARENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                window.isNavigationBarContrastEnforced = false
+            }
+            val controller = WindowCompat.getInsetsController(window, view)
+            controller.isAppearanceLightStatusBars = false
+            controller.isAppearanceLightNavigationBars = false
+        }
+        Box(
+            Modifier
+                .fillMaxSize()
+                .background(Color.Black)
+                .safeDrawingPadding()
+                .semantics { testTagsAsResourceId = true }
+                .testTag("attachment_review_dialog"),
+            contentAlignment = Alignment.Center,
+        ) {
+            FittedZoomableImage(request)
+            IconButton(
+                onClick = onDismiss,
+                modifier =
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp)
+                        .background(Color.Black.copy(alpha = 0.72f), CircleShape)
+                        .testTag("attachment_review_close"),
+            ) {
+                Icon(Icons.Filled.Close, stringResource(R.string.upload_review_close), tint = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+private fun FittedZoomableImage(
+    model: ImageRequest,
+    state: ZoomableImageState =
+        rememberZoomableImageState(
+            rememberZoomableState(ZoomSpec(maxZoomFactor = MAX_IMAGE_SCALE)),
+        ),
+    onClick: ((Offset) -> Unit)? = null,
+) {
+    val context = LocalContext.current
+    // Telephoto reports when an image is displayed but not why one failed, so the request listener
+    // is the only signal for the error affordance. Both reset whenever the request changes.
+    var loadFailed by remember(context, model) { mutableStateOf(false) }
+    val request =
+        remember(context, model) {
+            model
+                .newBuilder(context)
+                .crossfade(true)
+                .listener(
+                    onError = { _, _ -> loadFailed = true },
+                    onSuccess = { _, _ -> loadFailed = false },
+                ).build()
+        }
+    val zoomableState = state.zoomableState
+    // Coil can report success while Telephoto's sub-sampling decode still fails silently.
+    LaunchedEffect(request) {
+        delay(IMAGE_DISPLAY_TIMEOUT_MS)
+        if (!state.isImageDisplayed) loadFailed = true
+    }
+
+    ZoomableAsyncImage(
+        model = request,
+        contentDescription = stringResource(R.string.image_viewer_content_description),
+        state = state,
+        // The app-wide loader carries the GIF decoders registered in MotdApplication.
+        imageLoader = context.imageLoader,
+        contentScale = ContentScale.Fit,
+        onClick = onClick,
+        onDoubleClick = doubleTapZoom,
+        modifier =
+            Modifier
+                .fillMaxSize()
+                // Read inside semantics so gesture frames don't recompose the screen.
+                .semantics { imageViewerTransform = zoomableState.currentTransform() }
+                .testTag(IMAGE_VIEWER_IMAGE_TAG),
+    )
+
+    when {
+        loadFailed -> {
+            Text(
+                text = stringResource(R.string.image_viewer_load_failed),
+                color = Color.White,
+                style = MaterialTheme.typography.bodyMedium,
+            )
+        }
+
+        !state.isImageDisplayed -> {
+            CircularProgressIndicator(color = Color.White)
         }
     }
 }

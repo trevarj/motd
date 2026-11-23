@@ -44,7 +44,7 @@ class AttachmentViewModel
         private val uploader: AttachmentUploader,
     ) : ViewModel() {
         val config = prefs.config.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PasteBackendConfig())
-        val recent = prefs.recentUploads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+        val recent = prefs.recentUploads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), emptyList())
         private val _progress = MutableStateFlow<UploadProgress?>(null)
         val progress: StateFlow<UploadProgress?> = _progress.asStateFlow()
         private val _error = MutableStateFlow<AttachmentError?>(null)

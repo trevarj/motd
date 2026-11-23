@@ -204,6 +204,7 @@ import androidx.paging.compose.collectAsLazyPagingItems
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.attachment.AttachmentBackend
+import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
@@ -259,6 +260,7 @@ import io.github.trevarj.motd.dickord.isDiscordDirectMessage
 import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.canSendReactionTags
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ChannelWatchDuration
@@ -813,6 +815,7 @@ fun ChatScreen(
         consumeSharedFile = viewModel::consumeSharedFile,
         consumeAttachmentRequest = viewModel::consumeAttachmentRequest,
         attachmentSheetRequests = viewModel.attachmentSheetRequests,
+        attachmentViewModel = hiltViewModel(),
         composerDraft = composerDraft,
         scheduledComposer = scheduledComposer,
         aiTextState = aiTextState,
@@ -1165,6 +1168,43 @@ fun ChatScreen(
     }
 }
 
+private fun String.containsDraftUploadUrl(url: String): Boolean {
+    val start = indexOf(url)
+    if (start < 0) return false
+    val end = start + url.length
+    // The usual standalone link needs no parsing. Use chat's URL boundaries for prose punctuation.
+    if ((start == 0 || this[start - 1].isWhitespace()) && (end == length || this[end].isWhitespace())) return true
+    val text = if (containsIrcFormatting(this)) plainIrcText(this) else this
+    return uriTokens(text).any { token ->
+        val candidate = token.value
+        candidate == url || (candidate.startsWith(url) && trimUrl(candidate) == url)
+    }
+}
+
+@Composable
+private fun UploadedImageDraftCard(record: UploadRecord) {
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("chat_composer_upload_preview"),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        Row(
+            modifier = Modifier.padding(6.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            UploadRecordPreview(record, Modifier.size(40.dp).testTag("chat_composer_upload_thumbnail"))
+            Text(
+                record.url,
+                modifier = Modifier.weight(1f).testTag("chat_composer_upload_url"),
+                style = MaterialTheme.typography.bodySmall,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 internal fun ChatContent(
@@ -1290,6 +1330,7 @@ internal fun ChatContent(
     consumeAttachmentRequest: () -> Boolean = { false },
     // The same request aimed at this conversation while it is already open; see ChatViewModel.
     attachmentSheetRequests: Flow<Unit> = emptyFlow(),
+    attachmentViewModel: AttachmentViewModel? = null,
     composerDraft: ComposerDraftState = ComposerDraftState(),
     aiTextState: AiTextUiState = AiTextUiState.Closed,
     aiTextEnabled: Boolean = false,
@@ -1623,6 +1664,12 @@ internal fun ChatContent(
         var composerText by remember(traceBufferId) {
             mutableStateOf(TextFieldValue(""))
         }
+        val latestAttachmentRoom by rememberUpdatedState(traceBufferId)
+        val uploadedImage =
+            key(traceBufferId) {
+                // Save only the receipt; the preview always comes from live upload history.
+                rememberSaveable { mutableStateOf<Pair<String, Long>?>(null) }
+            }
         var pendingEbooksRequestRevision by remember(traceBufferId) { mutableStateOf<Long?>(null) }
         var ebooksHelpOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
         var ebooksResults by remember(eligibleEbooksRoomId) { mutableStateOf<List<EbooksResult>?>(null) }
@@ -4340,6 +4387,27 @@ internal fun ChatContent(
                                             )
                                         }
                                     }
+                                    uploadedImage.value?.let { receipt ->
+                                        val (url, uploadedAt) = receipt
+                                        val containsUpload =
+                                            remember(composerText.text, url) {
+                                                composerText.text.containsDraftUploadUrl(url)
+                                            }
+                                        if (containsUpload && attachmentViewModel != null) {
+                                            val recent by attachmentViewModel.recent.collectAsStateWithLifecycle()
+                                            recent
+                                                .firstOrNull { it.url == url && it.uploadedAt == uploadedAt }
+                                                ?.let { UploadedImageDraftCard(it) }
+                                        } else if (!containsUpload) {
+                                            LaunchedEffect(receipt, composerDraft.hydrated, composerDraft.text) {
+                                                // A send only blanks the field optimistically. Keep the receipt
+                                                // if the draft can still be restored after a rejected send.
+                                                if (composerDraft.hydrated && !composerDraft.text.containsDraftUploadUrl(url)) {
+                                                    uploadedImage.value = null
+                                                }
+                                            }
+                                        }
+                                    }
                                     Composer(
                                         value = composerText,
                                         onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
@@ -5174,18 +5242,21 @@ internal fun ChatContent(
                     state.buffer?.type == BufferType.QUERY &&
                         state.connState is IrcClientState.Ready,
                 onDismiss = {
+                    if (traceBufferId != latestAttachmentRoom) return@AttachmentSheets
                     attachmentSheetOpen = false
                     uploadCurrentDraftDirectly = false
                     sharedFile = null
                 },
                 onOpenNetworkSettings = onOpenNetworkSettings,
                 onInsertUrl = {
+                    if (traceBufferId != latestAttachmentRoom) return@AttachmentSheets
                     composerText =
                         io.github.trevarj.motd.ui.components
                             .insertAtCursor(composerText, it)
                     onDraftChanged(composerText.text)
                 },
                 onReplaceDraft = {
+                    if (traceBufferId != latestAttachmentRoom) return@AttachmentSheets
                     composerText =
                         TextFieldValue(
                             it,
@@ -5195,6 +5266,15 @@ internal fun ChatContent(
                     onDraftChanged(composerText.text)
                 },
                 onDirectFile = onSendDccFile,
+                viewModel = attachmentViewModel ?: hiltViewModel(),
+                onUploaded = { record ->
+                    if (
+                        traceBufferId != null && traceBufferId == latestAttachmentRoom &&
+                        record.mimeType?.startsWith("image/", ignoreCase = true) == true
+                    ) {
+                        uploadedImage.value = record.url to record.uploadedAt
+                    }
+                },
             )
         }
         if (longDraftPrompt) {

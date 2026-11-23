@@ -131,6 +131,9 @@ class AttachmentPrefsImpl
                             put("at", r.uploadedAt)
                             put("token", r.deletionToken)
                             put("endpoint", r.endpoint)
+                            r.preview?.takeIf { it.isBounded() }?.let {
+                                put("preview", json.encodeToJsonElement(LocalUploadPreview.serializer(), it))
+                            }
                         },
                     )
                 }
@@ -158,6 +161,11 @@ class AttachmentPrefsImpl
                             o["at"]?.jsonPrimitive?.longOrNull ?: 0,
                             o["token"]?.jsonPrimitive?.contentOrNull,
                             endpoint,
+                            o["preview"]?.let { encoded ->
+                                runCatching { json.decodeFromJsonElement(LocalUploadPreview.serializer(), encoded) }
+                                    .getOrNull()
+                                    ?.takeIf { it.isBounded() }
+                            },
                         )
                     }.take(MAX_UPLOAD_HISTORY)
             }.getOrDefault(emptyList())

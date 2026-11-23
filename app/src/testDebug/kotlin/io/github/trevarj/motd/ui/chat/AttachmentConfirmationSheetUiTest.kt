@@ -7,7 +7,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.net.Uri
+import android.util.Base64
 import androidx.activity.compose.LocalActivityResultRegistryOwner
 import androidx.activity.result.ActivityResultRegistry
 import androidx.activity.result.ActivityResultRegistryOwner
@@ -24,26 +26,34 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.app.ActivityOptionsCompat
@@ -60,6 +70,7 @@ import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
+import io.github.trevarj.motd.attachment.LocalUploadPreview
 import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.SOJU_FILEHOST_TOKEN
@@ -72,6 +83,10 @@ import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.components.Composer
+import io.github.trevarj.motd.ui.imageviewer.IMAGE_VIEWER_COPY_BUTTON_TAG
+import io.github.trevarj.motd.ui.imageviewer.IMAGE_VIEWER_IMAGE_TAG
+import io.github.trevarj.motd.ui.imageviewer.IMAGE_VIEWER_SAVE_BUTTON_TAG
+import io.github.trevarj.motd.ui.imageviewer.ImageViewerTransformKey
 import io.github.trevarj.motd.ui.settings.AttachmentSettingsViewModel
 import io.github.trevarj.motd.ui.settings.UploadsSettingsContent
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -96,8 +111,10 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.IOException
+import java.io.RandomAccessFile
 import java.security.KeyStore
 import java.util.concurrent.TimeUnit
 import javax.net.ssl.HttpsURLConnection
@@ -296,6 +313,76 @@ class AttachmentConfirmationSheetUiTest {
         compose.onNodeWithText("photo.png").assertDoesNotExist()
         compose.onNodeWithText("text.txt").assertDoesNotExist()
         assertEquals(emptyList<UploadRecord>(), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+    }
+
+    @Test
+    fun recentUploadsRenderLocalMediaTextAndLegacyMetadata() {
+        val thumbnail =
+            ByteArrayOutputStream().use { out ->
+                Bitmap.createBitmap(24, 16, Bitmap.Config.ARGB_8888).also { bitmap ->
+                    bitmap.eraseColor(Color.RED)
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    bitmap.recycle()
+                }
+                Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)
+            }
+
+        fun upload(
+            name: String,
+            mime: String,
+            preview: LocalUploadPreview? = null,
+        ) = UploadRecord("https://preview.invalid/$name", AttachmentBackend.CRAFTERBIN, name, mime, 2048L, preview = preview)
+
+        val image = upload("red.png", "image/png", LocalUploadPreview(thumbnailBase64 = thumbnail))
+        val video = upload("clip.mp4", "video/mp4", LocalUploadPreview(thumbnailBase64 = thumbnail, durationMillis = 12_000))
+        val audio = upload("voice.ogg", "audio/ogg", LocalUploadPreview(durationMillis = 65_000))
+        val text = upload("paste.txt", "text/plain", LocalUploadPreview(textSnippet = "Local preview ✓"))
+        val pdf = upload("notes.pdf", "application/pdf", LocalUploadPreview(thumbnailBase64 = thumbnail))
+        val legacy = upload("old.zip", "application/zip")
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking {
+            prefs.clearUploadHistory()
+            listOf(image, video, audio, text, pdf, legacy).forEach { prefs.addUpload(it) }
+        }
+        var insertedUrl: String? = null
+        var completed: UploadRecord? = null
+        showConditionalAttachments(prefs = prefs, onInsertUrl = { insertedUrl = it }, onUploaded = { completed = it })
+
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("attachment_record_thumbnail", useUnmergedTree = true).fetchSemanticsNodes().size == 3
+        }
+
+        fun row(record: UploadRecord) = hasTestTag("attachment_recent_row") and hasAnyDescendant(hasText(record.displayName))
+
+        fun view(
+            record: UploadRecord,
+            tag: String,
+        ) = compose.onNode(hasTestTag(tag) and hasAnyAncestor(row(record)), useUnmergedTree = true)
+
+        listOf(image, video, audio, text, pdf, legacy).forEach { record ->
+            compose.onNode(row(record), useUnmergedTree = true).performScrollTo()
+            compose.onNodeWithText("${record.mimeType} • 2.0 KiB", useUnmergedTree = true).assertIsDisplayed()
+            when (record) {
+                image, video, pdf -> view(record, "attachment_record_thumbnail").assertIsDisplayed()
+                else -> view(record, "attachment_record_fallback").assertIsDisplayed()
+            }
+        }
+        view(video, "attachment_recent_duration").performScrollTo().assertTextEquals("0:12")
+        view(audio, "attachment_recent_duration").performScrollTo().assertTextEquals("1:05")
+        view(text, "attachment_recent_text").performScrollTo().assertTextEquals("Local preview ✓")
+        view(text, "attachment_recent_more").performScrollTo().performClick()
+        compose.onNodeWithText(context.getString(R.string.upload_copy_link)).performClick()
+        compose.runOnIdle {
+            val clipboard = context.getSystemService(ClipboardManager::class.java)
+            val clip = requireNotNull(clipboard.primaryClip)
+            assertEquals(text.url, clip.getItemAt(0).text.toString())
+            assertNull(insertedUrl)
+        }
+        compose.onNode(row(pdf), useUnmergedTree = true).performScrollTo().performClick()
+        compose.runOnIdle {
+            assertEquals(pdf.url, insertedUrl)
+            assertNull(completed)
+        }
     }
 
     @Test
@@ -531,6 +618,112 @@ class AttachmentConfirmationSheetUiTest {
     }
 
     @Test
+    fun localImageReviewFitsThenZoomsAndPansWithoutChangingConfirmation() {
+        val file = context.cacheDir.resolve("image-clipboard/attachment-review.png")
+        file.parentFile!!.mkdirs()
+        Bitmap.createBitmap(800, 160, Bitmap.Config.ARGB_8888).also { bitmap ->
+            bitmap.eraseColor(Color.RED)
+            file.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig()) }
+        var uploadAttempts = 0
+        try {
+            showConditionalAttachments(prefs = prefs, onUploadAttempt = { uploadAttempts++ })
+            compose.onNodeWithText(context.getString(R.string.upload_file)).performScrollTo().performClick()
+            returnFromFilePicker(FileProvider.getUriForFile(context, "${context.packageName}.camera", file))
+            compose.onNodeWithTag("attachment_change_destination").performScrollTo().performClick()
+            compose.onNodeWithText(AttachmentBackend.X0_AT.label).performScrollTo().performClick()
+            compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_off_warning)).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithTag("attachment_thumbnail").performScrollTo().performClick()
+            compose.onNodeWithTag("attachment_review_dialog").assertIsDisplayed()
+            val image = compose.onNodeWithTag(IMAGE_VIEWER_IMAGE_TAG)
+
+            fun transform() = image.fetchSemanticsNode().config[ImageViewerTransformKey]
+
+            compose.waitUntil(5_000) { transform().contentBounds.width > 0f }
+            val fitted = transform()
+            val viewport = image.fetchSemanticsNode().layoutInfo
+            assertEquals(1f, fitted.scale, 0.01f)
+            assertEquals(viewport.width.toFloat(), fitted.contentBounds.width, 1f)
+            assertTrue(fitted.contentBounds.top > 0f)
+            assertTrue(fitted.contentBounds.bottom < viewport.height)
+
+            image.performTouchInput { doubleClick() }
+            compose.waitUntil(5_000) { transform().scale > 2f }
+            val zoomed = transform()
+            image.performTouchInput { swipe(center, center - Offset(width / 4f, 0f), durationMillis = 400L) }
+            assertTrue(transform().offset.x < zoomed.offset.x)
+            compose.onNodeWithTag(IMAGE_VIEWER_SAVE_BUTTON_TAG).assertDoesNotExist()
+            compose.onNodeWithTag(IMAGE_VIEWER_COPY_BUTTON_TAG).assertDoesNotExist()
+            compose.onNodeWithContentDescription(context.getString(R.string.image_viewer_share)).assertDoesNotExist()
+            compose.onNodeWithTag("attachment_review_close").performClick()
+
+            compose.onNodeWithTag("attachment_review_dialog").assertDoesNotExist()
+            compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
+            compose.onNodeWithText(file.name).assertExists()
+            compose.onNodeWithText(AttachmentBackend.X0_AT.label).assertExists()
+            compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().assertIsOff()
+            compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+            compose.runOnIdle { assertEquals(0, uploadAttempts) }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
+    fun oversizedAttachmentSwitchesToLargerDestinationAndRetryChecksLiveCap() {
+        val mib = 1024L * 1024
+        val file = context.cacheDir.resolve("attachment-oversized.bin")
+        RandomAccessFile(file, "rw").use { it.setLength(32 * mib) }
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking {
+            prefs.setConfig(PasteBackendConfig(backend = AttachmentBackend.X0_AT, sizeLimitBytes = 64 * mib))
+        }
+        var uploadAttempts = 0
+
+        fun limitError(cap: String) = context.getString(R.string.upload_over_size_limit, "32.0 MiB", cap)
+
+        try {
+            val attachments =
+                showConditionalAttachments(
+                    prefs = prefs,
+                    uploadFailure = { IOException("Rejected") },
+                    onUploadAttempt = { uploadAttempts++ },
+                    expectedUploadBackend = AttachmentBackend.X0_AT,
+                )
+            compose.onNodeWithText(context.getString(R.string.upload_file)).performClick()
+            returnFromFilePicker(Uri.fromFile(file))
+            compose.onNodeWithTag("attachment_change_destination").performScrollTo().performClick()
+            compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.label).performScrollTo().performClick()
+            compose.onNodeWithTag("attachment_size_limit_error").assertIsDisplayed().assertTextEquals(limitError("25.0 MiB"))
+            compose.onNodeWithTag("attachment_upload").assertIsNotEnabled()
+            compose.runOnIdle { assertEquals(0, uploadAttempts) }
+
+            compose.onNodeWithTag("attachment_change_destination").performScrollTo().performClick()
+            compose.onNodeWithText(AttachmentBackend.X0_AT.label).performScrollTo().performClick()
+            compose.onNodeWithTag("attachment_size_limit_error").assertDoesNotExist()
+            compose.onNodeWithTag("attachment_upload").assertIsEnabled().performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText("Rejected").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText("Rejected").assertIsDisplayed()
+
+            runBlocking { prefs.updateConfig { it.copy(sizeLimitBytes = 30 * mib) } }
+            compose.waitUntil(5_000) { compose.runOnIdle { attachments.config.value.sizeLimitBytes == 30 * mib } }
+            compose.onNodeWithText(context.getString(R.string.upload_retry)).performClick()
+            compose.onNodeWithTag("attachment_size_limit_error").assertIsDisplayed().assertTextEquals(limitError("30.0 MiB"))
+            compose.onNodeWithTag("attachment_upload").assertIsNotEnabled()
+            compose.onNodeWithText(AttachmentBackend.X0_AT.label).assertIsDisplayed()
+            compose.runOnIdle { assertEquals(1, uploadAttempts) }
+        } finally {
+            file.delete()
+        }
+    }
+
+    @Test
     fun imageDocumentThumbnailTracksMimeWithoutStartingUpload() {
         val file = context.cacheDir.resolve("document-preview.png")
         Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).also { bitmap ->
@@ -614,7 +807,10 @@ class AttachmentConfirmationSheetUiTest {
         pasteIntoComposer: Boolean = false,
         onUploadAttempt: () -> Unit = {},
         prefs: AttachmentPrefs? = null,
-    ) {
+        expectedUploadBackend: AttachmentBackend = AttachmentBackend.SOJU_FILEHOST,
+        onInsertUrl: (String) -> Unit = {},
+        onUploaded: ((UploadRecord) -> Unit)? = null,
+    ): AttachmentViewModel {
         val viewModel =
             AttachmentViewModel(
                 prefs =
@@ -645,7 +841,7 @@ class AttachmentConfirmationSheetUiTest {
                             } else {
                                 flow {
                                     assertEquals(networkId, context.networkId)
-                                    assertEquals(AttachmentBackend.SOJU_FILEHOST, config.backend)
+                                    assertEquals(expectedUploadBackend, config.backend)
                                     throw uploadFailure()
                                 }
                             }
@@ -693,11 +889,12 @@ class AttachmentConfirmationSheetUiTest {
                                 sharedFile = pastedFile,
                                 directFileTransferAvailable = directFileTransferAvailable,
                                 onDismiss = { open = false },
-                                onInsertUrl = {},
+                                onInsertUrl = onInsertUrl,
                                 onReplaceDraft = {},
                                 onOpenNetworkSettings = onOpenNetworkSettings,
                                 onDirectFile = { directFile = it },
                                 viewModel = viewModel,
+                                onUploaded = onUploaded,
                             )
                         }
                     }
@@ -705,6 +902,7 @@ class AttachmentConfirmationSheetUiTest {
                 }
             }
         }
+        return viewModel
     }
 
     private fun returnFromFilePicker(uri: Uri?) {

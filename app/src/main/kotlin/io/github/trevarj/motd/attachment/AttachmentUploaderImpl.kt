@@ -97,37 +97,40 @@ class AttachmentUploaderImpl
                     val progress: suspend (Long, Long?) -> Unit = { sent, total ->
                         send(UploadProgress.Transferring(sent, total))
                     }
-                    when (safe.protocol) {
-                        PasteProtocol.TERMBIN -> {
-                            send(uploadTermbin(sanitized as AttachmentSource.Text, safe))
-                        }
+                    val completed =
+                        when (safe.protocol) {
+                            PasteProtocol.TERMBIN -> {
+                                uploadTermbin(sanitized as AttachmentSource.Text, safe)
+                            }
 
-                        PasteProtocol.MULTIPART_0X0 -> {
-                            send(
+                            PasteProtocol.MULTIPART_0X0 -> {
                                 if (safe.backend == AttachmentBackend.CUSTOM_0X0) {
                                     uploadCustom(sanitized, safe, progress)
                                 } else {
                                     upload0x0(sanitized, safe, progress)
-                                },
-                            )
-                        }
+                                }
+                            }
 
-                        PasteProtocol.RAW_CNET -> {
-                            send(uploadCNet(sanitized, safe, progress))
-                        }
+                            PasteProtocol.RAW_CNET -> {
+                                uploadCNet(sanitized, safe, progress)
+                            }
 
-                        PasteProtocol.MULTIPART_UGUU -> {
-                            send(uploadUguu(sanitized, safe, progress))
-                        }
+                            PasteProtocol.MULTIPART_UGUU -> {
+                                uploadUguu(sanitized, safe, progress)
+                            }
 
-                        PasteProtocol.MULTIPART_CATBOX -> {
-                            send(uploadCatbox(sanitized, safe, progress))
-                        }
+                            PasteProtocol.MULTIPART_CATBOX -> {
+                                uploadCatbox(sanitized, safe, progress)
+                            }
 
-                        PasteProtocol.SOJU_FILEHOST -> {
-                            send(uploadSojuFileHost(sanitized, safe, context, progress))
+                            PasteProtocol.SOJU_FILEHOST -> {
+                                uploadSojuFileHost(sanitized, safe, context, progress)
+                            }
                         }
-                    }
+                    currentCoroutineContext().ensureActive()
+                    val preview = localUploadPreview(sanitized)
+                    currentCoroutineContext().ensureActive()
+                    send(if (preview == null) completed else UploadProgress.Complete(completed.record.copy(preview = preview)))
                 }
             }.flowOn(Dispatchers.IO)
 
@@ -726,14 +729,6 @@ private fun AttachmentSource.mimeType() =
 internal fun guessMimeType(name: String): String =
     java.net.URLConnection.guessContentTypeFromName(name.lowercase(Locale.ROOT))
         ?: "application/octet-stream"
-
-private fun AttachmentSource.sizeOrNull() =
-    when (this) {
-        is AttachmentSource.Text -> text.toByteArray(StandardCharsets.UTF_8).size.toLong()
-        is AttachmentSource.Document -> size
-        is AttachmentSource.Photo -> size
-        is AttachmentSource.LocalFile -> size
-    }
 
 open class UploadException(
     message: String,

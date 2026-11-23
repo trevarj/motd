@@ -666,6 +666,12 @@ flowchart TD
   Cancellation promptly stops the owning flow and requests HTTP disconnect or closes
   DCC sockets. Temporary files have explicit success/error/cancellation ownership,
   with bounded buffers rather than bitmap decoding, transcoding or whole-file copies.
+- Hosted upload confirmation checks the known size against the selected destination and
+  keeps the local full-image review separate from transport. Successful uploads retain
+  bounded, local previews in backup-excluded Recent uploads: image/video/PDF thumbnails,
+  text excerpts, and media duration when available. History retention owns these previews.
+  The most recently uploaded image can appear beside its ordinary, editable draft URL;
+  the preview itself never enters the IRC message.
 - Network-owned images, avatars, icons, video, and image Save use `NetworkMediaHttp`
   with `routeForNetwork`, native OkHttp/Coil caching scoped by network, and Media3's
   OkHttp adapter for streaming/range requests. The route lease lasts through

@@ -925,8 +925,12 @@
         <item quantity="other">%1$d characters</item>
     </plurals>
     <string name="upload_confirm_title">Ready to upload</string>
+    <string name="upload_review_image">Open full-screen image preview</string>
+    <string name="upload_review_close">Close image preview</string>
     <string name="upload_destination">Destination</string>
     <string name="upload_destination_change">Change destination</string>
+    <string name="upload_destination_size_limit">Up to %1$s</string>
+    <string name="upload_over_size_limit">This attachment is %1$s. The selected destination allows up to %2$s.</string>
     <string name="upload_action">Upload</string>
     <string name="upload_privacy_title">Secret link requested</string>
     <string name="upload_privacy_secret">Anyone with the link can access it. Expires: %1$s.</string>

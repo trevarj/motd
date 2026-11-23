@@ -74,6 +74,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -89,6 +90,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -109,7 +113,12 @@ import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.isLocalMediaUri
+import io.github.trevarj.motd.attachment.normalizedConfig
+import io.github.trevarj.motd.attachment.sizeOrNull
 import io.github.trevarj.motd.attachment.supports
+import io.github.trevarj.motd.audio.formatAudioDuration
+import io.github.trevarj.motd.ui.components.MetadataPill
+import io.github.trevarj.motd.ui.imageviewer.LocalImageReviewDialog
 import io.github.trevarj.motd.ui.settings.SwitchRow
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -207,6 +216,7 @@ fun AttachmentSheets(
     onOpenNetworkSettings: (Long) -> Unit,
     onDirectFile: (Uri) -> Unit = {},
     viewModel: AttachmentViewModel = hiltViewModel(),
+    onUploaded: ((UploadRecord) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val cameraStartError = stringResource(R.string.upload_camera_failed)
@@ -317,30 +327,40 @@ fun AttachmentSheets(
         flow = AttachmentFlow.Confirm(source, false)
     }
 
-    fun uploadConfig(request: AttachmentFlow.Confirm): PasteBackendConfig =
+    fun uploadConfig(
+        request: AttachmentFlow.Confirm,
+        configured: PasteBackendConfig = defaultConfig,
+    ): PasteBackendConfig =
         (
             request.config ?: preferredUploadConfig(
                 request.source,
-                defaultConfig,
+                configured,
                 sojuFileHostAvailable,
                 preferSojuFileHost,
             )
-        ).copy(stripMetadata = defaultConfig.stripMetadata)
+        ).copy(stripMetadata = configured.stripMetadata, sizeLimitBytes = configured.sizeLimitBytes)
 
     fun startUpload(
         request: AttachmentFlow.Confirm,
         allowOriginalMetadata: Boolean = false,
         uploadContext: AttachmentUploadContext = AttachmentUploadContext(networkId),
     ) {
-        val config = uploadConfig(request)
+        val config = uploadConfig(request, viewModel.config.value)
+        val limit = normalizedConfig(config).sizeLimitBytes
+        if (request.source.sizeOrNull()?.let { it > limit } == true) {
+            viewModel.clearAttempt()
+            flow = request
+            return
+        }
         flow = AttachmentFlow.Idle
         viewModel.upload(
             request.source,
-            config,
+            config.copy(sizeLimitBytes = limit),
             uploadContext.copy(allowOriginalMetadata = allowOriginalMetadata),
             replaceDraft = request.replaceDraft,
         ) { record ->
             if (request.replaceDraft) onReplaceDraft(record.url) else onInsertUrl(record.url)
+            onUploaded?.invoke(record)
             if (request.source.deleteCameraCapture()) capturePath = null
             onDismiss()
         }
@@ -859,7 +879,12 @@ private fun SourceSheet(
             },
         )
     }
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface, modifier = Modifier.testTag("attachment_source_sheet")) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("attachment_source_sheet"),
+    ) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
             Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
@@ -912,7 +937,9 @@ private fun SourceSheet(
                     Text(stringResource(R.string.upload_clear_history))
                 }
                 Spacer(Modifier.height(8.dp))
-                recent.forEach { record -> RecentUploadRow(record, onInsertRecent, onCopyRecent, onDeleteRecent) }
+                recent.forEach { record ->
+                    key(record.url) { RecentUploadRow(record, onInsertRecent, onCopyRecent, onDeleteRecent) }
+                }
             }
             Spacer(Modifier.height(24.dp))
         }
@@ -957,13 +984,39 @@ private fun RecentUploadRow(
                 .colors(containerColor = Color.Transparent),
         headlineContent = { Text(record.displayName, maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            io.github.trevarj.motd.ui.components
-                .MetadataPill("${record.backend.label} • ${record.sizeBytes?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)}")
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                MetadataPill(
+                    stringResource(
+                        R.string.upload_metadata,
+                        record.mimeType ?: stringResource(R.string.upload_type_unknown),
+                        record.sizeBytes?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown),
+                    ),
+                )
+                Text(record.backend.label, style = MaterialTheme.typography.labelMedium)
+                record.preview?.durationMillis?.let { duration ->
+                    Text(
+                        formatAudioDuration(duration),
+                        style = MaterialTheme.typography.labelMedium,
+                        modifier = Modifier.testTag("attachment_recent_duration"),
+                    )
+                }
+                record.preview?.textSnippet?.let { snippet ->
+                    androidx.compose.material3.Text(
+                        text = snippet,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.testTag("attachment_recent_text"),
+                    )
+                }
+            }
         },
-        leadingContent = { Icon(if (record.mimeType?.startsWith("image/") == true) Icons.Outlined.Image else Icons.Outlined.Description, null) },
+        leadingContent = { UploadRecordPreview(record, Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))) },
         trailingContent = {
             Box {
-                IconButton(onClick = { menuOpen = true }) { Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more)) }
+                IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("attachment_recent_more")) {
+                    Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more))
+                }
                 DropdownMenu(menuOpen, { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                     DropdownMenuItem({ Text(stringResource(R.string.upload_insert_link)) }, {
                         menuOpen = false
@@ -982,7 +1035,7 @@ private fun RecentUploadRow(
                 }
             }
         },
-        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onInsert(record) },
+        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onInsert(record) }.testTag("attachment_recent_row"),
     )
 }
 
@@ -1034,7 +1087,18 @@ internal fun ConfirmationSheet(
             else -> null
         }
     val unsupportedUri = sourceUri != null && !sourceUri.isLocalMediaUri()
+    val preview =
+        when (source) {
+            is AttachmentSource.Photo -> source.uri.takeUnless { unsupportedUri }
+            is AttachmentSource.Document -> source.uri.takeIf { !unsupportedUri && source.mimeType?.startsWith("image/") == true }
+            is AttachmentSource.LocalFile -> if (source.mimeType.startsWith("image/")) Uri.fromFile(source.file) else null
+            else -> null
+        }
     var previewFailed by remember(source) { mutableStateOf(false) }
+    var reviewing by remember(source) { mutableStateOf(false) }
+    val sourceSize = remember(source) { source.sizeOrNull() }
+    val limit = remember(config) { normalizedConfig(config).sizeLimitBytes }
+    val oversizedBytes = sourceSize?.takeIf { it > limit }
     val sojuUnavailable = config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
     val customUnavailable =
         config.backend == AttachmentBackend.CUSTOM_0X0 &&
@@ -1045,6 +1109,7 @@ internal fun ConfirmationSheet(
         contentColor = MaterialTheme.colorScheme.onSurface,
         onDismissRequest = onDismiss,
         sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("attachment_confirmation_sheet"),
     ) {
         SheetSystemBars()
         Column(Modifier.fillMaxWidth()) {
@@ -1057,17 +1122,10 @@ internal fun ConfirmationSheet(
                 Text(stringResource(R.string.upload_confirm_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
                 Spacer(Modifier.height(12.dp))
                 if (unsupportedUri) Text(stringResource(R.string.settings_local_media_required), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("attachment_thumbnail_error"))
-                val preview =
-                    when (source) {
-                        is AttachmentSource.Photo -> source.uri.takeIf { it.isLocalMediaUri() }
-                        is AttachmentSource.Document -> source.uri.takeIf { it.isLocalMediaUri() && source.mimeType?.startsWith("image/") == true }
-                        is AttachmentSource.LocalFile -> source.file.takeIf { source.mimeType.startsWith("image/") }
-                        else -> null
-                    }
                 if (preview != null && !previewFailed) {
                     AsyncImage(
                         model = preview,
-                        contentDescription = null,
+                        contentDescription = stringResource(R.string.upload_review_image),
                         onError = { previewFailed = true },
                         onSuccess = { previewFailed = false },
                         modifier =
@@ -1075,6 +1133,7 @@ internal fun ConfirmationSheet(
                                 .fillMaxWidth()
                                 .aspectRatio(16f / 9f)
                                 .clip(RoundedCornerShape(20.dp))
+                                .clickable(role = Role.Button) { reviewing = true }
                                 .testTag("attachment_thumbnail"),
                         contentScale = ContentScale.Crop,
                     )
@@ -1096,7 +1155,7 @@ internal fun ConfirmationSheet(
                         )
                     },
                     trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.onSurfaceVariant) },
-                    modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination),
+                    modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination).testTag("attachment_change_destination"),
                 )
                 Spacer(Modifier.height(12.dp))
                 UploadPrivacyCard(config)
@@ -1112,9 +1171,24 @@ internal fun ConfirmationSheet(
                 Spacer(Modifier.height(8.dp))
             }
             Column(Modifier.padding(horizontal = 16.dp)) {
+                if (oversizedBytes != null) {
+                    val sizeLabel = formatBytes(oversizedBytes)
+                    val limitLabel = formatBytes(limit)
+                    val sameRoundedLabels = sizeLabel == limitLabel
+                    Text(
+                        stringResource(
+                            R.string.upload_over_size_limit,
+                            if (sameRoundedLabels) "$oversizedBytes B" else sizeLabel,
+                            if (sameRoundedLabels) "$limit B" else limitLabel,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(bottom = 8.dp).testTag("attachment_size_limit_error"),
+                    )
+                }
                 Button(
-                    onClick = { if (!unsupportedUri) onUpload() },
-                    enabled = !sojuUnavailable && !customUnavailable && !unsupportedUri,
+                    onClick = onUpload,
+                    enabled = !sojuUnavailable && !customUnavailable && !unsupportedUri && oversizedBytes == null,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("attachment_upload"),
                 ) {
                     Icon(Icons.Outlined.CloudUpload, null)
@@ -1125,6 +1199,9 @@ internal fun ConfirmationSheet(
                 Spacer(Modifier.height(12.dp))
             }
         }
+    }
+    if (reviewing && preview != null) {
+        LocalImageReviewDialog(preview, onDismiss = { reviewing = false })
     }
 }
 
@@ -1137,7 +1214,12 @@ private fun BackendPickerSheet(
     onSelect: (PasteBackendConfig) -> Unit,
     onDismiss: () -> Unit,
 ) {
-    ModalBottomSheet(onDismissRequest = onDismiss, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, contentColor = MaterialTheme.colorScheme.onSurface) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
+        contentColor = MaterialTheme.colorScheme.onSurface,
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("attachment_destination_sheet"),
+    ) {
         SheetSystemBars()
         Column(
             Modifier
@@ -1150,7 +1232,12 @@ private fun BackendPickerSheet(
             uploadDestinations(source, config, sojuFileHostAvailable).forEach { destination ->
                 io.github.trevarj.motd.ui.settings.RadioRow(
                     label = destination.label,
-                    subtitle = backendRetention(destination.config),
+                    subtitle =
+                        stringResource(
+                            R.string.upload_metadata,
+                            backendRetention(destination.config),
+                            stringResource(R.string.upload_destination_size_limit, formatBytes(destination.config.sizeLimitBytes)),
+                        ),
                     selected = sameDestination(config, destination.config),
                     enabled = true,
                     onClick = { onSelect(destination.config) },
@@ -1325,6 +1412,10 @@ private fun AttachmentSource.displayName() =
     }
 
 private fun android.content.ContentResolver.queryMeta(uri: Uri): Pair<String, Long?> {
+    if (uri.scheme == ContentResolver.SCHEME_FILE) {
+        val file = uri.path?.let(::File)?.takeIf { it.isFile }
+        return (uri.lastPathSegment ?: "attachment") to file?.length()
+    }
     var name = uri.lastPathSegment ?: "attachment"
     var size: Long? = null
     val cursor: Cursor? = query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)

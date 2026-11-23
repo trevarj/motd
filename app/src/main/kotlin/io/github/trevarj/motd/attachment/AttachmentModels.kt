@@ -3,6 +3,7 @@ package io.github.trevarj.motd.attachment
 import android.net.Uri
 import kotlinx.coroutines.flow.Flow
 import kotlinx.serialization.Serializable
+import okio.utf8Size
 import java.io.File
 import java.util.Locale
 
@@ -77,6 +78,14 @@ sealed interface AttachmentSource {
     ) : AttachmentSource
 }
 
+internal fun AttachmentSource.sizeOrNull(): Long? =
+    when (this) {
+        is AttachmentSource.Text -> text.utf8Size()
+        is AttachmentSource.Document -> size
+        is AttachmentSource.Photo -> size
+        is AttachmentSource.LocalFile -> size
+    }?.takeIf { it >= 0 }
+
 @Serializable
 data class PasteBackendConfig(
     val backend: AttachmentBackend = AttachmentBackend.CRAFTERBIN,
@@ -102,6 +111,14 @@ data class UploadRecord(
     val uploadedAt: Long = System.currentTimeMillis(),
     val deletionToken: String? = null,
     val endpoint: String? = null,
+    val preview: LocalUploadPreview? = null,
+)
+
+@Serializable
+data class LocalUploadPreview(
+    val thumbnailBase64: String? = null,
+    val textSnippet: String? = null,
+    val durationMillis: Long? = null,
 )
 
 data class AttachmentUploadContext(

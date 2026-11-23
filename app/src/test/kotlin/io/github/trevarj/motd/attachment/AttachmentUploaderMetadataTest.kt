@@ -2,6 +2,9 @@ package io.github.trevarj.motd.attachment
 
 import android.content.Context
 import android.content.ContextWrapper
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.util.Base64
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
@@ -41,11 +44,13 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.security.KeyStore
+import java.util.HexFormat
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.zip.CRC32
@@ -103,7 +108,9 @@ class AttachmentUploaderMetadataTest {
             }
         }
 
-    @Test fun actualRequestContainsSanitizedMediaAndConsentDoesNotSurviveAnotherAttempt() =
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    @Test
+    fun actualRequestContainsSanitizedMediaAndConsentDoesNotSurviveAnotherAttempt() =
         runBlocking {
             val cache = temporary.newFolder()
             val context =
@@ -148,6 +155,9 @@ class AttachmentUploaderMetadataTest {
                 val before = original.readBytes()
                 server.enqueue(MockResponse().setBody("https://example.com/clean.png"))
                 val record = (uploader.upload(AttachmentSource.LocalFile(original, original.name, "image/png"), config).last() as UploadProgress.Complete).record
+                val thumbnail = decodePreview(record.preview)
+                assertEquals(2, thumbnail.outWidth)
+                assertEquals(3, thumbnail.outHeight)
                 val request = server.takeRequest(5, TimeUnit.SECONDS)!!
                 val body = request.body.readByteArray()
                 val text = body.toString(Charsets.ISO_8859_1)
@@ -192,6 +202,7 @@ class AttachmentUploaderMetadataTest {
                 val malformedSource = AttachmentSource.LocalFile(malformed, malformed.name, "image/png", 1)
                 server.enqueue(MockResponse().setBody("https://example.com/original.png"))
                 val originalRecord = (uploader.upload(malformedSource, config.copy(stripMetadata = false)).last() as UploadProgress.Complete).record
+                assertNull(originalRecord.preview)
                 val malformedRequest = server.takeRequest(5, TimeUnit.SECONDS)!!
                 val originalBody = malformedRequest.body.readByteArray()
                 val originalText = originalBody.toString(Charsets.ISO_8859_1)
@@ -248,4 +259,44 @@ class AttachmentUploaderMetadataTest {
                 HttpsURLConnection.setDefaultHostnameVerifier(previousVerifier)
             }
         }
+
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun jpegOrientationAndGifFitInBoundedThumbnails() {
+        val jpeg = temporary.newFile("rotated.jpg")
+        // Let GIF exercise decoder sampling; the SDK 28 Robolectric JPEG sampling JNI crashes on this host.
+        val bytes = ByteArrayOutputStream()
+        val bitmap = Bitmap.createBitmap(320, 160, Bitmap.Config.ARGB_8888)
+        try {
+            assertTrue(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, bytes))
+        } finally {
+            bitmap.recycle()
+        }
+        val original = bytes.toByteArray()
+        val exifOrientation6 = HexFormat.of().parseHex("ffe1002245786966000049492a0008000000010012010300010000000600000000000000")
+        jpeg.outputStream().use {
+            it.write(original, 0, 2)
+            it.write(exifOrientation6)
+            it.write(original, 2, original.size - 2)
+        }
+        val oriented = decodePreview(localUploadPreview(AttachmentSource.LocalFile(jpeg, jpeg.name, "image/jpeg")))
+        assertEquals(96, oriented.outWidth)
+        assertEquals(192, oriented.outHeight)
+
+        val gif = temporary.newFile("first-frame.gif")
+        ImageIO.write(BufferedImage(680, 340, BufferedImage.TYPE_BYTE_INDEXED), "gif", gif)
+        val frame = decodePreview(localUploadPreview(AttachmentSource.LocalFile(gif, gif.name, "image/gif")))
+        assertEquals(192, frame.outWidth)
+        assertEquals(96, frame.outHeight)
+    }
+
+    private fun decodePreview(preview: LocalUploadPreview?): BitmapFactory.Options {
+        val thumbnail = checkNotNull(preview?.thumbnailBase64)
+        assertTrue(thumbnail.length <= MAX_UPLOAD_PREVIEW_BASE64_LENGTH)
+        val bytes = Base64.decode(thumbnail, Base64.DEFAULT)
+        return BitmapFactory.Options().apply {
+            inJustDecodeBounds = true
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size, this)
+        }
+    }
 }
