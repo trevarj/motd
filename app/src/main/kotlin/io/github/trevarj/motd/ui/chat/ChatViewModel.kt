@@ -2398,12 +2398,7 @@ class ChatViewModel
             foregroundBufferTracker.set(null)
             visibleSession.value = null
             closeConversationLinks()
-            if (activeJumpRequest?.conversationLink != null) {
-                jumpResolveJob?.cancel()
-                jumpResolveJob = null
-                activeJumpRequest = null
-                _jumpTarget.value = null
-            }
+            activeJumpRequest?.takeIf { it.conversationLink != null }?.let(::clearRetainedLinkJump)
             // Leaving the chat acknowledges a settled history error: the user has had the in-chat
             // detail (stale chip / retry pill) on screen, so the chat-list badge must not keep
             // nagging. Transient Queued/Syncing states are left untouched.
@@ -4452,10 +4447,7 @@ class ChatViewModel
         private fun failActiveJump(request: JumpRequest) {
             if (activeJumpRequest?.token != request.token) return
             if (request.conversationLink != null) {
-                jumpResolveJob?.cancel()
-                jumpResolveJob = null
-                activeJumpRequest = null
-                _jumpTarget.value = null
+                clearRetainedLinkJump(request)
                 uiEventQueue.enqueue(ChatUiEvent.ConversationLinkUnavailable)
                 return
             }
@@ -4470,6 +4462,28 @@ class ChatViewModel
                 uiEventQueue.enqueue(
                     ChatUiEvent.ReplyJumpUnavailable(ReplyTarget(msgid = request.msgid, eventId = request.eventId)),
                 )
+            }
+        }
+
+        private fun clearRetainedLinkJump(request: JumpRequest) {
+            val intent = _entryPositionIntent.value
+            jumpResolveJob?.cancel()
+            jumpResolveJob = null
+            activeJumpRequest = null
+            _jumpTarget.value = null
+
+            fun needsEntryTarget(): Boolean =
+                request.settlesEntryPosition && _entryState.value is EntryPositionState.Pending &&
+                    _initialTarget.value == null && !_entryFallbackLatched.value && canAdoptRetainedFallback(intent)
+
+            if (!needsEntryTarget()) return
+            // The tap invalidated in-flight entry positioning, but not preparation of the unread snapshot.
+            viewModelScope.launch {
+                entryPreparationReady.first { it }
+                if (!needsEntryTarget()) return@launch
+                val spec = filterSpecs.first()
+                val target = resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
+                if (needsEntryTarget()) _initialTarget.value = target.copy(requiredVisibilitySpec = spec)
             }
         }
 

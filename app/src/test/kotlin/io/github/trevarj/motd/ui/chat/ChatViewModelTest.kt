@@ -4727,6 +4727,94 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun removedRetainedLinkReturnsOwnershipToUnpublishedEntry() =
+        runTest(dispatcher) {
+            retainedLinkJumpReturnsOwnershipToEntry(pause = false)
+        }
+
+    @Test
+    fun pausingRetainedLinkJumpReturnsOwnershipToUnpublishedEntry() =
+        runTest(dispatcher) {
+            retainedLinkJumpReturnsOwnershipToEntry(pause = true)
+        }
+
+    private suspend fun retainedLinkJumpReturnsOwnershipToEntry(pause: Boolean) {
+        val unread = message(channel.id, "first unread", "first", "alice", 28).copy(serverTime = 10, timelineOrder = 10)
+        val link = message(channel.id, "https://example.test/link", null, "alice", 29).copy(serverTime = 20, timelineOrder = 20)
+        db.messageDao().insertAll(listOf(unread, link))
+        val entryCountStarted = CompletableDeferred<Unit>()
+        val releaseEntryCount = CompletableDeferred<Unit>()
+        val repository = FakeMessageRepository(events = listOf(unread), counts = MessageVisibilityReader(db))
+        val messages =
+            object : MessageRepository by repository {
+                override suspend fun countNewerThan(
+                    bufferId: Long,
+                    serverTime: Long,
+                    id: Long,
+                    visibility: MessageVisibilitySpec,
+                ): Int {
+                    entryCountStarted.complete(Unit)
+                    releaseEntryCount.await()
+                    return repository.countNewerThan(bufferId, serverTime, id, visibility)
+                }
+
+                override fun observeReplyTarget(
+                    bufferId: Long,
+                    eventId: Long?,
+                    msgid: String?,
+                ): Flow<MessageEntity?> = db.messageDao().observeReplyTarget(bufferId, eventId, msgid)
+            }
+        val vm = viewModel(channel, FakeConnectionManager(network.id, state = IrcClientState.Disconnected), messages = messages)
+        try {
+            vm.state.first { it.buffer != null }
+            vm.onResume()
+            entryCountStarted.await()
+            vm.openConversationLinks()
+            val occurrence =
+                vm.conversationLinks
+                    .filterNotNull()
+                    .first { !it.loading }
+                    .occurrences
+                    .single()
+            assertFalse(vm.entryPreparationReady.value)
+            assertNull(vm.initialTarget.value)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+
+            vm.jumpToConversationLink(occurrence)
+            assertEquals(
+                link.id,
+                vm.jumpTarget
+                    .filterNotNull()
+                    .first()
+                    .expectedEventId,
+            )
+            if (pause) {
+                vm.onPause()
+                vm.onResume()
+            } else {
+                db.messageDao().deleteById(link.id)
+                val events = vm.uiEvents.first { it.isNotEmpty() }
+                assertEquals(ChatUiEvent.ConversationLinkUnavailable, events.single().value)
+            }
+            assertNull(vm.jumpTarget.value)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+
+            releaseEntryCount.complete(Unit)
+            val target = vm.initialTarget.filterNotNull().first()
+            assertEquals(unread.id, target.expectedEventId)
+            assertEquals(if (pause) 1 else 0, target.index)
+            assertTrue(vm.entryPreparationReady.value)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+            vm.onInitialPositionHandled()
+            assertEquals(EntryPositionState.Settled, vm.entryState.value)
+            if (pause) assertTrue(vm.uiEvents.value.isEmpty())
+        } finally {
+            vm.viewModelScope.cancel()
+            releaseEntryCount.complete(Unit)
+        }
+    }
+
+    @Test
     fun `reply jump failure queues exact retry and retry reissues opaque msgid`() =
         runTest {
             val messages = FakeMessageRepository()
