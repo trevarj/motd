@@ -473,6 +473,53 @@ class NewConversationSheetUiTest {
         }
         input.assertInputText("+LockedRoom")
         compose.onNodeWithTag("new_conversation_join_error").assertTextEquals("You cannot join this channel")
+        submit.assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(Triple(1L, "+LockedRoom", null), attempts.last()) }
+    }
+
+    @Test
+    fun keyedTimeoutRefocusesTheEmptyKeyFieldWithoutRequiringAKeyForRetry() {
+        val joinState = mutableStateOf(NewConversationJoinState())
+        val attempts = mutableListOf<Triple<Long, String, String?>>()
+        compose.setContent {
+            MotdTheme {
+                NewConversationSheetContent(
+                    networks = listOf(network()),
+                    channelRules = mapOf(1L to IrcIdentityRules()),
+                    joinState = joinState.value,
+                    onJoinChannel = { id, channel, secret ->
+                        attempts += Triple(id, channel, secret)
+                        joinState.value = NewConversationJoinState(joining = true)
+                    },
+                    onMessageUser = { _, _ -> },
+                )
+            }
+        }
+
+        val input = compose.onNodeWithTag("new_conversation_input")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        val key = compose.onNodeWithTag("new_conversation_password")
+        input.performTextInput("#slow")
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        key.performTextInput("first-key")
+        submit.performClick().assertIsNotEnabled()
+        compose.runOnIdle {
+            joinState.value =
+                NewConversationJoinState(
+                    error = ChannelJoinFailure("The network didn't confirm the join. Try again."),
+                    revealKey = true,
+                )
+        }
+
+        compose.onNodeWithTag("new_conversation_join_error").assertTextEquals("The network didn't confirm the join. Try again.")
+        input.assertInputText("#slow")
+        submit.assertIsEnabled()
+        key.assertIsFocused().assertInputText("")
+        key.performImeAction()
+        submit.assertIsNotEnabled()
+        compose.runOnIdle {
+            assertEquals(listOf(Triple(1L, "#slow", "first-key"), Triple(1L, "#slow", null)), attempts)
+        }
     }
 
     @Test

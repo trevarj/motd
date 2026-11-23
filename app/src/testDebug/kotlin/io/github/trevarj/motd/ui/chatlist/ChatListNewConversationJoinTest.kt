@@ -205,7 +205,7 @@ class ChatListNewConversationJoinTest {
             }
             for (key in listOf("two words", "comma,key", "cr\rkey", "€".repeat(131))) {
                 fixture.model.joinChannel(1, "+private", key)
-                fixture.assertFailure(R.string.channel_list_join_invalid_key, needsKey = true)
+                fixture.assertFailure(R.string.channel_list_join_invalid_key, revealKey = true)
             }
             fixture.transports.getValue(1L).feed(":srv 005 me CHANTYPES= :supported")
             runCurrent()
@@ -247,7 +247,7 @@ class ChatListNewConversationJoinTest {
             fixture.connections.onWrite = { false }
             fixture.model.joinChannel(1, "+Locked[Room]", "other-key")
             runCurrent()
-            fixture.assertFailure(R.string.channel_list_join_not_sent, needsKey = true)
+            fixture.assertFailure(R.string.channel_list_join_not_sent, revealKey = true)
         }
 
     @Test
@@ -343,15 +343,15 @@ class ChatListNewConversationJoinTest {
         runTest {
             val fixture = Fixture(this)
             fixture.connections.onWrite = { awaitCancellation() }
-            fixture.model.joinChannel(1, "+slow", null)
+            fixture.model.joinChannel(1, "+slow", "optional-key")
             runCurrent()
             advanceTimeBy(20_000L)
             runCurrent()
-            fixture.assertFailure(R.string.channel_list_join_timeout)
+            fixture.assertFailure(R.string.channel_list_join_timeout, revealKey = true)
             fixture.transports.getValue(1L).feed(":me!u@h JOIN +slow")
             fixture.memberships.getValue(1L).value = listOf(JoinedChannelRow(10, 1, "+slow"))
             runCurrent()
-            fixture.assertFailure(R.string.channel_list_join_timeout)
+            fixture.assertFailure(R.string.channel_list_join_timeout, revealKey = true)
         }
 
     private inner class Fixture(
@@ -466,8 +466,9 @@ class ChatListNewConversationJoinTest {
         fun assertFailure(
             error: Int,
             needsKey: Boolean = false,
+            revealKey: Boolean = false,
         ) {
-            assertEquals(NewConversationJoinState(error = ChannelJoinFailure(context.getString(error), needsKey)), state)
+            assertEquals(NewConversationJoinState(error = ChannelJoinFailure(context.getString(error), needsKey), revealKey = revealKey), state)
         }
     }
 

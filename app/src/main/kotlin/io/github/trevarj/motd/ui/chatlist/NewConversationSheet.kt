@@ -215,6 +215,7 @@ internal fun NewConversationSheetContent(
     val joinTarget = if (joining && rules != null) remember(activeDraft, rules) { exactChannelTarget(activeDraft, rules) } else null
     val joinPending = joinState.joining || joinState.openBufferId != null
     val needsKey = joinState.error?.needsKey == true
+    val revealKey = needsKey || joinState.revealKey
     val canSubmit =
         when {
             selectedNetwork == null -> false
@@ -225,11 +226,11 @@ internal fun NewConversationSheetContent(
     val nickSuggestionIdentity = selectedNetwork?.id?.let { "$it\u0000$nickPrefix" }
     val currentQueryCallback by rememberUpdatedState(onNickSuggestionQuery)
 
-    LaunchedEffect(joinState.error) {
-        if (needsKey) passwordExpanded = true
+    LaunchedEffect(joinState.error, revealKey) {
+        if (revealKey) passwordExpanded = true
     }
-    LaunchedEffect(needsKey, passwordExpanded) {
-        if (needsKey && passwordExpanded) passwordFocusRequester.requestFocus()
+    LaunchedEffect(joinState.error, revealKey, passwordExpanded, joining) {
+        if (joining && revealKey && passwordExpanded) passwordFocusRequester.requestFocus()
     }
     LaunchedEffect(joining, selectedNetwork?.id, selectedNetwork?.nick, nickPrefix) {
         if (!joining && selectedNetwork != null && nickPrefix.isNotEmpty()) {

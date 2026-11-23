@@ -153,6 +153,7 @@ data class NewConversationJoinState(
     val joining: Boolean = false,
     val error: ChannelJoinFailure? = null,
     val openBufferId: Long? = null,
+    val revealKey: Boolean = false,
 )
 
 private data class NickSuggestionRequest(
@@ -835,7 +836,7 @@ class ChatListViewModel
                 return
             }
             if (key != null && !isValidChannelJoinKey(target, key)) {
-                _newConversationJoin.value = newConversationJoinFailure(R.string.channel_list_join_invalid_key, needsKey = true)
+                _newConversationJoin.value = newConversationJoinFailure(R.string.channel_list_join_invalid_key, revealKey = true)
                 return
             }
             val attempt = NewConversationJoinAttempt(networkId, client, target)
@@ -886,7 +887,7 @@ class ChatListViewModel
                         val result =
                             withTimeoutOrNull(NEW_CONVERSATION_JOIN_TIMEOUT_MS) {
                                 sendAndAwaitNewConversationJoin(attempt, key, membership, connectionLost)
-                            } ?: newConversationJoinFailure(R.string.channel_list_join_timeout, needsKey = key != null)
+                            } ?: newConversationJoinFailure(R.string.channel_list_join_timeout, revealKey = key != null)
                         if (newConversationJoinAttempt !== attempt) return@coroutineScope
                         val bufferId = result.openBufferId
                         if (!attempt.isCurrentReadyClient() || (bufferId != null && attempt.joinedBufferId() != bufferId)) {
@@ -906,7 +907,7 @@ class ChatListViewModel
                 throw cancelled
             } catch (_: Exception) {
                 if (newConversationJoinAttempt === attempt) {
-                    _newConversationJoin.value = newConversationJoinFailure(R.string.channel_list_join_not_sent, needsKey = key != null)
+                    _newConversationJoin.value = newConversationJoinFailure(R.string.channel_list_join_not_sent, revealKey = key != null)
                 }
             } finally {
                 if (newConversationJoinAttempt === attempt) newConversationJoinAttempt = null
@@ -947,7 +948,7 @@ class ChatListViewModel
                             } else if (requestId != null &&
                                 !connectionManager.joinChannelForRejection(attempt.networkId, attempt.client, attempt.channel, key, requestId)
                             ) {
-                                newConversationJoinFailure(R.string.channel_list_join_not_sent, needsKey = key != null)
+                                newConversationJoinFailure(R.string.channel_list_join_not_sent, revealKey = key != null)
                             } else {
                                 NewConversationJoinState(openBufferId = membership.filterNotNull().first())
                             }
@@ -977,7 +978,8 @@ class ChatListViewModel
         private fun newConversationJoinFailure(
             @StringRes message: Int,
             needsKey: Boolean = false,
-        ): NewConversationJoinState = NewConversationJoinState(error = ChannelJoinFailure(context.getString(message), needsKey))
+            revealKey: Boolean = false,
+        ): NewConversationJoinState = NewConversationJoinState(error = ChannelJoinFailure(context.getString(message), needsKey), revealKey = revealKey)
 
         private inner class NewConversationJoinAttempt(
             val networkId: Long,
