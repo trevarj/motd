@@ -133,6 +133,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
@@ -325,7 +326,7 @@ fun ChatListScreen(
             onOpenOnboarding()
         }
     }
-    LaunchedEffect(state.loading, state.rows) {
+    LaunchedEffect(state.loading, state.rows, onDefaultBufferAvailable) {
         if (!state.loading) defaultChatBufferId(state.rows)?.let(onDefaultBufferAvailable)
     }
 
@@ -1400,9 +1401,12 @@ fun ChatListContent(
 
         if (showSheet && newConversationSheetActive()) {
             val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+            val sheetScope = rememberCoroutineScope()
+            val sheetActive by rememberUpdatedState(newConversationSheetActive)
             val cancelJoin by rememberUpdatedState(onCancelNewConversationJoin)
             DisposableEffect(Unit) {
-                onDispose { if (showSheet) cancelJoin() }
+                // A recreated Activity still owns the same route and ViewModel.
+                onDispose { if (showSheet && !sheetActive()) cancelJoin() }
             }
 
             fun canAct() = showSheet && newConversationSheetActive() && sheetState.targetValue != SheetValue.Hidden
@@ -1427,9 +1431,16 @@ fun ChatListContent(
                         if (canAct()) onJoinChannel(networkId, channel, key)
                     },
                     onOpenJoinedChannel = { bufferId ->
-                        if (canAct() && onConsumeNewConversationJoin(bufferId)) {
-                            discardDraft()
-                            onOpenBuffer(bufferId)
+                        sheetScope.launch {
+                            // A JOIN may complete while the Activity is being recreated, before
+                            // the restored sheet has been measured and started to open.
+                            if (sheetState.targetValue == SheetValue.Hidden) {
+                                snapshotFlow { sheetState.targetValue }.first { it != SheetValue.Hidden }
+                            }
+                            if (canAct() && onConsumeNewConversationJoin(bufferId)) {
+                                discardDraft()
+                                onOpenBuffer(bufferId)
+                            }
                         }
                     },
                     onMessageUser = { networkId, nick ->

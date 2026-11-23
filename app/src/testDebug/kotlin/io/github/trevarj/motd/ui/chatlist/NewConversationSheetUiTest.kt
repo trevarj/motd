@@ -1,12 +1,17 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toPixelMap
 import androidx.compose.ui.platform.LocalDensity
@@ -52,6 +57,7 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.channellist.ChannelJoinFailure
+import io.github.trevarj.motd.ui.nav.ChatWorkspace
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import org.junit.Assert.assertEquals
@@ -313,6 +319,96 @@ class NewConversationSheetUiTest {
         compose.onNodeWithTag("new_conversation_password").assertDoesNotExist()
         compose.onNodeWithTag("new_conversation_password_toggle").performClick()
         compose.onNodeWithTag("new_conversation_password").assertInputText("")
+    }
+
+    @Test
+    fun restoringChatListKeepsPendingJoinAndOpensAReplyReceivedDuringRecreation() {
+        val restoration = StateRestorationTester(compose)
+        val joinState = mutableStateOf(NewConversationJoinState())
+        val attempts = mutableListOf<Triple<Long, String, String?>>()
+        val opened = mutableListOf<Long>()
+        val wide = mutableStateOf(false)
+        val routeActive = mutableStateOf(true)
+        var twoPaneRestored = false
+        var replyDuringRecreation = false
+        restoration.setContent {
+            DisposableEffect(Unit) {
+                onDispose {
+                    if (replyDuringRecreation) {
+                        wide.value = true
+                        joinState.value = NewConversationJoinState(openBufferId = 10)
+                    }
+                }
+            }
+            MotdTheme {
+                Box(Modifier.requiredWidth(if (wide.value) 800.dp else 411.dp)) {
+                    ChatWorkspace(
+                        listWidth = remember { mutableFloatStateOf(320f) },
+                        listPane = { twoPane ->
+                            twoPaneRestored = twoPane
+                            ChatListContent(
+                                state = ChatListState(networks = listOf(network()), loading = false),
+                                onOpenBuffer = { opened += it },
+                                onOpenSettings = {},
+                                onOpenSearch = {},
+                                onSetPinned = { _, _ -> },
+                                onSetMuted = { _, _ -> },
+                                onSetArchived = { _, _ -> },
+                                onJoinChannel = { networkId, channel, key ->
+                                    attempts += Triple(networkId, channel, key)
+                                    joinState.value = NewConversationJoinState(joining = true)
+                                },
+                                onMessageUser = { _, _ -> },
+                                newConversationSheetActive = { routeActive.value },
+                                newConversationJoin = joinState.value,
+                                newConversationChannelRules = mapOf(1L to IrcIdentityRules()),
+                                onCancelNewConversationJoin = { joinState.value = NewConversationJoinState() },
+                                onConsumeNewConversationJoin = { id ->
+                                    (joinState.value.openBufferId == id).also { if (it) joinState.value = NewConversationJoinState() }
+                                },
+                            )
+                        },
+                    )
+                }
+            }
+        }
+
+        compose.onNodeWithTag("chatlist_new_conversation").performClick()
+        val input = compose.onNodeWithTag("new_conversation_input")
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        val key = compose.onNodeWithTag("new_conversation_password")
+        input.performTextInput("#locked")
+        compose.onNodeWithTag("new_conversation_password_toggle").performClick()
+        key.performTextInput("temporary-key")
+        submit.performClick().assertIsNotEnabled()
+        restoration.emulateSavedInstanceStateRestore()
+
+        input.assertInputText("#locked")
+        key.assertDoesNotExist()
+        submit.assertTextEquals("Joining…").assertIsNotEnabled()
+        compose.runOnIdle { replyDuringRecreation = true }
+        restoration.emulateSavedInstanceStateRestore()
+
+        compose.onNodeWithTag("new_conversation_sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            replyDuringRecreation = false
+            assertTrue(twoPaneRestored)
+            assertEquals(listOf(Triple(1L, "#locked", "temporary-key")), attempts)
+            assertEquals(listOf(10L), opened)
+        }
+
+        compose.runOnIdle { wide.value = false }
+        compose.onNodeWithTag("chatlist_new_conversation").performClick()
+        input.performTextInput("#departed")
+        submit.performClick().assertIsNotEnabled()
+        compose.runOnIdle { routeActive.value = false }
+        compose.onNodeWithTag("new_conversation_sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(NewConversationJoinState(), joinState.value)
+            routeActive.value = true
+        }
+        input.assertInputText("#departed")
+        submit.assertIsEnabled()
     }
 
     @Test

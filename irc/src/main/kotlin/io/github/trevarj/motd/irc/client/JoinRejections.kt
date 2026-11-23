@@ -25,8 +25,9 @@ internal class JoinRejections(
     private var disabled = false
 
     @Synchronized
-    fun prior(channel: String): CompletableDeferred<Unit>? = pending[bucket(channel)]?.let {
-        it.drained ?: CompletableDeferred<Unit>().also { waiter -> it.drained = waiter }
+    fun prior(channel: String): CompletableDeferred<Unit>? {
+        val previous = pending[bucket(channel)] ?: return null
+        return previous.drained ?: CompletableDeferred<Unit>().also { previous.drained = it }
     }
 
     @Synchronized

@@ -87,20 +87,24 @@ internal fun ChatWorkspace(
         val availableWidth = maxWidth
         var requestedListWidthDp by listWidth
         val policy = chatWorkspacePolicy(availableWidth.value, requestedListWidthDp)
-        if (policy.mode == ChatWorkspaceMode.SINGLE) {
-            if (detailPane == null) listPane(false) else detailPane(true)
+        val twoPane = policy.mode != ChatWorkspaceMode.SINGLE
+        if (!twoPane && detailPane != null) {
+            detailPane(true)
             return@BoxWithConstraints
         }
 
-        val layoutDirection = LocalLayoutDirection.current
-        val resizeDescription = stringResource(R.string.chat_workspace_resize)
         Row(modifier = Modifier.fillMaxSize()) {
             Surface(
-                modifier = Modifier.width(policy.listWidthDp.dp).fillMaxHeight(),
+                modifier = if (twoPane) Modifier.width(policy.listWidthDp.dp).fillMaxHeight() else Modifier.fillMaxSize(),
                 color = MaterialTheme.colorScheme.surface,
             ) {
-                listPane(true)
+                // Keep the list at the same composition location across width changes, including restore.
+                listPane(twoPane)
             }
+            if (!twoPane) return@Row
+
+            val layoutDirection = LocalLayoutDirection.current
+            val resizeDescription = stringResource(R.string.chat_workspace_resize)
             Box(
                 modifier =
                     Modifier

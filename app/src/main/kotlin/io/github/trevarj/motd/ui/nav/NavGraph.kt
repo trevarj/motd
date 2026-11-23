@@ -213,9 +213,13 @@ fun MotdNavGraph(
                         appContentVisible = chatListVisible,
                         suppressOnboarding = incomingActive,
                         onDefaultBufferAvailable = { bufferId ->
-                            if (twoPane && !openedDefault) {
+                            if (twoPane && !openedDefault && navController.currentBackStackEntry == entry) {
                                 openedDefault = true
-                                navController.openChat(ChatRoute(bufferId), replaceCurrentChat = false)
+                                // Rotation can make this a two-pane list while the sheet still owns the JOIN.
+                                val join = chatListViewModel.newConversationJoin.value
+                                if (!join.joining && join.openBufferId == null && join.error == null) {
+                                    navController.openChat(ChatRoute(bufferId), replaceCurrentChat = false)
+                                }
                             }
                         },
                     )
