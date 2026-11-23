@@ -748,6 +748,35 @@ class BufferDaoTest {
         }
 
     @Test
+    fun incomingModeDoesNotPromoteChatUntilAVisibleMessageArrives() =
+        runTest {
+            val buffers = db.bufferDao()
+            val messages = db.messageDao()
+            val older = buffers.insert(buffer(networkId, "#older"))
+            val newer = buffers.insert(buffer(networkId, "#newer"))
+            messages.insertAll(
+                listOf(
+                    message(older, "older message", serverTime = 1_000, dedupKey = "older"),
+                    message(newer, "newer message", serverTime = 2_000, dedupKey = "newer"),
+                ),
+            )
+
+            buffers.observeChatList(messagesOnly = true).test {
+                assertEquals(listOf(newer, older), awaitItem().map(ChatListRow::bufferId))
+
+                messages.insertAll(listOf(message(older, "mode +m", serverTime = 3_000, dedupKey = "mode", kind = MessageKind.MODE)))
+                val afterMode = awaitItem()
+                assertEquals(listOf(newer, older), afterMode.map(ChatListRow::bufferId))
+                assertEquals("older message", afterMode.last().lastMessageText)
+
+                messages.insertAll(listOf(message(older, "latest message", serverTime = 4_000, dedupKey = "latest")))
+                val afterMessage = awaitItem()
+                assertEquals(listOf(older, newer), afterMessage.map(ChatListRow::bufferId))
+                assertEquals("latest message", afterMessage.first().lastMessageText)
+            }
+        }
+
+    @Test
     fun chatList_excludesServerBuffers_andSortsPinnedFirstThenActivity() =
         runTest {
             val bufDao = db.bufferDao()
