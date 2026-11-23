@@ -231,6 +231,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
@@ -338,6 +339,7 @@ fun ChatListScreen(
     ChatListContent(
         state = state,
         unreadFilter = viewModel.unreadFilter,
+        folderSelection = viewModel.folderSelection,
         communityInvitation = {
             if (communityAllowed && community.invitation) {
                 CommunityInvitation(
@@ -444,6 +446,12 @@ private fun chatListTopBarMode(
         else -> ChatListTopBarMode.DEFAULT
     }
 
+// null in the saved flow means disabled; null IDs mean All Networks / All chats.
+data class ChatListUnreadScope(
+    val networkId: Long?,
+    val folderId: Long?,
+) : java.io.Serializable
+
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
 fun ChatListContent(
@@ -517,13 +525,12 @@ fun ChatListContent(
     onCancelNewConversationJoin: () -> Unit = {},
     onConsumeNewConversationJoin: (Long) -> Boolean = { false },
     onOpenScheduledMessages: (() -> Unit)? = null,
-    unreadFilter: MutableStateFlow<Boolean> = remember { MutableStateFlow(false) },
+    unreadFilter: MutableStateFlow<ChatListUnreadScope?> = remember { MutableStateFlow(null) },
+    folderSelection: MutableStateFlow<Long?> = remember { MutableStateFlow(null) },
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
     var invitationMode by rememberSaveable { mutableStateOf(false) }
-    val unreadOnly by unreadFilter.collectAsStateWithLifecycle()
-    val filterUnread = unreadOnly && !archiveMode && !invitationMode
     var showSheet by rememberSaveable { mutableStateOf(false) }
     val newConversationStateHolder = rememberSaveableStateHolder()
     val newConversationDraftKey = "new_conversation"
@@ -554,7 +561,7 @@ fun ChatListContent(
             state.archivedRows.isNotEmpty() ||
             state.invitations.any(ChatListInvitation::actionable) ||
             folderTabs.isEmpty()
-    var selectedFolderId by rememberSaveable { mutableStateOf<Long?>(null) }
+    val selectedFolderId by folderSelection.collectAsStateWithLifecycle()
     val effectiveFolderId =
         selectedFolderId
             ?.takeIf { id -> folderTabs.any { it.folder.id == id } }
@@ -563,11 +570,14 @@ fun ChatListContent(
                 ?.folder
                 ?.id
                 ?.takeUnless { showAllTab }
-    LaunchedEffect(state.loading, state.folderDisplayMode, selectedFolderId, effectiveFolderId, folderTabs.map { it.folder.id }) {
+    LaunchedEffect(state.loading, state.folderDisplayMode, selectedFolderId, effectiveFolderId) {
         if (!state.loading && state.folderDisplayMode == FolderDisplayMode.TABS && selectedFolderId != effectiveFolderId) {
-            selectedFolderId = effectiveFolderId
+            folderSelection.compareAndSet(selectedFolderId, effectiveFolderId)
         }
     }
+    val unreadScope by unreadFilter.collectAsStateWithLifecycle()
+    val unreadOnly = !state.loading && unreadScope?.let { it.networkId == state.selectedNetworkId && it.folderId == effectiveFolderId } == true
+    val filterUnread = unreadOnly && !archiveMode && !invitationMode
     val scopedRows =
         if (!archiveMode && !invitationMode && state.folderDisplayMode == FolderDisplayMode.TABS) {
             effectiveFolderId?.let { id ->
@@ -579,9 +589,19 @@ fun ChatListContent(
     val displayedRows = if (filterUnread) remember(scopedRows) { unreadChatRows(scopedRows) } else scopedRows
     var scrollToTopSignal by rememberSaveable { mutableIntStateOf(0) }
 
+    // A placeholder cannot invalidate a saved scope. A resolved mismatch never filters the new list.
+    SideEffect {
+        val enabledScope = unreadScope
+        if (!state.loading && enabledScope != null && !unreadOnly && unreadFilter.compareAndSet(enabledScope, null)) {
+            scrollToTopSignal++
+        }
+    }
+
     fun setUnreadFilter(enabled: Boolean) {
-        if (unreadFilter.value == enabled) return
-        unreadFilter.value = enabled
+        if (enabled && state.loading) return
+        val scope = if (enabled) ChatListUnreadScope(state.selectedNetworkId, effectiveFolderId) else null
+        if (unreadFilter.value == scope) return
+        unreadFilter.value = scope
         scrollToTopSignal++
     }
 
@@ -1029,7 +1049,7 @@ fun ChatListContent(
                                                     }
                                                 }
                                                 DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chatlist_more_menu")) {
-                                                    if (!unreadOnly) {
+                                                    if (!state.loading && !unreadOnly) {
                                                         DropdownMenuItem(
                                                             text = { Text(stringResource(R.string.chatlist_show_unread)) },
                                                             modifier = Modifier.testTag("chatlist_show_unread"),
@@ -1250,8 +1270,8 @@ fun ChatListContent(
                                     onSelect = { folderId ->
                                         if (folderId != effectiveFolderId) {
                                             selectedIds = emptyList()
-                                            selectedFolderId = folderId
-                                            unreadFilter.value = false
+                                            unreadFilter.value = null
+                                            folderSelection.value = folderId
                                             scrollToTopSignal++
                                         }
                                     },

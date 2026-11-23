@@ -55,6 +55,8 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.InviteState
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
@@ -211,6 +213,81 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_folder_tab_8").performClick().assertIsSelected()
         compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
         compose.onNodeWithTag("chatlist_row_5").assertIsDisplayed()
+    }
+
+    @Test
+    fun unread_survives_loading_but_clears_after_automatic_folder_or_network_fallback() {
+        val originalNetwork =
+            NetworkEntity(
+                id = 1,
+                name = "Test",
+                role = NetworkRole.DIRECT,
+                host = "test.invalid",
+                port = 6697,
+                nick = "test",
+                username = "test",
+                realname = "Test",
+            )
+        val remainingNetwork = originalNetwork.copy(id = 2, name = "Other")
+        val readDev = row()
+        val unreadDev = row(2, "#unread-dev").copy(unreadCount = 1)
+        val readOther = row(3, "#read-other", folderId = 8)
+        val scoped =
+            ChatListState(
+                rows = listOf(readDev, unreadDev, readOther),
+                folders = listOf(folder(), folder(8, "Other")),
+                networks = listOf(originalNetwork, remainingNetwork),
+                selectedNetworkId = originalNetwork.id,
+                folderDisplayMode = FolderDisplayMode.TABS,
+                showFolderChatsInAll = false,
+                loading = false,
+            )
+        val state = mutableStateOf(scoped)
+        setContent(state)
+
+        compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_unread").performClick()
+        compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_row_1").assertDoesNotExist()
+
+        compose.runOnIdle { state.value = ChatListState() }
+        compose.waitForIdle()
+        compose.runOnIdle {
+            state.value =
+                scoped.copy(
+                    rows = listOf(readDev, unreadDev.copy(unreadCount = 0), readOther),
+                    networks = listOf(originalNetwork.copy(name = "Renamed"), remainingNetwork),
+                )
+        }
+        compose.onNodeWithTag("chatlist_folder_tab_7").assertIsSelected()
+        compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_unread_empty").assertIsDisplayed()
+
+        val remainingFolder = scoped.copy(rows = listOf(readOther), folders = scoped.folders.drop(1))
+        compose.runOnIdle { state.value = remainingFolder }
+        compose.onNodeWithTag("chatlist_folder_tab_8").assertIsSelected()
+        compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
+
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_unread").performClick()
+        compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
+        compose.runOnIdle {
+            state.value =
+                remainingFolder.copy(
+                    rows = listOf(readOther.copy(networkId = remainingNetwork.id, networkName = remainingNetwork.name)),
+                    selectedNetworkId = null,
+                    networks = listOf(remainingNetwork),
+                )
+        }
+        compose.onNodeWithTag("chatlist_folder_tab_8").assertIsSelected()
+        compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
+
+        compose.runOnIdle { state.value = remainingFolder }
+        compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
+        compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
     }
 
     @Test

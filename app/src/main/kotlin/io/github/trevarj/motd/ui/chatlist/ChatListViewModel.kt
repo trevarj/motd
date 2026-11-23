@@ -534,7 +534,9 @@ class ChatListViewModel
         // Scope selection survives config changes; null = unified list (default).
         private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
 
-        internal val unreadFilter = savedStateHandle.getMutableStateFlow(KEY_UNREAD_FILTER, false)
+        // Both panes use the same tab selection and Unread scope, including after recreation.
+        internal val folderSelection = savedStateHandle.getMutableStateFlow<Long?>(KEY_SELECTED_FOLDER, null)
+        internal val unreadFilter = savedStateHandle.getMutableStateFlow<ChatListUnreadScope?>(KEY_UNREAD_SCOPE, null)
 
         private val nickSuggestionRequest = MutableStateFlow<NickSuggestionRequest?>(null)
         val nickSuggestions: StateFlow<NickSuggestions> =
@@ -1273,7 +1275,8 @@ class ChatListViewModel
 
         private companion object {
             const val KEY_SELECTED = "selected_network"
-            const val KEY_UNREAD_FILTER = "unread_filter"
+            const val KEY_SELECTED_FOLDER = "selected_folder"
+            const val KEY_UNREAD_SCOPE = "unread_scope"
             const val NEW_CONVERSATION_JOIN_TIMEOUT_MS = 20_000L
         }
     }
