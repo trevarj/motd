@@ -34,6 +34,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasAnyAncestor
@@ -745,9 +746,10 @@ class AttachmentConfirmationSheetUiTest {
             awaitConfirmation()
             compose.onNodeWithTag("attachment_change_destination").performScrollTo().performClick()
             compose.onNodeWithText(AttachmentBackend.X0_AT.label).performScrollTo().performClick()
-            compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().performClick()
+            val stripMetadata = compose.onNodeWithTag("attachment_strip_metadata_row")
+            stripMetadata.performScrollTo().assertIsOff().performClick()
             compose.waitUntil(5_000) {
-                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_off_warning)).fetchSemanticsNodes().isNotEmpty()
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_image_metadata_description)).fetchSemanticsNodes().isNotEmpty()
             }
             compose.onNodeWithTag("attachment_thumbnail").performScrollTo().performClick()
             compose.onNodeWithTag("attachment_review_dialog").assertIsDisplayed()
@@ -777,7 +779,7 @@ class AttachmentConfirmationSheetUiTest {
             compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
             compose.onNodeWithText(file.name).assertExists()
             compose.onNodeWithText(AttachmentBackend.X0_AT.label).assertExists()
-            compose.onNodeWithTag("attachment_strip_metadata_row").performScrollTo().assertIsOff()
+            stripMetadata.performScrollTo().assertIsOn()
             compose.onNodeWithTag("attachment_upload").assertIsEnabled()
             compose.runOnIdle { assertEquals(0, uploadAttempts) }
         } finally {
