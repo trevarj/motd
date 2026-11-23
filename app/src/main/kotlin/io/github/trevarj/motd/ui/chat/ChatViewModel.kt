@@ -129,9 +129,11 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.emitAll
@@ -146,7 +148,9 @@ import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
+import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
@@ -1538,56 +1542,100 @@ class ChatViewModel
             _conversationLinks.value = ConversationLinksState(loading = true)
             conversationLinksJob =
                 viewModelScope.launch(start = CoroutineStart.LAZY) {
-                    combine(
-                        conversationLinkContext(),
-                        visibilityReader.observeRetainedConversationLinkChanges(),
-                        contentPreviews,
-                    ) { context, _, _ -> context }
-                        .onEach { context ->
-                            if (context.roomId == roomId) {
-                                // ponytail: restart one page on Room invalidation; never rescan older pages without demand.
-                                demand.tryReceive()
-                                _conversationLinks.value = ConversationLinksState(loading = true)
-                            } else {
-                                closeConversationLinks()
-                            }
-                        }.collectLatest { context ->
-                            var before: TimelineAnchor? = null
-                            val policy = withContext(Dispatchers.Default) { MessageVisibilityPolicy(context.spec, context.rules) }
-                            do {
-                                val current = _conversationLinks.value ?: return@collectLatest
-                                _conversationLinks.value = current.copy(loading = true, failed = false)
-                                try {
-                                    val rows = visibilityReader.retainedConversationLinkRows(roomId, before, CONVERSATION_LINK_PAGE_SIZE + 1)
-                                    val size = minOf(rows.size, CONVERSATION_LINK_PAGE_SIZE)
-                                    val page =
-                                        withContext(Dispatchers.Default) {
-                                            buildList {
-                                                for (index in 0 until size) {
-                                                    ensureActive()
-                                                    val row = rows[index]
-                                                    if (row.bufferId != roomId || !policy.allowsConversationLink(row)) continue
-                                                    conversationBodyLinks(row.conversationLinkBody()).forEachIndexed { urlIndex, url ->
-                                                        add(ConversationLinkOccurrence(row.id, urlIndex, url, row.sender, row.serverTime))
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    before = rows.getOrNull(size - 1)?.let { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
-                                    val hasMore = rows.size > size
-                                    val occurrences = if (page.isEmpty()) current.occurrences else current.occurrences + page
-                                    _conversationLinks.value = ConversationLinksState(occurrences, hasMore = hasMore)
-                                    if (!hasMore) break
-                                } catch (cancelled: CancellationException) {
-                                    throw cancelled
-                                } catch (_: Exception) {
-                                    _conversationLinks.value = current.copy(loading = false, failed = true)
-                                }
-                            } while (demand.receiveCatching().isSuccess)
+                    var context: ConversationLinkContext? = null
+                    var renderedContext: ConversationLinkContext? = null
+                    var before: TimelineAnchor? = null
+                    var retainedRows = emptyList<MessageEntity>()
+                    var retryOlder = false
+                    val refreshes =
+                        combine(
+                            conversationLinkContext(),
+                            visibilityReader.observeRetainedConversationLinkChanges(),
+                        ) { current, _ -> current }.conflate()
+                    merge(refreshes, demand.receiveAsFlow().map { null }).buffer(Channel.RENDEZVOUS).collect { refresh ->
+                        val next = refresh ?: context ?: return@collect
+                        if (next.roomId != roomId) {
+                            closeConversationLinks()
+                            return@collect
                         }
+                        context = next
+                        val current = _conversationLinks.value ?: return@collect
+                        if (refresh == null && !current.hasMore && !current.failed) return@collect
+                        val loadOlder = refresh == null && (!current.failed || retryOlder)
+                        retryOlder = loadOlder
+                        if (refresh == null) _conversationLinks.value = current.copy(loading = true, failed = false)
+                        try {
+                            val cursor = before
+                            // Refresh to the last demanded anchor, not a count from the live head:
+                            // newer rows must not push previously loaded links out of the window.
+                            val through = cursor?.takeUnless { loadOlder }
+                            val batch =
+                                if (through != null) {
+                                    visibilityReader.retainedConversationLinkWindow(roomId, through)
+                                } else {
+                                    visibilityReader.retainedConversationLinkRows(roomId, cursor, CONVERSATION_LINK_PAGE_SIZE + 1)
+                                }
+                            val rows =
+                                if (through != null || batch.size <= CONVERSATION_LINK_PAGE_SIZE) {
+                                    batch
+                                } else {
+                                    batch.subList(0, CONVERSATION_LINK_PAGE_SIZE)
+                                }
+                            val candidates = if (through != null) rows else rows.filter { ':' in it.conversationLinkBody() }
+                            val hasMore =
+                                if (through != null) {
+                                    visibilityReader.retainedConversationLinkRows(roomId, through, limit = 1).isNotEmpty()
+                                } else {
+                                    batch.size > rows.size
+                                }
+                            val occurrences =
+                                if (!loadOlder && renderedContext == next && candidates == retainedRows) {
+                                    current.occurrences
+                                } else {
+                                    val links = conversationLinkOccurrences(roomId, next, candidates)
+                                    when {
+                                        !loadOlder -> links
+                                        links.isEmpty() -> current.occurrences
+                                        else -> current.occurrences + links
+                                    }
+                                }
+                            if (through == null) {
+                                rows.lastOrNull()?.let { before = TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+                            }
+                            renderedContext = next
+                            if (!loadOlder) {
+                                retainedRows = candidates
+                            } else if (candidates.isNotEmpty()) {
+                                retainedRows += candidates
+                            }
+                            _conversationLinks.value = ConversationLinksState(occurrences, hasMore = hasMore)
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (_: Exception) {
+                            _conversationLinks.value = current.copy(loading = false, failed = true)
+                        }
+                    }
                 }
             conversationLinksJob?.start()
         }
+
+        private suspend fun conversationLinkOccurrences(
+            roomId: Long,
+            context: ConversationLinkContext,
+            rows: List<MessageEntity>,
+        ): List<ConversationLinkOccurrence> =
+            withContext(Dispatchers.Default) {
+                val policy = MessageVisibilityPolicy(context.spec, context.rules)
+                buildList {
+                    for (row in rows) {
+                        ensureActive()
+                        if (row.bufferId != roomId || !policy.allowsConversationLink(row)) continue
+                        conversationBodyLinks(row.conversationLinkBody()).forEachIndexed { urlIndex, url ->
+                            add(ConversationLinkOccurrence(row.id, urlIndex, url, row.sender, row.serverTime))
+                        }
+                    }
+                }
+            }
 
         fun loadOlderConversationLinks() {
             val current = _conversationLinks.value ?: return

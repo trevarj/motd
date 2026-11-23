@@ -4503,21 +4503,46 @@ class ChatViewModelTest {
                 assertEquals(listOf(url, url, actionUrl), older.occurrences.map { it.url })
                 assertEquals(listOf(101L to 0, 101L to 1, 170L to 0), older.occurrences.map { it.eventId to it.urlIndex })
 
+                val selected = older.occurrences[1]
+                val observed = mutableListOf<ConversationLinksState>()
+                backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                    vm.conversationLinks.filterNotNull().collect { observed += it }
+                }
+                db.messageDao().insertAll(listOf(message(query.id, "https://example.test/unrelated", null, "bob", 501)))
+                val fresh = message(channel.id, "https://example.test/fresh", null, "bob", 300).copy(timelineOrder = 100)
+                val backfill = message(channel.id, "https://example.test/backfill", null, "bob", 301).copy(timelineOrder = -1)
+                db.messageDao().insertAll(
+                    listOf(
+                        message(channel.id, "more ordinary text", null, "bob", 302).copy(timelineOrder = 101),
+                        fresh,
+                        backfill,
+                    ),
+                )
+                val refreshed = vm.conversationLinks.filterNotNull().first { it.occurrences.firstOrNull()?.eventId == fresh.id }
+                assertTrue(refreshed.hasMore)
+                assertTrue(observed.isNotEmpty())
+                assertTrue(observed.all { selected in it.occurrences })
+                assertEquals(listOf(fresh.id, repeat.id, repeat.id, dimmed.id), refreshed.occurrences.map { it.eventId })
+
+                db.messageDao().update(repeat.copy(ircFormattedText = "$url `$url`"))
+                val edited = vm.conversationLinks.filterNotNull().first { selected !in it.occurrences }
+                assertEquals(listOf(fresh.id to 0, repeat.id to 0, dimmed.id to 0), edited.occurrences.map { it.eventId to it.urlIndex })
+
                 settings.settings.value =
                     settings.settings.value.copy(
                         fools = settings.settings.value.fools + "alice",
                         foolPreferences = settings.settings.value.foolPreferences + ("alice" to FoolPreferences(FoolsMode.COLLAPSE)),
                     )
-                vm.conversationLinks.filterNotNull().first { !it.loading && it.hasMore && it.occurrences.isEmpty() }
-                vm.loadOlderConversationLinks()
-                val filtered = vm.conversationLinks.filterNotNull().first { !it.loading && !it.hasMore }
-                assertEquals(listOf(actionUrl), filtered.occurrences.map { it.url })
+                val filtered = vm.conversationLinks.filterNotNull().first { state -> state.occurrences.none { it.eventId == repeat.id } }
+                assertEquals(listOf(fresh.id, dimmed.id), filtered.occurrences.map { it.eventId })
 
                 db.messageDao().deleteById(dimmed.id)
-                vm.conversationLinks.filterNotNull().first { !it.loading && it.hasMore && it.occurrences.isEmpty() }
+                val afterDelete = vm.conversationLinks.filterNotNull().first { state -> state.occurrences.none { it.eventId == dimmed.id } }
+                assertEquals(listOf(fresh.id), afterDelete.occurrences.map { it.eventId })
+                assertTrue(afterDelete.hasMore)
                 vm.loadOlderConversationLinks()
-                val afterDelete = vm.conversationLinks.filterNotNull().first { !it.loading && !it.hasMore }
-                assertTrue(afterDelete.occurrences.isEmpty())
+                val exhausted = vm.conversationLinks.filterNotNull().first { !it.loading && !it.hasMore }
+                assertEquals(listOf(fresh.id, backfill.id), exhausted.occurrences.map { it.eventId })
 
                 buffers.update(query)
                 vm.conversationLinks.first { it == null }

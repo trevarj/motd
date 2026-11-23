@@ -65,7 +65,7 @@ class MessageVisibilityReader
 
         internal fun observeRetainedConversationLinkChanges(): Flow<Unit> =
             db.invalidationTracker
-                .createFlow("messages", "buffers", "event_redirects", "network_identity", emitInitialState = true)
+                .createFlow("messages", "buffers", "event_redirects", emitInitialState = true)
                 .map { _: Set<String> -> }
 
         /** Local candidates only; the caller applies body visibility before extracting links. */
@@ -73,14 +73,29 @@ class MessageVisibilityReader
             bufferId: Long,
             before: TimelineAnchor?,
             limit: Int,
+        ): List<MessageEntity> = if (limit <= 0) emptyList() else retainedConversationLinkRows(bufferId, before, "<", limit)
+
+        /** Refresh possible URL bodies only, within the range the user has already paged through. */
+        internal suspend fun retainedConversationLinkWindow(
+            bufferId: Long,
+            through: TimelineAnchor,
+        ): List<MessageEntity> = retainedConversationLinkRows(bufferId, through, ">=", -1, possibleUrlsOnly = true)
+
+        private suspend fun retainedConversationLinkRows(
+            bufferId: Long,
+            anchor: TimelineAnchor?,
+            operator: String,
+            limit: Int,
+            possibleUrlsOnly: Boolean = false,
         ): List<MessageEntity> {
-            if (limit <= 0) return emptyList()
-            val seek = if (before == null) "" else "AND (m.serverTime, m.timelineOrder, m.id) < (?, ?, ?) "
+            val seek = if (anchor == null) "" else "AND (m.serverTime, m.timelineOrder, m.id) $operator (?, ?, ?) "
+            // URI tokens require ':' even if IRC formatting later splits the visible token.
+            val possibleUrls = if (possibleUrlsOnly) "AND instr(COALESCE(m.ircFormattedText, m.text), ':') > 0 " else ""
             val args =
-                if (before == null) {
+                if (anchor == null) {
                     arrayOf<Any>(bufferId, limit)
                 } else {
-                    arrayOf<Any>(bufferId, before.serverTime, before.timelineOrder, before.eventId, limit)
+                    arrayOf<Any>(bufferId, anchor.serverTime, anchor.timelineOrder, anchor.eventId, limit)
                 }
             return db.messageDao().rawMessages(
                 SimpleSQLiteQuery(
@@ -92,6 +107,7 @@ class MessageVisibilityReader
                         "AND m.kind IN ($CONVERSATION_KIND_SQL) " +
                         "AND NOT EXISTS (SELECT 1 FROM event_redirects WHERE losingEventId = m.id) " +
                         seek +
+                        possibleUrls +
                         "ORDER BY m.serverTime DESC, m.timelineOrder DESC, m.id DESC LIMIT ?",
                     args,
                 ),
