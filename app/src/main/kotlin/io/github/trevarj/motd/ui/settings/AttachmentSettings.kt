@@ -125,6 +125,14 @@ fun UploadsSettingsContent(
     }
 
     SettingsGroup(title = stringResource(R.string.settings_upload_privacy)) {
+        val stripImages = config.stripHostedImageMetadata == true
+        SwitchRow(
+            title = stringResource(R.string.upload_strip_image_metadata),
+            subtitle = stringResource(if (stripImages) R.string.upload_strip_image_metadata_description else R.string.upload_strip_image_metadata_off_warning),
+            checked = stripImages,
+            onCheckedChange = { enabled -> onUpdate { it.copy(stripHostedImageMetadata = enabled) } },
+            switchTag = "settings_upload_strip_image_metadata",
+        )
         SwitchRow(
             title = stringResource(R.string.upload_strip_metadata),
             subtitle = stringResource(if (config.stripMetadata) R.string.upload_strip_metadata_description else R.string.upload_strip_metadata_off_warning),

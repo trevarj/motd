@@ -79,6 +79,33 @@ class AttachmentPrefsTest {
         }
 
     @Test
+    fun hostedImagesDefaultToOriginalsWithoutChangingTheOtherPolicyOrLegacyChoices() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val prefs = AttachmentPrefsImpl(context)
+            val key = stringPreferencesKey("config_v1")
+            val image = AttachmentSource.LocalFile(context.cacheDir.resolve("photo.jpg"), "photo.jpg", "image/jpeg")
+            val document = AttachmentSource.LocalFile(context.cacheDir.resolve("document.pdf"), "document.pdf", "application/pdf")
+            store(prefs).edit { it.remove(key) }
+            prefs.updateConfig { it.copy(username = "existing-user") }
+            val defaults = AttachmentPrefsImpl(context).config.first()
+            assertFalse(defaults.stripsHostedUploadMetadata(image))
+            assertTrue(defaults.stripsHostedUploadMetadata(document))
+
+            for (enabled in listOf(true, false)) {
+                store(prefs).edit { it[key] = """{"stripMetadata":$enabled}""" }
+                val legacy = AttachmentPrefsImpl(context).config.first()
+                assertEquals(enabled, legacy.stripsHostedUploadMetadata(image))
+                assertEquals(enabled, legacy.stripsHostedUploadMetadata(document))
+
+                prefs.updateConfig { it.copy(stripHostedImageMetadata = !enabled) }
+                val updated = AttachmentPrefsImpl(context).config.first()
+                assertEquals(!enabled, updated.stripsHostedUploadMetadata(image))
+                assertEquals(enabled, updated.stripsHostedUploadMetadata(document))
+            }
+        }
+
+    @Test
     fun localPreviewsArePersistedAndRemovedWithTheirHistoryRecords() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

@@ -52,13 +52,14 @@ and saved deletion tokens. Hosted files and active uploads are unaffected.
 
 ## Upload privacy
 
-By default, file uploads and outgoing DCC transfers remove private metadata from supported
-media before sending anything. This also covers camera captures, shared files
-and voice recordings, including plaintext before voice encryption. Originals
-are not modified; sanitized files use a generated filename.
+By default, hosted image uploads send original bytes. Other file uploads and
+outgoing DCC transfers leave metadata stripping on, including plaintext before
+voice encryption. Originals are not modified, and sanitized files use a generated
+filename.
 
-Change **Strip metadata** in **Settings → Uploads** or a non-text upload confirmation.
-This shared setting is included in configuration backups and captured once per attempt.
+Change **Strip uploaded image metadata** or **Strip metadata** in **Settings →
+Uploads** or the relevant upload confirmation. Previously saved choices are kept.
+The settings are included in configuration backups and captured once per attempt.
 Turning it off bypasses metadata parsing and sends original bytes and filenames, which
 may expose location, author or device details. Size limits and local-file checks still apply.
 

@@ -432,7 +432,8 @@ class ConfigurationBackupRepositoryImpl
                         replies = replyPrefs.config.first(),
                         attachments =
                             attachmentPrefs.config.first().let { config ->
-                                if (includeSecrets) config else config.copy(username = "", password = "")
+                                val portable = config.copy(stripHostedImageMetadata = config.stripHostedImageMetadata == true)
+                                if (includeSecrets) portable else portable.copy(username = "", password = "")
                             },
                         voice = voicePrefs.config.first(),
                         showSharedAvatars = avatarPrefs.config.first().showSharedAvatars,
@@ -1096,7 +1097,7 @@ class ConfigurationBackupRepositoryImpl
                             imported.copy(username = "", password = "")
                         }
                     }
-                attachmentPrefs.setConfig(resolved)
+                attachmentPrefs.setConfig(resolved.copy(stripHostedImageMetadata = resolved.stripHostedImageMetadata ?: resolved.stripMetadata))
             }
             settings.voice?.let {
                 voicePrefs.replace(it)

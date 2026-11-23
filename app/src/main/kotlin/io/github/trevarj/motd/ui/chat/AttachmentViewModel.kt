@@ -14,6 +14,8 @@ import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
+import io.github.trevarj.motd.attachment.isHostedImage
+import io.github.trevarj.motd.attachment.stripsHostedUploadMetadata
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
@@ -104,8 +106,14 @@ class AttachmentViewModel
                 viewModelScope.launch(start = CoroutineStart.LAZY) {
                     try {
                         val snapshot = prefs.config.first()
-                        val stripMetadata = snapshot.stripMetadata || (review != null && override.stripMetadata)
-                        val destination = override.copy(stripMetadata = stripMetadata)
+                        val stripMetadata =
+                            snapshot.stripsHostedUploadMetadata(source) || (source !is AttachmentSource.Text && override.stripsHostedUploadMetadata(source))
+                        val destination =
+                            if (source.isHostedImage()) {
+                                override.copy(stripMetadata = stripMetadata, stripHostedImageMetadata = stripMetadata)
+                            } else {
+                                override.copy(stripMetadata = stripMetadata)
+                            }
                         _attempt.value = AttachmentAttempt(source, destination, context.copy(allowOriginalMetadata = false), replaceDraft)
                         uploader.upload(source, destination, context).collect { update ->
                             _progress.value = update
@@ -134,10 +142,14 @@ class AttachmentViewModel
             job?.start()
         }
 
-        fun setStripMetadata(enabled: Boolean) =
-            viewModelScope.launch {
-                prefs.updateConfig { it.copy(stripMetadata = enabled) }
+        internal fun setStripMetadata(
+            source: AttachmentSource,
+            enabled: Boolean,
+        ) = viewModelScope.launch {
+            prefs.updateConfig {
+                if (source.isHostedImage()) it.copy(stripHostedImageMetadata = enabled) else it.copy(stripMetadata = enabled)
             }
+        }
 
         fun fail(message: String) {
             _attempt.value = null

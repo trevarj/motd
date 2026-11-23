@@ -221,6 +221,12 @@ class AttachmentConfirmationSheetUiTest {
                     }
                 }
             }
+            compose.onNodeWithText(context.getString(R.string.upload_strip_image_metadata_off_warning)).assertIsDisplayed()
+            compose.onNodeWithTag("settings_upload_strip_image_metadata_row").performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_image_metadata_description)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertTrue(runBlocking { prefs.config.first().stripHostedImageMetadata == true })
             compose.onNodeWithTag("settings_upload_strip_metadata_row").performClick()
             compose.waitUntil(5_000) {
                 compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_off_warning)).fetchSemanticsNodes().isNotEmpty()
@@ -287,6 +293,24 @@ class AttachmentConfirmationSheetUiTest {
             compose.waitUntil(5_000) { compose.onAllNodesWithText(newEndpoint).fetchSemanticsNodes().isNotEmpty() }
             compose.onNodeWithText(newEndpoint).assertIsDisplayed()
             assertEquals(2, server.requestCount)
+
+            val uploadNode = compose.onNodeWithTag("attachment_upload").fetchSemanticsNode()
+            val staleUpload = uploadNode.config[SemanticsActions.OnClick].action!!
+            compose.mainClock.autoAdvance = false
+            try {
+                runBlocking { prefs.updateConfig { it.copy(stripMetadata = false) } }
+                compose.runOnUiThread { assertTrue(staleUpload()) }
+            } finally {
+                compose.mainClock.autoAdvance = true
+            }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_off_warning)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals(2, server.requestCount)
+            runBlocking { prefs.updateConfig { it.copy(stripMetadata = true) } }
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_strip_metadata_description)).fetchSemanticsNodes().isNotEmpty()
+            }
 
             compose.onNodeWithTag("attachment_upload").performClick()
             compose.waitUntil(5_000) {

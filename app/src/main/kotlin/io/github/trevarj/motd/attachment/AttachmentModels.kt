@@ -104,9 +104,20 @@ data class PasteBackendConfig(
     val username: String = "",
     val password: String = "",
     val stripMetadata: Boolean = true,
+    val stripHostedImageMetadata: Boolean? = null,
 ) {
     val protocol: PasteProtocol get() = backend.protocol
 }
+
+internal fun AttachmentSource.isHostedImage(): Boolean =
+    when (this) {
+        is AttachmentSource.Photo -> true
+        is AttachmentSource.Document -> mimeType?.trimStart()?.startsWith("image/", ignoreCase = true) == true
+        is AttachmentSource.LocalFile -> reviewedImage != null || mimeType.trimStart().startsWith("image/", ignoreCase = true)
+        is AttachmentSource.Text -> false
+    }
+
+internal fun PasteBackendConfig.stripsHostedUploadMetadata(source: AttachmentSource): Boolean = if (source.isHostedImage()) stripHostedImageMetadata == true else stripMetadata
 
 data class UploadRecord(
     val url: String,

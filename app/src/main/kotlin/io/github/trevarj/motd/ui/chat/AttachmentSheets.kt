@@ -120,8 +120,10 @@ import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.attachment.isHostedAttachmentUri
+import io.github.trevarj.motd.attachment.isHostedImage
 import io.github.trevarj.motd.attachment.normalizedConfig
 import io.github.trevarj.motd.attachment.sizeOrNull
+import io.github.trevarj.motd.attachment.stripsHostedUploadMetadata
 import io.github.trevarj.motd.attachment.supports
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.ui.components.MetadataPill
@@ -452,7 +454,7 @@ fun AttachmentSheets(
         val config = uploadConfig(request, configured, currentContext.expectedSojuFileHostUrl != null, latestPreferSojuFileHost)
         val destinationChanged =
             !sameUploadConsent(disclosedConfig, config) ||
-                (review != null && disclosedConfig.stripMetadata && !config.stripMetadata) ||
+                (request.source !is AttachmentSource.Text && disclosedConfig.stripsHostedUploadMetadata(request.source) && !config.stripsHostedUploadMetadata(request.source)) ||
                 (
                     config.backend == AttachmentBackend.SOJU_FILEHOST &&
                         (uploadContext != currentContext || currentContext.expectedSojuFileHostUrl == null)
@@ -466,7 +468,11 @@ fun AttachmentSheets(
         val completeUpload = prepareUploadCompletion?.invoke((request.source as? AttachmentSource.Text)?.text.takeIf { request.replaceDraft })
         viewModel.upload(
             request.source,
-            disclosedConfig.copy(sizeLimitBytes = config.sizeLimitBytes, stripMetadata = config.stripMetadata),
+            disclosedConfig.copy(
+                sizeLimitBytes = config.sizeLimitBytes,
+                stripMetadata = config.stripMetadata,
+                stripHostedImageMetadata = config.stripHostedImageMetadata,
+            ),
             uploadContext.copy(allowOriginalMetadata = allowOriginalMetadata),
             replaceDraft = request.replaceDraft,
         ) { record ->
@@ -637,7 +643,7 @@ fun AttachmentSheets(
                 },
                 onDismiss = ::closeSourceSheet,
                 onUpload = { consentScope.launch { startUpload(current, disclosedConfig, disclosedContext) } },
-                onStripMetadataChange = viewModel::setStripMetadata,
+                onStripMetadataChange = { viewModel.setStripMetadata(current.source, it) },
             )
         }
     }
@@ -1298,10 +1304,20 @@ internal fun ConfirmationSheet(
                 Spacer(Modifier.height(12.dp))
                 UploadPrivacyCard(config)
                 if (source !is AttachmentSource.Text) {
+                    val stripMetadata = config.stripsHostedUploadMetadata(source)
+                    val image = source.isHostedImage()
                     SwitchRow(
-                        title = stringResource(R.string.upload_strip_metadata),
-                        subtitle = stringResource(if (config.stripMetadata) R.string.upload_strip_metadata_description else R.string.upload_strip_metadata_off_warning),
-                        checked = config.stripMetadata,
+                        title = stringResource(if (image) R.string.upload_strip_image_metadata else R.string.upload_strip_metadata),
+                        subtitle =
+                            stringResource(
+                                when {
+                                    image && !stripMetadata -> R.string.upload_strip_image_metadata_off_warning
+                                    image -> R.string.upload_strip_image_metadata_description
+                                    !stripMetadata -> R.string.upload_strip_metadata_off_warning
+                                    else -> R.string.upload_strip_metadata_description
+                                },
+                            ),
+                        checked = stripMetadata,
                         onCheckedChange = onStripMetadataChange,
                         switchTag = "attachment_strip_metadata",
                     )

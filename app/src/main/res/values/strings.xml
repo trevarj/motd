@@ -2733,9 +2733,12 @@
     <string name="upload_metadata_warning_title">Send original file?</string>
     <string name="upload_metadata_warning_body">Metadata removal is not supported for this file. The original may include private information such as location, author or device details.</string>
     <string name="upload_strip_metadata">Strip metadata</string>
-    <string name="upload_strip_metadata_description">Remove supported metadata before file uploads, direct file transfers and voice messages.</string>
+    <string name="upload_strip_metadata_description">Remove supported metadata before non-image uploads, direct file transfers and voice messages.</string>
     <string name="upload_strip_metadata_off_warning">Off: sends original files, which may expose location, author or device details.</string>
     <string name="upload_send_original">Send original</string>
+    <string name="upload_strip_image_metadata">Strip uploaded image metadata</string>
+    <string name="upload_strip_image_metadata_description">Remove supported metadata from images before uploading.</string>
+    <string name="upload_strip_image_metadata_off_warning">Off: sends original images, which may expose location or device details.</string>
     <string name="settings_emoji_set">Emoji set</string>
     <string name="settings_emoji_scope">Changes emoji throughout the app, independently of the text font. Installed sets work offline.</string>
     <string name="settings_emoji_system">System</string>

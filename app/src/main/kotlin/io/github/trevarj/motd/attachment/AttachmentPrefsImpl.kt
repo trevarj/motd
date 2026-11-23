@@ -8,6 +8,7 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
@@ -101,6 +102,7 @@ class AttachmentPrefsImpl
                 put("username", c.username)
                 put("password", c.password)
                 put("stripMetadata", c.stripMetadata)
+                put("stripHostedImageMetadata", c.stripHostedImageMetadata)
             }.toString()
 
         private fun decodeConfig(raw: String) =
@@ -115,6 +117,7 @@ class AttachmentPrefsImpl
                             runCatching { AttachmentBackend.valueOf(value) }.getOrNull()
                         }
                     } ?: legacyAttachmentBackend(o["protocol"]?.jsonPrimitive?.content, endpoint)
+                val stripMetadata = (o["stripMetadata"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull
                 normalizedConfig(
                     PasteBackendConfig(
                         backend = backend,
@@ -128,7 +131,13 @@ class AttachmentPrefsImpl
                         sizeLimitBytes = o["limit"]?.jsonPrimitive?.longOrNull ?: DEFAULT_PUBLIC_LIMIT_BYTES,
                         username = o["username"]?.jsonPrimitive?.content.orEmpty(),
                         password = o["password"]?.jsonPrimitive?.content.orEmpty(),
-                        stripMetadata = (o["stripMetadata"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull ?: true,
+                        stripMetadata = stripMetadata ?: true,
+                        stripHostedImageMetadata =
+                            when (val value = o["stripHostedImageMetadata"]) {
+                                JsonNull -> null
+                                is JsonPrimitive -> value.takeUnless { it.isString }?.booleanOrNull ?: stripMetadata
+                                else -> stripMetadata
+                            },
                     ),
                 )
             }.getOrDefault(PasteBackendConfig())
