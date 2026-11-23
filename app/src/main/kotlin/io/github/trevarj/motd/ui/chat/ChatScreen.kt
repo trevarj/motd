@@ -208,7 +208,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.AiFeature
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.UploadRecord
-import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
+import io.github.trevarj.motd.attachment.advertisedSojuFileHostUrl
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioCacheStatus
 import io.github.trevarj.motd.audio.AudioMetadata
@@ -1182,10 +1182,10 @@ fun ChatScreen(
             open = avatarUploadOpen,
             currentDraft = "",
             networkId = state.buffer?.networkId,
-            sojuFileHostAvailable =
+            sojuFileHostUrl =
                 (state.connState as? IrcClientState.Ready)
                     ?.isupport
-                    ?.let(::sojuFileHostAdvertised) == true,
+                    ?.let(::advertisedSojuFileHostUrl),
             imageOnly = true,
             onDismiss = { avatarUploadOpen = false },
             onInsertUrl = {
@@ -5370,12 +5370,11 @@ internal fun ChatContent(
                 open = true,
                 currentDraft = composerText.text,
                 networkId = state.buffer?.networkId,
-                // Offer-only. The upload path binds the advertised endpoint to the connected network's own
-                // host and refuses an off-host one there, where the credential is actually attached.
-                sojuFileHostAvailable =
+                // Disclose the advertised destination; the uploader also validates credential authority.
+                sojuFileHostUrl =
                     (state.connState as? IrcClientState.Ready)
                         ?.isupport
-                        ?.let(::sojuFileHostAdvertised) == true,
+                        ?.let(::advertisedSojuFileHostUrl),
                 preferSojuFileHost = activeDickordChannel,
                 startWithCurrentDraft = uploadCurrentDraftDirectly,
                 sharedFile = sharedFile,

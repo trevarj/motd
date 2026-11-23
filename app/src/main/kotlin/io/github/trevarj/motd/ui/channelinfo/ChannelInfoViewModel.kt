@@ -3,7 +3,7 @@ package io.github.trevarj.motd.ui.channelinfo
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
+import io.github.trevarj.motd.attachment.advertisedSojuFileHostUrl
 import io.github.trevarj.motd.avatar.AvatarController
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
 import io.github.trevarj.motd.avatar.NoopAvatarController
@@ -92,7 +92,7 @@ data class ChannelInfoUiState(
     val lagMs: Long? = null,
     val connected: Boolean = false,
     val selfNick: String? = null,
-    val sojuFileHostAvailable: Boolean = false,
+    val sojuFileHostUrl: String? = null,
     /**
      * ISUPPORT-derived mode vocabulary for this network, null until the connection is Ready. It
      * says which modes the server *advertises*, never which modes are currently set.
@@ -372,7 +372,7 @@ class ChannelInfoViewModel
                     lagMs = runtime.lagMs,
                     connected = runtime.connected,
                     selfNick = runtime.selfNick,
-                    sojuFileHostAvailable = runtime.isupport?.let(::sojuFileHostAdvertised) == true,
+                    sojuFileHostUrl = runtime.isupport?.let(::advertisedSojuFileHostUrl),
                     modeCatalog = modeCatalog,
                     joinedChannels = derived.joinedChannels,
                 )

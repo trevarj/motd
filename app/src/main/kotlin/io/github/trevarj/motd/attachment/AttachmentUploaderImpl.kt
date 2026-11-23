@@ -302,14 +302,22 @@ class AttachmentUploaderImpl
             val networkId =
                 context.networkId
                     ?: throw UploadException("Choose a chat with a connected Soju file host.")
-            val ready =
-                connectionManager.connectionStates.value[networkId] as? IrcClientState.Ready
-                    ?: throw UploadException("This IRC network is not connected.")
+            if (connectionManager.connectionStates.value[networkId] !is IrcClientState.Ready) {
+                throw UploadException("This IRC network is not connected.")
+            }
             val route =
                 routeProvider.routeForNetwork(networkId)
                     ?: throw UploadException("No route for this network.")
-            if (route.proxyError != null) throw UploadException(route.proxyError)
             return route.use {
+                if (route.proxyError != null) throw UploadException(route.proxyError)
+                val ready =
+                    connectionManager.connectionStates.value[networkId] as? IrcClientState.Ready
+                        ?: throw UploadException("This IRC network is not connected.")
+                if (context.expectedSojuFileHostUrl != null &&
+                    context.expectedSojuFileHostUrl != ready.isupport[SOJU_FILEHOST_TOKEN]?.trim()
+                ) {
+                    throw UploadException("The advertised Soju file host changed. Review the upload destination and try again.")
+                }
                 val endpoint =
                     when (
                         val advertised =

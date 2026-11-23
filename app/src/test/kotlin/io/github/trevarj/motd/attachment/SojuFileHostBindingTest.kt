@@ -139,19 +139,44 @@ class SojuFileHostBindingTest {
         assertEquals(0, probe.connections())
     }
 
+    @Test fun confirmedFileHostChangeWhileResolvingRouteRefusesBothRequests() {
+        val disclosed = "https://127.0.0.1:${probe.port}/uploads"
+        val error =
+            assertThrows(UploadException::class.java) {
+                uploadText(
+                    advertised = disclosed,
+                    networkHost = "127.0.0.1",
+                    expectedSojuFileHostUrl = disclosed,
+                    advertisedAfterRouteLookup = "$disclosed/new-path",
+                )
+            }
+        assertTrue(error.message, error.message.orEmpty().contains("file host changed"))
+        assertEquals(0, probe.connections())
+        assertTrue("the media route was not released", released)
+    }
+
     private fun uploadText(
         advertised: String?,
         networkHost: String,
         vlessHost: String? = null,
         trustedFileHost: String? = null,
         role: NetworkRole = NetworkRole.DIRECT,
+        expectedSojuFileHostUrl: String? = null,
+        advertisedAfterRouteLookup: String? = null,
     ) = runBlocking {
         val isupport = advertised?.let { mapOf(SOJU_FILEHOST_TOKEN to it) }.orEmpty()
+        val ready = IrcClientState.Ready("me", emptySet(), isupport)
+        val manager = FakeConnectionManager(ready)
         val uploader =
             AttachmentUploaderImpl(
                 ApplicationProvider.getApplicationContext<Context>(),
-                FakeConnectionManager(IrcClientState.Ready("me", emptySet(), isupport)),
-                MediaRouteResolver { id -> route(id, networkHost, vlessHost, trustedFileHost, role) },
+                manager,
+                MediaRouteResolver { id ->
+                    advertisedAfterRouteLookup?.let {
+                        manager.connectionStates.value = mapOf(id to ready.copy(isupport = mapOf(SOJU_FILEHOST_TOKEN to it)))
+                    }
+                    route(id, networkHost, vlessHost, trustedFileHost, role)
+                },
                 UploadMetadataSanitizer(ApplicationProvider.getApplicationContext<Context>()),
                 AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>()),
             )
@@ -159,7 +184,7 @@ class SojuFileHostBindingTest {
             .upload(
                 AttachmentSource.Text("hello"),
                 PasteBackendConfig(backend = AttachmentBackend.SOJU_FILEHOST),
-                AttachmentUploadContext(NETWORK_ID),
+                AttachmentUploadContext(NETWORK_ID, expectedSojuFileHostUrl = expectedSojuFileHostUrl),
             ).collect { }
     }
 

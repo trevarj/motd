@@ -330,7 +330,7 @@ fun ChannelInfoScreen(
             open = avatarUploadOpen,
             currentDraft = "",
             networkId = state.buffer?.networkId,
-            sojuFileHostAvailable = state.sojuFileHostAvailable,
+            sojuFileHostUrl = state.sojuFileHostUrl,
             imageOnly = true,
             onDismiss = { avatarUploadOpen = false },
             onInsertUrl = {

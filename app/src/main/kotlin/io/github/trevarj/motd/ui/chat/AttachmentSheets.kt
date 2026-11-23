@@ -78,6 +78,8 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -127,6 +129,7 @@ import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
@@ -147,8 +150,8 @@ private sealed interface AttachmentFlow {
     data class Confirm(
         val source: AttachmentSource,
         val replaceDraft: Boolean,
-        // Follow live preferences and FILEHOST until the user explicitly chooses a destination.
-        val config: PasteBackendConfig? = null,
+        // Follow the default backend until the user explicitly chooses one.
+        val backend: AttachmentBackend? = null,
     ) : AttachmentFlow
 }
 
@@ -203,7 +206,7 @@ fun AttachmentSheets(
     open: Boolean,
     currentDraft: String,
     networkId: Long?,
-    sojuFileHostAvailable: Boolean,
+    sojuFileHostUrl: String?,
     preferSojuFileHost: Boolean = false,
     startWithCurrentDraft: Boolean = false,
     // Shared/pasted image hand-off: skip source selection and confirm this file directly.
@@ -223,13 +226,18 @@ fun AttachmentSheets(
     val cameraStartError = stringResource(R.string.upload_camera_failed)
     val localMediaRequiredError = stringResource(R.string.settings_local_media_required)
     val defaultConfig by viewModel.config.collectAsStateWithLifecycle()
+    val sojuFileHostAvailable = sojuFileHostUrl != null
+    val disclosedContext = AttachmentUploadContext(networkId, expectedSojuFileHostUrl = sojuFileHostUrl)
+    val latestContext by rememberUpdatedState(disclosedContext)
+    val latestPreferSojuFileHost by rememberUpdatedState(preferSojuFileHost)
+    val consentScope = rememberCoroutineScope()
     val recent by viewModel.recent.collectAsStateWithLifecycle()
     val progress by viewModel.progress.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     var flow by remember { mutableStateOf<AttachmentFlow>(AttachmentFlow.Idle) }
     var pasteText by remember { mutableStateOf("") }
     val attempt by viewModel.attempt.collectAsStateWithLifecycle()
-    val lastAttempt = attempt?.let { AttachmentFlow.Confirm(it.source, it.replaceDraft, it.config) }
+    val lastAttempt = attempt?.let { AttachmentFlow.Confirm(it.source, it.replaceDraft, it.config.backend) }
     var capturePath by rememberSaveable { mutableStateOf<String?>(null) }
     var deleteTarget by remember { mutableStateOf<UploadRecord?>(null) }
     var backendPickerRequest by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
@@ -331,24 +339,32 @@ fun AttachmentSheets(
     fun uploadConfig(
         request: AttachmentFlow.Confirm,
         configured: PasteBackendConfig = defaultConfig,
+        fileHostAvailable: Boolean = sojuFileHostAvailable,
+        preferFileHost: Boolean = preferSojuFileHost,
     ): PasteBackendConfig =
-        (
-            request.config ?: preferredUploadConfig(
-                request.source,
-                configured,
-                sojuFileHostAvailable,
-                preferSojuFileHost,
-            )
-        ).copy(stripMetadata = configured.stripMetadata, sizeLimitBytes = configured.sizeLimitBytes)
+        request.backend?.let(configured::forBackend)
+            ?: normalizedConfig(preferredUploadConfig(request.source, configured, fileHostAvailable, preferFileHost))
 
-    fun startUpload(
+    suspend fun startUpload(
         request: AttachmentFlow.Confirm,
+        disclosedConfig: PasteBackendConfig,
+        uploadContext: AttachmentUploadContext,
         allowOriginalMetadata: Boolean = false,
-        uploadContext: AttachmentUploadContext = AttachmentUploadContext(networkId),
+        retry: AttachmentAttempt? = null,
     ) {
-        val config = uploadConfig(request, viewModel.config.value)
-        val limit = normalizedConfig(config).sizeLimitBytes
-        if (request.source.sizeOrNull()?.let { it > limit } == true) {
+        // The presentation flow can lag a completed preferences write.
+        val configured = viewModel.currentConfig()
+        val requestStillCurrent = if (retry == null) flow === request else viewModel.attempt.value === retry
+        if (!requestStillCurrent) return
+        val currentContext = latestContext
+        val config = uploadConfig(request, configured, currentContext.expectedSojuFileHostUrl != null, latestPreferSojuFileHost)
+        val destinationChanged =
+            !sameUploadConsent(disclosedConfig, config) ||
+                (
+                    config.backend == AttachmentBackend.SOJU_FILEHOST &&
+                        (uploadContext != currentContext || currentContext.expectedSojuFileHostUrl == null)
+                )
+        if (destinationChanged || request.source.sizeOrNull()?.let { it > config.sizeLimitBytes } == true) {
             viewModel.clearAttempt()
             flow = request
             return
@@ -357,7 +373,7 @@ fun AttachmentSheets(
         val completeUpload = prepareUploadCompletion?.invoke((request.source as? AttachmentSource.Text)?.text.takeIf { request.replaceDraft })
         viewModel.upload(
             request.source,
-            config.copy(sizeLimitBytes = limit),
+            disclosedConfig.copy(sizeLimitBytes = config.sizeLimitBytes, stripMetadata = config.stripMetadata),
             uploadContext.copy(allowOriginalMetadata = allowOriginalMetadata),
             replaceDraft = request.replaceDraft,
         ) { record ->
@@ -505,10 +521,11 @@ fun AttachmentSheets(
         }
 
         is AttachmentFlow.Confirm -> {
+            val disclosedConfig = uploadConfig(current)
             ConfirmationSheet(
                 source = current.source,
-                config = uploadConfig(current),
-                sojuFileHostAvailable = sojuFileHostAvailable,
+                config = disclosedConfig,
+                sojuFileHostUrl = sojuFileHostUrl,
                 onChangeDestination = {
                     backendPickerRequest = current
                     flow = AttachmentFlow.Idle
@@ -517,7 +534,7 @@ fun AttachmentSheets(
                     if (current.source.deleteCameraCapture()) capturePath = null
                     closeSourceSheet()
                 },
-                onUpload = { startUpload(current) },
+                onUpload = { consentScope.launch { startUpload(current, disclosedConfig, disclosedContext) } },
                 onStripMetadataChange = viewModel::setStripMetadata,
             )
         }
@@ -529,7 +546,7 @@ fun AttachmentSheets(
             config = uploadConfig(request),
             sojuFileHostAvailable = sojuFileHostAvailable,
             onSelect = { selected ->
-                flow = request.copy(config = selected)
+                flow = request.copy(backend = selected.backend)
                 backendPickerRequest = null
             },
             onDismiss = {
@@ -594,11 +611,15 @@ fun AttachmentSheets(
                         val retry = attempt ?: return@TextButton
                         if (viewModel.attempt.value !== retry || viewModel.error.value !== failure) return@TextButton
                         viewModel.clearError()
-                        startUpload(
-                            request,
-                            allowOriginalMetadata = failure.metadataNotSupported,
-                            uploadContext = retry.context,
-                        )
+                        consentScope.launch {
+                            startUpload(
+                                request,
+                                disclosedConfig = retry.config,
+                                uploadContext = retry.context,
+                                allowOriginalMetadata = failure.metadataNotSupported,
+                                retry = retry,
+                            )
+                        }
                     }) {
                         if (!failure.metadataNotSupported) {
                             Icon(Icons.Outlined.Refresh, null)
@@ -1082,7 +1103,7 @@ private fun TextPasteSheet(
 internal fun ConfirmationSheet(
     source: AttachmentSource,
     config: PasteBackendConfig,
-    sojuFileHostAvailable: Boolean,
+    sojuFileHostUrl: String?,
     onChangeDestination: () -> Unit,
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
@@ -1107,7 +1128,7 @@ internal fun ConfirmationSheet(
     val sourceSize = remember(source) { source.sizeOrNull() }
     val limit = remember(config) { normalizedConfig(config).sizeLimitBytes }
     val oversizedBytes = sourceSize?.takeIf { it > limit }
-    val sojuUnavailable = config.backend == AttachmentBackend.SOJU_FILEHOST && !sojuFileHostAvailable
+    val sojuUnavailable = config.backend == AttachmentBackend.SOJU_FILEHOST && sojuFileHostUrl == null
     val customUnavailable =
         config.backend == AttachmentBackend.CUSTOM_0X0 &&
             io.github.trevarj.motd.attachment
@@ -1154,13 +1175,22 @@ internal fun ConfirmationSheet(
                 ListItem(
                     headlineContent = { Text(config.backend.label, fontWeight = FontWeight.SemiBold) },
                     supportingContent = {
-                        Text(
-                            when {
-                                sojuUnavailable -> stringResource(R.string.upload_soju_unavailable)
-                                customUnavailable -> stringResource(R.string.upload_custom_unavailable)
-                                else -> backendRetention(config)
-                            },
-                        )
+                        Column {
+                            Text(
+                                when {
+                                    sojuUnavailable -> stringResource(R.string.upload_soju_unavailable)
+                                    customUnavailable -> stringResource(R.string.upload_custom_unavailable)
+                                    else -> backendRetention(config)
+                                },
+                            )
+                            val endpoint =
+                                when (config.backend) {
+                                    AttachmentBackend.SOJU_FILEHOST -> sojuFileHostUrl
+                                    AttachmentBackend.CUSTOM_0X0 -> config.endpoint.takeUnless { customUnavailable }
+                                    else -> null
+                                }
+                            endpoint?.let { Text(it) }
+                        }
                     },
                     trailingContent = { Text(stringResource(R.string.upload_destination_change), color = MaterialTheme.colorScheme.onSurfaceVariant) },
                     modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination).testTag("attachment_change_destination"),
@@ -1362,6 +1392,34 @@ private fun sameDestination(
     a: PasteBackendConfig,
     b: PasteBackendConfig,
 ): Boolean = a.backend == b.backend && (a.backend != AttachmentBackend.CUSTOM_0X0 || a.endpoint == b.endpoint)
+
+private fun sameUploadConsent(
+    disclosed: PasteBackendConfig,
+    current: PasteBackendConfig,
+): Boolean =
+    sameDestination(disclosed, current) &&
+        when (current.backend) {
+            AttachmentBackend.CUSTOM_0X0 -> {
+                disclosed.secretUrl == current.secretUrl && disclosed.expiry == current.expiry &&
+                    disclosed.username == current.username && disclosed.password == current.password
+            }
+
+            AttachmentBackend.CRAFTERBIN -> {
+                disclosed.secretUrl == current.secretUrl && disclosed.expiry == current.expiry
+            }
+
+            AttachmentBackend.X0_AT -> {
+                disclosed.secretUrl == current.secretUrl
+            }
+
+            AttachmentBackend.LITTERBOX -> {
+                disclosed.litterboxExpiry == current.litterboxExpiry
+            }
+
+            else -> {
+                true
+            }
+        }
 
 internal fun backendRetention(config: PasteBackendConfig): String =
     when (config.backend) {

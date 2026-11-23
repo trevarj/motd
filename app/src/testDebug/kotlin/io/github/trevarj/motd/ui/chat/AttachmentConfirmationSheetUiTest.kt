@@ -77,7 +77,7 @@ import io.github.trevarj.motd.attachment.SOJU_FILEHOST_TOKEN
 import io.github.trevarj.motd.attachment.UploadMetadataSanitizer
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
-import io.github.trevarj.motd.attachment.sojuFileHostAdvertised
+import io.github.trevarj.motd.attachment.advertisedSojuFileHostUrl
 import io.github.trevarj.motd.audio.AudioWaveform
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -205,7 +205,7 @@ class AttachmentConfirmationSheetUiTest {
                             open = true,
                             currentDraft = "",
                             networkId = null,
-                            sojuFileHostAvailable = false,
+                            sojuFileHostUrl = null,
                             sharedFile = PendingShare.File(uri, "application/pdf"),
                             onDismiss = {},
                             onInsertUrl = {},
@@ -274,6 +274,27 @@ class AttachmentConfirmationSheetUiTest {
                 compose.onAllNodesWithText(context.getString(R.string.upload_send_original)).fetchSemanticsNodes().isNotEmpty()
             }
             assertEquals(2, server.requestCount)
+
+            val newEndpoint = server.url("/new-upload").toString()
+            runBlocking { prefs.updateConfig { it.copy(customEndpoint = newEndpoint) } }
+            assertEquals(newEndpoint, runBlocking { prefs.config.first().customEndpoint })
+            compose.onNodeWithText(context.getString(R.string.upload_send_original)).performClick()
+            compose.waitUntil(5_000) { compose.onAllNodesWithText(newEndpoint).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(newEndpoint).assertIsDisplayed()
+            assertEquals(2, server.requestCount)
+
+            compose.onNodeWithTag("attachment_upload").performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_send_original)).fetchSemanticsNodes().isNotEmpty()
+            }
+            compose.onNodeWithText(context.getString(R.string.upload_send_original)).assertIsDisplayed()
+            assertEquals(2, server.requestCount)
+            server.enqueue(MockResponse().setResponseCode(500).setBody("Rejected after renewed consent"))
+            compose.onNodeWithText(context.getString(R.string.upload_send_original)).performClick()
+            compose.waitUntil(5_000) {
+                compose.onAllNodesWithText(context.getString(R.string.upload_retry)).fetchSemanticsNodes().isNotEmpty()
+            }
+            assertEquals("/new-upload", server.takeRequest(5, TimeUnit.SECONDS)!!.path)
         } finally {
             attachments.viewModelScope.cancel()
             settings.viewModelScope.cancel()
@@ -282,6 +303,55 @@ class AttachmentConfirmationSheetUiTest {
             HttpsURLConnection.setDefaultHostnameVerifier(previousVerifier)
             file.delete()
         }
+    }
+
+    @Test
+    fun staleUploadActionRequiresConfirmationForNewEndpointStorageOrBackend() {
+        val oldEndpoint = "https://old.example/upload"
+        val newEndpoint = "https://new.example/upload"
+        val initial = PasteBackendConfig(backend = AttachmentBackend.CUSTOM_0X0, endpoint = oldEndpoint, customEndpoint = oldEndpoint)
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(initial) }
+        var uploadAttempts = 0
+        showConditionalAttachments(
+            currentDraft = "A text attachment",
+            startWithCurrentDraft = true,
+            prefs = prefs,
+            uploadFailure = { IOException("Rejected") },
+            onUploadAttempt = { uploadAttempts++ },
+            expectedUploadBackend = AttachmentBackend.UGUU,
+        )
+        val upload = compose.onNodeWithTag("attachment_upload")
+        compose.onNodeWithText(oldEndpoint).assertIsDisplayed()
+
+        fun changeAndClickStaleAction(config: PasteBackendConfig) {
+            val staleUpload = upload.fetchSemanticsNode().config[SemanticsActions.OnClick].action!!
+            compose.mainClock.autoAdvance = false
+            try {
+                runBlocking { prefs.setConfig(config) }
+                assertEquals(config, runBlocking { prefs.config.first() })
+                compose.runOnUiThread { assertTrue(staleUpload()) }
+            } finally {
+                compose.mainClock.autoAdvance = true
+            }
+            compose.runOnIdle { assertEquals(0, uploadAttempts) }
+        }
+
+        val newHost = initial.copy(endpoint = newEndpoint, customEndpoint = newEndpoint)
+        changeAndClickStaleAction(newHost)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(newEndpoint).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(newEndpoint).assertIsDisplayed()
+        val newStorage = newHost.copy(expiry = "24", secretUrl = false)
+        changeAndClickStaleAction(newStorage)
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Public link").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Public link").assertIsDisplayed()
+        changeAndClickStaleAction(newStorage.copy(backend = AttachmentBackend.UGUU, endpoint = AttachmentBackend.UGUU.endpoint!!))
+        compose.waitUntil(5_000) { compose.onAllNodesWithText(AttachmentBackend.UGUU.label).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(AttachmentBackend.UGUU.label).assertIsDisplayed()
+        upload.assertIsEnabled().performClick()
+        compose.waitUntil(5_000) { compose.onAllNodesWithText("Rejected").fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText("Rejected").assertIsDisplayed()
+        compose.runOnIdle { assertEquals(1, uploadAttempts) }
     }
 
     @Test
@@ -480,7 +550,7 @@ class AttachmentConfirmationSheetUiTest {
         try {
             var connection by mutableStateOf(IrcClientState.Ready("me", emptySet(), emptyMap()))
             showConditionalAttachments(
-                sojuFileHostAvailable = { sojuFileHostAdvertised(connection.isupport) },
+                sojuFileHostUrl = { advertisedSojuFileHostUrl(connection.isupport) },
                 preferSojuFileHost = true,
             )
             compose.onNodeWithText(context.getString(R.string.upload_photo)).performScrollTo().performClick()
@@ -514,16 +584,19 @@ class AttachmentConfirmationSheetUiTest {
     }
 
     @Test
-    fun offHostUploadOffersNetworkSettingsButOrdinaryFailureDoesNot() {
+    fun offHostUploadOffersNetworkSettingsButCannotRetryAChangedHost() {
         val networkId = 42L
+        var advertisedUrl by mutableStateOf("https://old.example/uploads")
+        var uploadAttempts = 0
         var failure: Throwable = IOException("Server rejected upload")
         var openedNetwork: Long? = null
         showConditionalAttachments(
             currentDraft = "A text attachment",
             networkId = networkId,
             startWithCurrentDraft = true,
-            sojuFileHostAvailable = { true },
+            sojuFileHostUrl = { advertisedUrl },
             uploadFailure = { failure },
+            onUploadAttempt = { uploadAttempts++ },
             onOpenNetworkSettings = { openedNetwork = it },
         )
         compose.onNodeWithText(context.getString(R.string.upload_destination_change)).performClick()
@@ -539,6 +612,11 @@ class AttachmentConfirmationSheetUiTest {
         compose.onNodeWithText(context.getString(R.string.upload_retry)).performClick()
         compose.onNodeWithText("File host differs from network host").assertIsDisplayed()
         compose.onNodeWithText(context.getString(R.string.upload_soju_off_host_override)).assertIsDisplayed()
+        compose.runOnIdle { advertisedUrl = "https://new.example/uploads" }
+        compose.onNodeWithText(context.getString(R.string.upload_retry)).performClick()
+        compose.onNodeWithText(advertisedUrl).assertIsDisplayed()
+        compose.runOnIdle { assertEquals(2, uploadAttempts) }
+        compose.onNodeWithTag("attachment_upload").performClick()
         compose.onNodeWithText(context.getString(R.string.upload_soju_open_network_settings)).performClick()
         compose.runOnIdle { assertEquals(networkId, openedNetwork) }
         compose.onNodeWithTag("attachment_owner").assertDoesNotExist()
@@ -603,7 +681,7 @@ class AttachmentConfirmationSheetUiTest {
                 ConfirmationSheet(
                     source = AttachmentSource.Photo(Uri.fromFile(file), file.name, "image/png", file.length()),
                     config = PasteBackendConfig(),
-                    sojuFileHostAvailable = false,
+                    sojuFileHostUrl = null,
                     onChangeDestination = {},
                     onDismiss = {},
                     onUpload = {},
@@ -736,7 +814,7 @@ class AttachmentConfirmationSheetUiTest {
         try {
             compose.setContent {
                 MotdTheme {
-                    ConfirmationSheet(source.value, PasteBackendConfig(), false, {}, {}, { uploads++ })
+                    ConfirmationSheet(source.value, PasteBackendConfig(), null, {}, {}, { uploads++ })
                 }
             }
             compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
@@ -798,7 +876,7 @@ class AttachmentConfirmationSheetUiTest {
     private fun showConditionalAttachments(
         currentDraft: String = "",
         directFileTransferAvailable: Boolean = false,
-        sojuFileHostAvailable: () -> Boolean = { false },
+        sojuFileHostUrl: () -> String? = { null },
         preferSojuFileHost: Boolean = false,
         networkId: Long? = null,
         startWithCurrentDraft: Boolean = false,
@@ -888,7 +966,7 @@ class AttachmentConfirmationSheetUiTest {
                                 open = open,
                                 currentDraft = currentDraft,
                                 networkId = networkId,
-                                sojuFileHostAvailable = sojuFileHostAvailable(),
+                                sojuFileHostUrl = sojuFileHostUrl(),
                                 startWithCurrentDraft = startWithCurrentDraft,
                                 preferSojuFileHost = preferSojuFileHost,
                                 sharedFile = pastedFile,

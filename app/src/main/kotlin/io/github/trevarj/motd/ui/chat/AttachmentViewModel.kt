@@ -43,6 +43,8 @@ class AttachmentViewModel
         private val prefs: AttachmentPrefs,
         private val uploader: AttachmentUploader,
     ) : ViewModel() {
+        internal suspend fun currentConfig(): PasteBackendConfig = prefs.config.first()
+
         val config = prefs.config.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PasteBackendConfig())
         val recent = prefs.recentUploads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), emptyList())
         private val _progress = MutableStateFlow<UploadProgress?>(null)

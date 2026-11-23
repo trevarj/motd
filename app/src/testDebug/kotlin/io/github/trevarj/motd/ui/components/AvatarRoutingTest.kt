@@ -756,7 +756,7 @@ class AvatarRoutingTest {
                             source.value,
                             io.github.trevarj.motd.attachment
                                 .PasteBackendConfig(),
-                            false,
+                            null,
                             {},
                             {},
                             { uploads++ },

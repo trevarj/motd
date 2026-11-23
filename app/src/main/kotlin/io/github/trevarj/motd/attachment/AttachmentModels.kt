@@ -125,6 +125,8 @@ data class LocalUploadPreview(
 data class AttachmentUploadContext(
     val networkId: Long? = null,
     val allowOriginalMetadata: Boolean = false,
+    // Bound when the attachment confirmation discloses a Soju destination.
+    val expectedSojuFileHostUrl: String? = null,
 )
 
 sealed interface UploadProgress {
@@ -244,7 +246,9 @@ sealed interface SojuFileHostEndpoint {
  * the upload path itself, where the credential is attached, so a misconfigured or hostile
  * advertisement is refused with an explanation instead of silently disappearing from the sheet.
  */
-fun sojuFileHostAdvertised(isupport: Map<String, String>): Boolean = httpsUploadUri(isupport[SOJU_FILEHOST_TOKEN]) != null
+fun sojuFileHostAdvertised(isupport: Map<String, String>): Boolean = advertisedSojuFileHostUrl(isupport) != null
+
+internal fun advertisedSojuFileHostUrl(isupport: Map<String, String>): String? = httpsUploadUri(isupport[SOJU_FILEHOST_TOKEN])?.toString()
 
 fun sojuFileHostEndpoint(
     isupport: Map<String, String>,
