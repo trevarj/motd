@@ -958,6 +958,9 @@ class MessagePagingDemandUiTest {
             compose.runOnIdle {
                 assertTrue("Fixture never grew beyond the initial window; ${failedState()}", items.itemSnapshotList.items.size > MESSAGE_PAGING_CONFIG.initialLoadSize)
             }
+            compose.mainClock.autoAdvance = false
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.waitForIdle()
             val timeline = compose.onNodeWithTag("chat_timeline")
             val timelineBounds = timeline.fetchSemanticsNode().boundsInRoot
             val hostTop =
@@ -974,7 +977,6 @@ class MessagePagingDemandUiTest {
                     ?: throw AssertionError("Fixture must paint ordinary history beyond the collapsed presence run; ${failedState()}")
             val paintedIds = listOf(6_490L, olderEdge)
             val beforeBounds = paintedIds.associateWith(::bounds)
-            compose.mainClock.autoAdvance = false
             val beforeImage = timeline.captureToImage().asAndroidBitmap()
             val beforePaint = paintedIds.associateWith { id -> paintedRow(beforeImage, timelineBounds, beforeBounds.getValue(id)) }
             compose.runOnIdle {
@@ -1005,6 +1007,10 @@ class MessagePagingDemandUiTest {
                     )
                 }
             }
+
+            compose.mainClock.advanceTimeByFrame()
+            compose.waitForIdle()
+            assertPainted()
 
             for ((batch, confirmedId) in listOf(6_490L, 6_500L, olderEdge).withIndex()) {
                 phase = "history transaction ${batch + 1}"
