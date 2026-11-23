@@ -146,6 +146,87 @@ class IrcClientTest {
         }
 
     @Test
+    fun `unlabeled ban refresh keeps removal errors visible without denying the list`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            ft.feed(":motd!u@h JOIN #Other")
+            runCurrent()
+            val errors = mutableListOf<IrcEvent.ServerError>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.ServerError>().toList(errors)
+            }
+
+            val mask = "*!*@Example.COM"
+            assertTrue(client.removeChannelBan("#room", mask))
+            val refresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            assertEquals(listOf("MODE #Room -b $mask", "MODE #Room +b"), ft.sent.takeLast(2))
+            ft.feed(":srv 482 MOTD #ROOM :Removal denied")
+            ft.feed(":srv 482 motd #Other :Unrelated channel error")
+            runCurrent()
+            assertFalse(refresh.isCompleted)
+            assertEquals(listOf("Removal denied", "Unrelated channel error"), errors.map { it.text })
+            ft.feed(":srv 367 motd #Room $mask")
+            ft.feed(":srv 368 motd #Room :End of refresh")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(listOf(ChannelBanEntry(mask))), refresh.await())
+
+            assertTrue(client.removeChannelBan("#Room", mask))
+            val ambiguous = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 482 motd #Room :Ambiguous denial")
+            ft.feed(":srv 368 motd #Room :Possible optional end after denial")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Incomplete, ambiguous.await())
+            assertEquals("Ambiguous denial", errors.last().text)
+
+            val denied = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 482 motd #Room :List denied")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Denied, denied.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+            assertEquals(3, errors.size)
+        }
+
+    @Test
+    fun `an older ban list terminator does not fence a later removal`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+
+            val older = async { client.listChannelBans("#Room") }
+            runCurrent()
+            assertTrue(client.removeChannelBan("#Room", "*!*@*"))
+            ft.feed(":srv 368 motd #Room :End of older list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), older.await())
+
+            val refresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            ft.feed(":srv 482 motd #Room :Removal denied")
+            runCurrent()
+            assertFalse(refresh.isCompleted)
+            refresh.cancelAndJoin()
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+            ft.feed(":srv 368 motd #Room :End of canceled list")
+            runCurrent()
+
+            val fresh = async { client.listChannelBans("#Room") }
+            runCurrent()
+            assertFalse(fresh.isCompleted)
+            ft.feed(":srv 368 motd #Room :End of new list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(emptyList()), fresh.await())
+        }
+
+    @Test
     fun `channel bans drain canceled and truncated reads before reusing their channel`() =
         runTest {
             val ft = FakeTransport()

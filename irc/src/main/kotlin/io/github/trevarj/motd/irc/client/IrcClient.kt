@@ -1990,6 +1990,8 @@ class IrcClient(
         return outboundLock.withLock {
             val target = liveBanTarget(session, channel) ?: return false
             val line = channelBanModeLine(target, mask) ?: return false
+            // Record ambiguity before sending: even a failed write can already have reached the server.
+            session.removing(target, isupport.identityRules.caseMapping)
             writeChannelBanLine(session.transport, line)
         }
     }

@@ -103,6 +103,7 @@ internal class ChannelBanRows {
     private var denied = false
     private var ended = false
     private var malformed = false
+    var ambiguousDenial = false
 
     fun accept(message: IrcMessage) {
         when {
@@ -137,7 +138,7 @@ internal class ChannelBanRows {
     fun result(): ChannelBanListResult =
         when {
             denied -> ChannelBanListResult.Denied
-            ended && !malformed -> ChannelBanListResult.Complete(entries.toList())
+            ended && !malformed && (!ambiguousDenial || entries.isNotEmpty()) -> ChannelBanListResult.Complete(entries.toList())
             else -> ChannelBanListResult.Incomplete
         }
 
@@ -202,6 +203,12 @@ internal class ChannelBanRequests(
     private var unlabeledBlocked = false
     private var caseMapping: IrcCaseMapping = IrcCaseMapping.Rfc1459
 
+    // A bare 482 identifies a channel, not the command. Keep it visible while a removal could
+    // have produced it; only a later owned list end proves the removal is behind us.
+    // Null means tracking overflowed or the old channel keys can no longer be compared safely.
+    private var pendingRemovals: MutableSet<String>? = mutableSetOf()
+    private var removedDuringRead = false
+
     @Synchronized
     fun begin(
         request: ChannelBanRequest,
@@ -211,6 +218,7 @@ internal class ChannelBanRequests(
         if (closed || active != null) return false
         if (request.label == null && (unlabeledBlocked || mapping.normalize(request.channel) in drains)) return false
         active = request
+        removedDuringRead = false
         return true
     }
 
@@ -238,7 +246,27 @@ internal class ChannelBanRequests(
         val request = active
         active = null
         drains.clear()
+        pendingRemovals?.clear()
         request?.stopped?.complete(ChannelBanListResult.Incomplete)
+    }
+
+    @Synchronized
+    fun removing(
+        channel: String,
+        mapping: IrcCaseMapping,
+    ) {
+        updateMapping(mapping)
+        val pending = pendingRemovals ?: return
+        if (closed) return
+        val key = mapping.normalize(channel)
+        if (pending.size == MAX_PENDING_REMOVALS && key !in pending) {
+            pendingRemovals = null
+            return
+        }
+        pending += key
+        if (active?.let { it.label == null && mapping.normalize(it.channel) == key } == true) {
+            removedDuringRead = true
+        }
     }
 
     /** Track potentially competing raw ban-list reads without blocking raw writes or hiding replies. */
@@ -292,6 +320,12 @@ internal class ChannelBanRequests(
         }
         val request = active ?: return false
         if (request.label != null || mapping.normalize(request.channel) != target) return false
+        if (message.command == "482" && pendingRemovals?.contains(target) != false) {
+            // An optional end after a list denial looks exactly like an empty list here.
+            if (message.isBanDenial()) request.rows.ambiguousDenial = true
+            return false
+        }
+        if (message.isBanEnd() && !removedDuringRead) pendingRemovals?.remove(target)
         request.rows.accept(message)
         if (message.isBanEnd() || message.isBanDenial()) {
             active = null
@@ -310,6 +344,7 @@ internal class ChannelBanRequests(
     fun updateMapping(mapping: IrcCaseMapping) {
         if (caseMapping == mapping) return
         caseMapping = mapping
+        if (pendingRemovals?.isNotEmpty() == true) pendingRemovals = null
         if (drains.isNotEmpty() || active?.let { it.label == null } == true) {
             unlabeledBlocked = true
             drains.clear()
@@ -333,5 +368,6 @@ internal class ChannelBanRequests(
 
     private companion object {
         const val MAX_DRAINS = 64
+        const val MAX_PENDING_REMOVALS = 64
     }
 }
