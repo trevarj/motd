@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.ui.nav
 
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.ReportDrawn
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
@@ -251,6 +253,12 @@ fun MotdNavGraph(
         }
         composable<ChatRoute> { entry ->
             val route = entry.toRoute<ChatRoute>()
+            val chatViewModel: ChatViewModel = hiltViewModel(entry)
+            val activity = LocalActivity.current as? ComponentActivity
+            DisposableEffect(navController, entry, activity, chatViewModel) {
+                val detach = observeDccSendVisit(navController, entry, activity, chatViewModel::clearDccSendAttempt)
+                onDispose { detach() }
+            }
             val chatListEntry =
                 remember(entry, navController) {
                     navController.getBackStackEntry(requireNotNull(ChatListRoute::class.qualifiedName))
@@ -311,7 +319,6 @@ fun MotdNavGraph(
                         }
                     },
                     detailPane = { showBack ->
-                        val chatViewModel: ChatViewModel = hiltViewModel(entry)
                         ChatTranslationSessionEffect(navController, entry, chatViewModel::clearExternalTranslationSession)
                         val ircLinkViewModel: IrcLinkViewModel = hiltViewModel(entry)
                         IrcLinkDialog(
@@ -812,6 +819,30 @@ fun MotdNavGraph(
             }
         }
         owner.chatPageCache?.let { ChatPresentationHost(it, presentations) }
+    }
+}
+
+/** The entry owns DCC consent, not the detail pane or its resumed lifecycle. */
+internal fun observeDccSendVisit(
+    navController: NavController,
+    entry: NavBackStackEntry,
+    activity: ComponentActivity?,
+    clearAttempt: () -> Unit,
+): () -> Unit {
+    val listener =
+        NavController.OnDestinationChangedListener { controller, _, _ ->
+            if (controller.currentBackStackEntry != entry) clearAttempt()
+        }
+    val observer =
+        LifecycleEventObserver { _, event ->
+            // The Activity also stops during rotation; that does not end the chat visit.
+            if (event == Lifecycle.Event.ON_STOP && activity?.isChangingConfigurations == false) clearAttempt()
+        }
+    navController.addOnDestinationChangedListener(listener)
+    activity?.lifecycle?.addObserver(observer)
+    return {
+        navController.removeOnDestinationChangedListener(listener)
+        activity?.lifecycle?.removeObserver(observer)
     }
 }
 

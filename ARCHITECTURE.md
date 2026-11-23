@@ -671,6 +671,8 @@ flowchart TD
   this review rather than sending. Only confirmation can create a transfer record;
   the offer rechecks the same private chat and live IRC route, and never advertises
   a private address or bypasses a proxy.
+  Preparation, metadata consent, and final review survive rotation of the same chat visit;
+  navigating to another chat or leaving the app abandons them.
 - Hosted upload confirmation checks the known size against the selected destination and
   keeps the local full-image review separate from transport. Successful uploads retain
   bounded, local previews in backup-excluded Recent uploads: image/video/PDF thumbnails,

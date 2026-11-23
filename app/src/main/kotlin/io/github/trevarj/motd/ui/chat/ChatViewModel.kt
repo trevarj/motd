@@ -2189,7 +2189,7 @@ class ChatViewModel
             }
         }
 
-        private fun clearDccSendAttempt() {
+        internal fun clearDccSendAttempt() {
             dccSendAttempt = null
             dccPrepareJob?.cancel()
             dccPrepareJob = null
@@ -2393,7 +2393,6 @@ class ChatViewModel
         }
 
         fun onPause() {
-            clearDccSendAttempt()
             readAloudController.stop()
             AutoFollowTrace.record("chat_pause", operationalBufferId.value)
             foregroundBufferTracker.set(null)

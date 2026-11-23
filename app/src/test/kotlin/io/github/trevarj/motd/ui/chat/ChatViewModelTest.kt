@@ -1,12 +1,19 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.content.Context
+import android.content.res.Configuration
 import android.net.Uri
+import android.os.Bundle
+import androidx.activity.ComponentActivity
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
+import androidx.navigation.NavHostController
+import androidx.navigation.compose.ComposeNavigator
+import androidx.navigation.compose.composable
+import androidx.navigation.createGraph
 import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
@@ -122,6 +129,9 @@ import io.github.trevarj.motd.service.TypingTracker
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.testing.ReadAloudHarness
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.nav.ChatListRoute
+import io.github.trevarj.motd.ui.nav.ChatRoute
+import io.github.trevarj.motd.ui.nav.observeDccSendVisit
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import kotlinx.coroutines.CancellationException
@@ -174,6 +184,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
+import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import java.io.File
 
@@ -538,6 +549,106 @@ class ChatViewModelTest {
             }
             assertFalse(active.exists())
             assertNull(vm.dccSendReview.value)
+        }
+
+    @Test
+    fun dccPreparationConsentAndReviewSurviveRotationOfTheSameQueryVisit() =
+        runTest(dispatcher) {
+            val file = temporary.newFile()
+            val source = Uri.parse("content://files/generated")
+            val finishPreparation = CompletableDeferred<Unit>()
+            val controller =
+                FakeDccTransferController { _, _, allowOriginal ->
+                    if (!allowOriginal) throw MetadataNotSupportedException()
+                    finishPreparation.await()
+                    stagedReview(query, file)
+                }
+            val host = Robolectric.buildActivity(ComponentActivity::class.java).setup()
+            val factory =
+                object : ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : ViewModel> create(modelClass: Class<T>): T = externalTranslationFixture(db, query, backgroundScope, dccTransfers = controller) as T
+                }
+
+            fun navigation(saved: Bundle? = null) =
+                NavHostController(host.get()).apply {
+                    setLifecycleOwner(host.get())
+                    setViewModelStore(host.get().viewModelStore)
+                    navigatorProvider.addNavigator(ComposeNavigator())
+                    restoreState(saved)
+                    graph =
+                        createGraph(startDestination = ChatListRoute) {
+                            composable<ChatListRoute> {}
+                            composable<ChatRoute> {}
+                        }
+                }
+            var nav = navigation()
+            nav.navigate(ChatRoute(query.id))
+            val entry = checkNotNull(nav.currentBackStackEntry)
+            val vm = ViewModelProvider(entry, factory)[ChatViewModel::class.java]
+            var detach = observeDccSendVisit(nav, entry, host.get(), vm::clearDccSendAttempt)
+
+            fun rotate() {
+                val saved = nav.saveState()
+                val oldActivity = host.get()
+                val rotated = Configuration(oldActivity.resources.configuration)
+                rotated.orientation =
+                    if (rotated.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                        Configuration.ORIENTATION_PORTRAIT
+                    } else {
+                        Configuration.ORIENTATION_LANDSCAPE
+                    }
+                vm.onPause() // The screen's foreground gate also pauses during recreation.
+                host.configurationChange(rotated)
+                assertTrue(host.get() !== oldActivity)
+                detach()
+                nav = navigation(saved)
+                val restored = checkNotNull(nav.currentBackStackEntry)
+                assertEquals(entry.id, restored.id)
+                assertSame(vm, ViewModelProvider(restored, factory)[ChatViewModel::class.java])
+                detach = observeDccSendVisit(nav, restored, host.get(), vm::clearDccSendAttempt)
+                vm.onResume()
+            }
+
+            try {
+                vm.onResume()
+                runCurrent()
+                vm.sendDccFile(source)
+                runCurrent()
+                val consent = requireNotNull(vm.dccSendFailure.value)
+                assertTrue(consent.canSendOriginal)
+                rotate()
+                assertSame(consent, vm.dccSendFailure.value)
+
+                vm.sendDccOriginal(consent)
+                runCurrent()
+                rotate()
+                assertTrue(vm.preparingDccSend.value)
+                assertNull(vm.dccSendReview.value)
+
+                finishPreparation.complete(Unit)
+                runCurrent()
+                val review = requireNotNull(vm.dccSendReview.value)
+                rotate()
+                assertSame(review, vm.dccSendReview.value)
+                assertTrue(file.exists())
+
+                nav.navigate(ChatRoute(query.id + 1))
+                assertNull(vm.dccSendReview.value)
+                assertFalse(file.exists())
+                vm.confirmDccSend(review)
+                assertTrue(controller.sent.isEmpty())
+
+                assertTrue(nav.popBackStack())
+                vm.sendDccFile(source)
+                runCurrent()
+                assertTrue(requireNotNull(vm.dccSendFailure.value).canSendOriginal)
+                host.pause().stop()
+                assertNull(vm.dccSendFailure.value)
+            } finally {
+                detach()
+                host.close()
+            }
         }
 
     @Test
