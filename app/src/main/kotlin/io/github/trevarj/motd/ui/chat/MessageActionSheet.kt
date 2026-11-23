@@ -46,12 +46,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
@@ -61,11 +63,14 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.ui.components.EmojiPickerPanel
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
+import java.text.DateFormat
+import java.util.Date
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -101,8 +106,10 @@ fun MessageActionSheet(
     canSelectText: Boolean = false,
     onSelectText: () -> Unit = {},
     initialReactionsTab: Boolean = false,
+    eventInfo: MessageEntity? = null,
 ) {
-    val hasReactions = reactions.isNotEmpty()
+    val canReplyOrReact = !isServerBuffer && eventInfo == null
+    val hasReactions = eventInfo == null && reactions.isNotEmpty()
     var selectedTab by remember { mutableIntStateOf(if (initialReactionsTab) 1 else 0) }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -146,7 +153,7 @@ fun MessageActionSheet(
             }
 
             if (!hasReactions || selectedTab == 0) {
-                if (!isServerBuffer) {
+                if (canReplyOrReact) {
                     // Quick reactions + "more".
                     Row(
                         modifier =
@@ -187,7 +194,7 @@ fun MessageActionSheet(
                             )
                         }
                     }
-                } // end !isServerBuffer (reactions hidden for SERVER buffers)
+                }
                 BoxWithConstraints(
                     modifier =
                         Modifier
@@ -198,76 +205,79 @@ fun MessageActionSheet(
                             .padding(horizontal = 8.dp),
                 ) {
                     val cellWidth = maxWidth / 4
-                    FlowRow(modifier = Modifier.fillMaxWidth(), maxItemsInEachRow = 4) {
-                        // FlowRow probes weighted children's intrinsic widths before wrapping.
-                        val actionModifier = Modifier.weight(1f).widthIn(max = cellWidth)
-                        if (!isServerBuffer) {
+                    Column {
+                        eventInfo?.let { EventMessageInfo(it) }
+                        FlowRow(modifier = Modifier.fillMaxWidth(), maxItemsInEachRow = 4) {
+                            // FlowRow probes weighted children's intrinsic widths before wrapping.
+                            val actionModifier = Modifier.weight(1f).widthIn(max = cellWidth)
+                            if (canReplyOrReact) {
+                                ActionItem(
+                                    Icons.AutoMirrored.Filled.Reply,
+                                    stringResource(R.string.chat_action_reply),
+                                    onReply,
+                                    modifier = actionModifier.testTag("message_action_reply"),
+                                )
+                            }
+                            onTranslate?.let {
+                                ActionItem(
+                                    Icons.Outlined.Translate,
+                                    stringResource(R.string.chat_action_translate),
+                                    it,
+                                    modifier = actionModifier.testTag("message_action_translate"),
+                                )
+                            }
                             ActionItem(
-                                Icons.AutoMirrored.Filled.Reply,
-                                stringResource(R.string.chat_action_reply),
-                                onReply,
-                                modifier = actionModifier.testTag("message_action_reply"),
+                                Icons.Filled.ContentCopy,
+                                stringResource(R.string.chat_action_copy),
+                                onCopy,
+                                modifier = actionModifier.testTag("message_action_copy"),
                             )
-                        }
-                        onTranslate?.let {
+                            if (canSelectText) {
+                                ActionItem(
+                                    Icons.Outlined.TextFields,
+                                    stringResource(R.string.chat_action_select_text),
+                                    onSelectText,
+                                    modifier = actionModifier.testTag("message_action_select_text"),
+                                )
+                            }
+                            onForward?.let {
+                                ActionItem(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    stringResource(R.string.chat_action_forward),
+                                    it,
+                                    modifier = actionModifier.testTag("message_action_forward"),
+                                )
+                            }
                             ActionItem(
-                                Icons.Outlined.Translate,
-                                stringResource(R.string.chat_action_translate),
-                                it,
-                                modifier = actionModifier.testTag("message_action_translate"),
+                                Icons.Filled.Share,
+                                stringResource(R.string.chat_action_share),
+                                onShare,
+                                modifier = actionModifier.testTag("message_action_share"),
                             )
-                        }
-                        ActionItem(
-                            Icons.Filled.ContentCopy,
-                            stringResource(R.string.chat_action_copy),
-                            onCopy,
-                            modifier = actionModifier.testTag("message_action_copy"),
-                        )
-                        if (canSelectText) {
                             ActionItem(
-                                Icons.Outlined.TextFields,
-                                stringResource(R.string.chat_action_select_text),
-                                onSelectText,
-                                modifier = actionModifier.testTag("message_action_select_text"),
+                                Icons.Filled.FormatQuote,
+                                stringResource(R.string.chat_action_quote),
+                                onQuote,
+                                modifier = actionModifier.testTag("message_action_quote"),
                             )
+                            if (canRedact) {
+                                ActionItem(
+                                    Icons.Filled.DeleteOutline,
+                                    stringResource(R.string.chat_action_delete_message),
+                                    onRedact,
+                                    modifier = actionModifier.testTag("message_redact"),
+                                    tint = MaterialTheme.colorScheme.error,
+                                )
+                            }
+                            // Weighted blanks keep a partial last row in quarter-width cells.
+                            val actionCount =
+                                3 + (if (canReplyOrReact) 1 else 0) +
+                                    (if (onTranslate != null) 1 else 0) +
+                                    (if (onForward != null) 1 else 0) +
+                                    (if (canSelectText) 1 else 0) +
+                                    (if (canRedact) 1 else 0)
+                            repeat((4 - actionCount % 4) % 4) { Spacer(actionModifier) }
                         }
-                        onForward?.let {
-                            ActionItem(
-                                Icons.AutoMirrored.Filled.Send,
-                                stringResource(R.string.chat_action_forward),
-                                it,
-                                modifier = actionModifier.testTag("message_action_forward"),
-                            )
-                        }
-                        ActionItem(
-                            Icons.Filled.Share,
-                            stringResource(R.string.chat_action_share),
-                            onShare,
-                            modifier = actionModifier.testTag("message_action_share"),
-                        )
-                        ActionItem(
-                            Icons.Filled.FormatQuote,
-                            stringResource(R.string.chat_action_quote),
-                            onQuote,
-                            modifier = actionModifier.testTag("message_action_quote"),
-                        )
-                        if (canRedact) {
-                            ActionItem(
-                                Icons.Filled.DeleteOutline,
-                                stringResource(R.string.chat_action_delete_message),
-                                onRedact,
-                                modifier = actionModifier.testTag("message_redact"),
-                                tint = MaterialTheme.colorScheme.error,
-                            )
-                        }
-                        // Weighted blanks keep a partial last row in quarter-width cells.
-                        val actionCount =
-                            3 + (if (!isServerBuffer) 1 else 0) +
-                                (if (onTranslate != null) 1 else 0) +
-                                (if (onForward != null) 1 else 0) +
-                                (if (canSelectText) 1 else 0) +
-                                (if (canRedact) 1 else 0)
-                        repeat((4 - actionCount % 4) % 4) { Spacer(actionModifier) }
                     }
                 }
             } else {
@@ -335,6 +345,33 @@ fun MessageActionSheet(
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun EventMessageInfo(event: MessageEntity) {
+    val locale = LocalConfiguration.current.locales[0]
+    val time =
+        remember(event.serverTime, locale) {
+            DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM, locale).format(Date(event.serverTime))
+        }
+    Column(
+        modifier = Modifier.testTag("message_event_info").padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            text = stringResource(R.string.chat_message_info),
+            style = MaterialTheme.typography.titleLarge,
+            modifier = Modifier.semantics { heading() },
+        )
+        Text(event.text, style = MaterialTheme.typography.bodyLarge)
+        if (event.sender.isNotBlank()) {
+            Text(stringResource(R.string.chat_message_info_sender, event.sender), style = MaterialTheme.typography.bodyMedium)
+        }
+        Text(stringResource(R.string.chat_message_info_time, time), style = MaterialTheme.typography.bodyMedium)
+        event.msgid?.let {
+            Text(stringResource(R.string.chat_message_info_id, it), style = MaterialTheme.typography.bodyMedium)
         }
     }
 }

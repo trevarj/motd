@@ -2139,17 +2139,54 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun externalTranslationSingleSystemHoldOpensPickerDirectlyWithLabsOff() {
-        val parent = translationMessage().copy(kind = MessageKind.JOIN, text = "alice joined")
+    fun standaloneJoinHoldShowsMessageInfoAndTranslatesOnlyOnExplicitActionWithLabsOff() {
+        registerTranslationHandler()
+        val event = translationMessage().copy(kind = MessageKind.JOIN, text = "alice joined", msgid = "join-event-id")
         setContent(
             draft = { ComposerDraftState("", hydrated = true, revision = 1) },
-            pages = flowOf(PagingData.from(listOf(parent))),
+            pages = flowOf(PagingData.from(listOf(event))),
+            reactionChips = { listOf(ReactionChip("👍", 1, mine = false, reactorDisplayNames = listOf("bob"))) },
             activityResults = pickerOwner,
+            onBeginExternalTranslation = { error("Opening or canceling the picker must not launch translation") },
             onSubmit = { error("translation sent") },
         )
-        compose.onNodeWithTag("chat_system_pill").performTouchInput { longClick() }
+        val pill = compose.onNodeWithTag("chat_system_pill")
+        pill.performTouchInput { longClick() }
+        compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
+        compose.onNodeWithTag("message_event_info").assertIsDisplayed()
+        val inInfo = hasAnyAncestor(hasTestTag("message_event_info"))
+        compose.onNode(hasText("Message info") and inInfo, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(hasText(event.text) and inInfo, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(hasText("Sender: ${event.sender}") and inInfo, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(hasText("Message ID: ${event.msgid}") and inInfo, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNode(hasText("Time: ", substring = true) and inInfo, useUnmergedTree = true).assertIsDisplayed()
+        compose.onNodeWithTag("message_action_reply").assertDoesNotExist()
+        compose.onNodeWithTag("message_more_reactions").assertDoesNotExist()
+        compose.onNodeWithTag("message_action_tab_reactions").assertDoesNotExist()
+        compose.onNode(hasText("👍") and hasAnyAncestor(hasTestTag("message_action_sheet"))).assertDoesNotExist()
+        compose.onNodeWithTag("message_action_select_text").assertDoesNotExist()
+        compose.onNodeWithTag("message_translation_picker").assertDoesNotExist()
+        compose.onNodeWithTag("message_action_copy").performScrollTo().performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.onNodeWithTag("message_translation_picker").assertDoesNotExist()
+        compose.runOnIdle {
+            val clipboard = RuntimeEnvironment.getApplication().getSystemService(ClipboardManager::class.java)
+            assertEquals(
+                event.text,
+                clipboard.primaryClip
+                    ?.getItemAt(0)
+                    ?.text
+                    ?.toString(),
+            )
+        }
+
+        pill.performTouchInput { longClick() }
+        compose.onNodeWithTag("message_translation_picker").assertDoesNotExist()
+        compose.onNodeWithTag("message_action_translate").performScrollTo().performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
         compose.onNodeWithTag("message_translation_picker").assertIsDisplayed()
-        compose.onNodeWithTag("message_action_translate").assertDoesNotExist()
+        compose.onNodeWithTag("message_translation_local").assertDoesNotExist()
+        compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").assertIsDisplayed()
         compose.onNodeWithTag("message_translation_cancel").performClick()
         compose.runOnIdle { assertTrue(pickerLaunchedIntents.isEmpty()) }
     }

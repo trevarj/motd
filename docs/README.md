@@ -231,6 +231,10 @@ buffers. Selected apps receive only that message's plain text and may send it to
 an online service. Apps labeled **Opens externally** do not return an inline result;
 other apps produce one only if they return text.
 
+Long-hold a system-event pill to see Message info and actions such as Copy,
+Share, Quote, and Translate. For a grouped pill, expand it and hold the
+individual event.
+
 Returned chat text appears in a solid reply-like inset inside its original bubble,
 dense row, card or pill in every layout. It wraps naturally without a two-line
 limit, remains selectable, and has its own dismiss button. The original message's

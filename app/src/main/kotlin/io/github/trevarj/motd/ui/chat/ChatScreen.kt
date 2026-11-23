@@ -230,6 +230,7 @@ import io.github.trevarj.motd.data.db.DccTransferEntity
 import io.github.trevarj.motd.data.db.DccTransferState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MessageEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.isSchedulableMessage
@@ -4871,7 +4872,6 @@ internal fun ChatContent(
                                                 bottomContentPadding = innerPadding,
                                                 topContentPadding = padding.calculateTopPadding(),
                                                 rowContentMetrics = rowContentMetrics,
-                                                onTranslateMessage = ::openTranslationPicker,
                                                 externalTranslations = externalTranslations,
                                                 onDismissExternalTranslation = onDismissExternalTranslation,
                                                 liveEntryIds = entries,
@@ -5465,6 +5465,13 @@ internal fun ChatContent(
 
         sheetRequest?.let { (target, initialReactionsTab) ->
             val selectionBufferId = state.buffer?.id
+            val eventInfo =
+                target.takeIf {
+                    when (it.kind) {
+                        MessageKind.INVITE, MessageKind.NETSPLIT, MessageKind.NETJOIN, MessageKind.DCC_TRANSFER -> true
+                        else -> !isServerBuffer && isSystemKind(it.kind)
+                    }
+                }
             // Dismiss with the M3 hide animation, clearing the target only once it settles.
             val hideThen: (() -> Unit) -> Unit = { after ->
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -5476,7 +5483,8 @@ internal fun ChatContent(
                 sheetState = sheetState,
                 initialReactionsTab = initialReactionsTab,
                 isServerBuffer = isServerBuffer,
-                canSelectText = canSelectMessage(target),
+                eventInfo = eventInfo,
+                canSelectText = eventInfo == null && canSelectMessage(target),
                 onSelectText = {
                     scope.launch {
                         sheetState.hide()

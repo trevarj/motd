@@ -79,8 +79,6 @@ import androidx.navigation.toRoute
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
 import androidx.paging.compose.collectAsLazyPagingItems
-import io.github.trevarj.motd.ai.text.TextTermination
-import io.github.trevarj.motd.ai.text.TextTransformResult
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioPlaybackRequest
 import io.github.trevarj.motd.data.db.DccAddressKind
@@ -105,9 +103,6 @@ import io.github.trevarj.motd.data.sync.COMMAND_RESPONSE_PAYLOAD_PREFIX
 import io.github.trevarj.motd.data.sync.InvitePayloadV1
 import io.github.trevarj.motd.data.sync.NetworkBatchPayloadV1
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
-import io.github.trevarj.motd.ui.ai.AiTextSheet
-import io.github.trevarj.motd.ui.ai.AiTextSource
-import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.chat.InlineTranslation
 import io.github.trevarj.motd.ui.chat.MessageList
 import io.github.trevarj.motd.ui.chat.MessageUrlCache
@@ -1305,6 +1300,7 @@ class MessageTimelineUiTest {
         var joined = 0L
         var dismissed = 0L
         var rejected = 0L
+        var held: MessageEntity? = null
         var foolOpen by mutableStateOf(false)
         val transfer =
             DccTransferEntity(
@@ -1345,7 +1341,7 @@ class MessageTimelineUiTest {
             flowOf(PagingData.from(rows)),
             onAcceptInvite = { joined = it },
             onDismissInvite = { dismissed = it },
-            translation = true,
+            onLongPress = { held = it },
             dccTransfer = { MutableStateFlow(if (it.id == 8L) transfer else null) },
             onRejectDccTransfer = { rejected = it },
             fools = setOf("alice"),
@@ -1373,47 +1369,47 @@ class MessageTimelineUiTest {
         ).forEach { (tag, row) ->
             scrollTo(tag)
             compose.onNodeWithTag(tag, useUnmergedTree = true).performTouchInput { longClick() }
-            compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
-            compose.onNodeWithTag("ai_text_source").assertTextEquals(row.text)
-            compose.runOnIdle { assertEquals(row.id, translatedEventId) }
-            compose.onNodeWithTag("ai_text_translate").performClick()
-            compose.onNodeWithTag("ai_text_result").assertTextEquals("Traduction locale.")
-            compose.onNodeWithTag("ai_text_apply").assertDoesNotExist()
-            compose.onNodeWithTag("ai_text_close").performClick()
+            compose.runOnIdle {
+                assertEquals(row, held)
+                held = null
+            }
         }
         scrollTo(messageTag(2))
         compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).performTouchInput { longClick() }
-        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(null, held) }
         // Quiet-feed concealment remains a second deliberate reveal, even for an expanded fool.
         compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).performTouchInput { longClick() }
-        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(null, held) }
         compose.onNodeWithTag(messageTag(2), useUnmergedTree = true).performTouchInput { longClick() }
-        compose.onNodeWithTag("ai_text_source").assertTextEquals("concealed fool prose")
-        compose.onNodeWithTag("ai_text_close").performClick()
+        compose.runOnIdle {
+            assertEquals(rows[6], held)
+            held = null
+        }
         scrollTo(messageTag(1))
         compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput { longClick() }
-        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(null, held) }
         compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput { longClick() }
-        compose.onNodeWithTag("ai_text_source").assertTextEquals("quiet ebook prose")
+        compose.runOnIdle { assertEquals(rows[7], held) }
     }
 
     @Test
     fun groupedDuplicateLinesKeepExactIdentityAfterPaging() {
         val rows = listOf(message(1002, 300, MessageKind.JOIN, "duplicate"), message(1001, 200, MessageKind.PART, "duplicate"))
         val pages = MutableStateFlow(PagingData.from(rows))
-        render(pages, translation = true)
+        var held: MessageEntity? = null
+        render(pages, onLongPress = { held = it })
         scrollTo("chat_system_pill")
         compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performTouchInput { longClick() }
-        listOf(1001L, 1002L).forEach { id ->
-            compose.onNodeWithTag("chat_system_event_$id", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnLongClick)
-            compose.runOnIdle { assertEquals(id, translatedEventId) }
-            compose.onNodeWithTag("ai_text_source").assertIsDisplayed()
-            compose.onNodeWithTag("ai_text_close").performClick()
+        compose.runOnIdle { assertEquals(null, held) }
+        rows.asReversed().forEach { row ->
+            compose.onNodeWithTag("chat_system_event_${row.id}", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnLongClick)
+            compose.runOnIdle { assertEquals(row, held) }
         }
-        compose.runOnIdle { pages.value = PagingData.from(rows + message(1000, 100, MessageKind.QUIT, "older")) }
-        compose.waitForIdle()
+        val older = message((900L until 1001L).last { !isSystemRunChunkBoundary(it) }, 100, MessageKind.QUIT, "older")
+        compose.runOnIdle { pages.value = PagingData.from(rows + older) }
+        compose.onNodeWithTag("chat_system_event_${older.id}", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("chat_system_event_1001", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnLongClick)
-        compose.runOnIdle { assertEquals(1001L, translatedEventId) }
+        compose.runOnIdle { assertEquals(rows[1], held) }
     }
 
     @Test
@@ -1549,7 +1545,8 @@ class MessageTimelineUiTest {
         val older = message((900L until source.id).last { !isSystemRunChunkBoundary(it) }, 100, MessageKind.QUIT, "older")
         val pages = MutableStateFlow(PagingData.from(listOf(newer, source)))
         val translations = mapOf(source.id to InlineTranslation(1, source.id, source.text, "Exact older line translation"))
-        render(pages, externalTranslations = { translations }, translation = true)
+        var holds = 0
+        render(pages, externalTranslations = { translations }, onLongPress = { holds++ })
         scrollTo("chat_system_pill")
         compose.onNodeWithTag("message_translation_1001").assertDoesNotExist()
         compose.onNodeWithTag("chat_system_pill", useUnmergedTree = true).performClick()
@@ -1560,8 +1557,7 @@ class MessageTimelineUiTest {
         val resultText = compose.onNodeWithText("Exact older line translation", useUnmergedTree = true)
         assertNoSourceActions(resultText.fetchSemanticsNode())
         resultText.performTouchInput { longClick() }
-        compose.runOnIdle { assertEquals(null, translatedEventId) }
-        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(0, holds) }
         compose.onNodeWithTag("message_translation_1002").assertDoesNotExist()
         compose.runOnIdle { pages.value = PagingData.from(listOf(newer, source, older)) }
         compose.onNodeWithTag("chat_system_event_${older.id}", useUnmergedTree = true).assertIsDisplayed()
@@ -1720,10 +1716,11 @@ class MessageTimelineUiTest {
         val output = "**Hello** https://invalid.example/a"
         val translations = mapOf(source.id to InlineTranslation(1, source.id, source.text, output))
         var replies = 0
+        var holds = 0
         render(
             flowOf(PagingData.from(listOf(source))),
             externalTranslations = { translations },
-            translation = true,
+            onLongPress = { holds++ },
             onReply = { replies++ },
         )
         scrollTo("message_translation_1")
@@ -1738,8 +1735,7 @@ class MessageTimelineUiTest {
         compose.onAllNodes(selectionHandle, useUnmergedTree = true).assertCountEquals(0)
         text.performTouchInput { longClick() }
         compose.waitUntil(5_000) { compose.onAllNodes(selectionHandle, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty() }
-        compose.onNodeWithTag("ai_text_sheet").assertDoesNotExist()
-        compose.runOnIdle { assertEquals(null, translatedEventId) }
+        compose.runOnIdle { assertEquals(0, holds) }
         val sourceDrag = with(compose.density) { 160.dp.toPx() }
         compose.onNodeWithTag(messageTag(1), useUnmergedTree = true).performTouchInput {
             // Source content can be narrower than the armed drag distance; capture inside it.
@@ -1979,7 +1975,6 @@ class MessageTimelineUiTest {
         }
     }
 
-    private var translatedEventId: Long? = null
     private var observedSystemGestureInsets: Pair<Int, Int>? = null
 
     private fun render(
@@ -2001,7 +1996,7 @@ class MessageTimelineUiTest {
         preserveOutgoingHiddenBodies: () -> Boolean = { false },
         foolExpanded: (Long) -> Boolean = { false },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
-        translation: Boolean = false,
+        onLongPress: (MessageEntity) -> Unit = {},
         dccTransfer: (MessageEntity) -> StateFlow<DccTransferEntity?> = { MutableStateFlow(null) },
         onRejectDccTransfer: (Long) -> Unit = {},
         onToggleFool: (Long) -> Unit = {},
@@ -2033,7 +2028,6 @@ class MessageTimelineUiTest {
         onFlightRowPositioned: (Long, Rect) -> Unit = { _, _ -> },
     ) {
         compose.setContent {
-            var ai by androidx.compose.runtime.remember { mutableStateOf<AiTextUiState>(AiTextUiState.Closed) }
             CompositionLocalProvider(
                 LocalDickordLabsEnabled provides dickordEnabled,
                 LocalAutomaticRemoteMedia provides automaticRemoteMedia,
@@ -2080,21 +2074,7 @@ class MessageTimelineUiTest {
                         directMessage = directMessage,
                         readMarkerTime = marker,
                         timelineSeams = timelineSeams(),
-                        onLongPress = { message ->
-                            if (translation) {
-                                translatedEventId = message.id
-                                ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(message.bufferId, message.id, message.msgid, message.text))
-                            }
-                        },
-                        onTranslateMessage =
-                            if (translation) {
-                                { message ->
-                                    translatedEventId = message.id
-                                    ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(message.bufferId, message.id, message.msgid, message.text))
-                                }
-                            } else {
-                                null
-                            },
+                        onLongPress = onLongPress,
                         externalTranslations = externalTranslations(),
                         onDismissExternalTranslation = onDismissExternalTranslation,
                         onReply = onReply,
@@ -2126,17 +2106,6 @@ class MessageTimelineUiTest {
                         dccTransfer = dccTransfer,
                         onRejectDccTransfer = onRejectDccTransfer,
                     )
-                    AiTextSheet(ai, emptyList(), null, onGenerate = {
-                        val source = (ai as AiTextUiState.Choosing).source as AiTextSource.StoredMessage
-                        ai =
-                            AiTextUiState.Result(
-                                source.eventId,
-                                source,
-                                source.text,
-                                TextTransformResult("Traduction locale.", TextTermination.EOG),
-                                1,
-                            )
-                    }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
                 }
             }
         }

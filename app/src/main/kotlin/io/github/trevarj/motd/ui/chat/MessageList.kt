@@ -467,7 +467,6 @@ fun MessageList(
     temporaryFoolVisibilityMotion: Boolean = false,
     hiddenFoolVisibility: Transition<Boolean>? = null,
     preserveOutgoingHiddenBodies: Boolean = false,
-    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     externalTranslations: Map<Long, InlineTranslation> = emptyMap(),
     onDismissExternalTranslation: (Long) -> Unit = {},
     // Reserve the overlaid bottom host without truncating the scrollable/drawn viewport.
@@ -621,7 +620,7 @@ fun MessageList(
             val translationContent: (@Composable (Color) -> Unit)? =
                 translation?.let { result -> { color -> InlineMessageTranslation(result, color) { onDismissExternalTranslation(result.eventId) } } }
             val translationHostModifier = if (translation != null) Modifier.testTag("message_translation_host_${msg.id}") else Modifier
-            val translationHold = onTranslateMessage.takeUnless { outgoingFlight?.matches(msg) == true }
+            val eventHold = onLongPress.takeUnless { outgoingFlight?.matches(msg) == true }
             val older = if (index + 1 < snapshot.size) snapshot[index + 1] else null
             val newer = if (index > 0) snapshot[index - 1] else null
 
@@ -644,7 +643,7 @@ fun MessageList(
                             message = msg,
                             onJoin = { onAcceptInvite(msg.id) },
                             onDismiss = { onDismissInvite(msg.id) },
-                            onLongPress = translationHold?.let { { it(msg) } },
+                            onLongPress = eventHold?.let { { it(msg) } },
                             trailingContent = translationContent,
                             modifier = translationHostModifier,
                             rootModifier = rowModifier,
@@ -668,7 +667,7 @@ fun MessageList(
                     ) { rowModifier ->
                         NetworkBatchPill(
                             message = msg,
-                            onLongPress = translationHold?.let { { it(msg) } },
+                            onLongPress = eventHold?.let { { it(msg) } },
                             trailingContent = translationContent,
                             modifier = translationHostModifier,
                             rootModifier = rowModifier,
@@ -699,7 +698,7 @@ fun MessageList(
                             onReject = onRejectDccTransfer,
                             onRemove = onRemoveDccTransfer,
                             onSaveToDownloads = onSaveDccToDownloads,
-                            onLongPress = translationHold?.let { { it(msg) } },
+                            onLongPress = eventHold?.let { { it(msg) } },
                             trailingContent = translationContent,
                             modifier = translationHostModifier,
                             rootModifier = rowModifier,
@@ -739,7 +738,7 @@ fun MessageList(
                         timelineSeams = timelineSeams,
                         onLoadGap = onLoadGap,
                         expandedEventIds = expandedSystemEventIds,
-                        onTranslateMessage = translationHold,
+                        onLongPress = eventHold,
                         externalTranslations = externalTranslations,
                         onDismissExternalTranslation = onDismissExternalTranslation,
                         onExpandedChange = { runIds, expanded ->
@@ -1106,7 +1105,7 @@ internal fun ActiveDccTransferCard(
                 Modifier.combinedClickable(
                     onClick = {},
                     onLongClick = it,
-                    onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                    onLongClickLabel = stringResource(R.string.chat_message_actions),
                 )
             } ?: Modifier,
         )
@@ -1634,7 +1633,7 @@ private fun InvitationCard(
                             Modifier.combinedClickable(
                                 onClick = {},
                                 onLongClick = it,
-                                onLongClickLabel = stringResource(R.string.ai_text_translate_message),
+                                onLongClickLabel = stringResource(R.string.chat_message_actions),
                             )
                         } ?: Modifier,
                     )
@@ -1703,7 +1702,7 @@ private fun SystemEventRun(
     onLoadGap: (Long) -> Unit,
     expandedEventIds: Set<Long>,
     onExpandedChange: (Collection<Long>, Boolean) -> Unit,
-    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+    onLongPress: ((MessageEntity) -> Unit)?,
     externalTranslations: Map<Long, InlineTranslation> = emptyMap(),
     onDismissExternalTranslation: (Long) -> Unit = {},
 ) {
@@ -1768,12 +1767,13 @@ private fun SystemEventRun(
             onExpandedChange = { expanded -> onExpandedChange(runIds, expanded) },
             forceCollapsible = commandResponse,
             modifier = Modifier.testTag("chat_system_pill"),
+            onLongPressLabel = stringResource(if (run.size == 1) R.string.chat_message_actions else R.string.system_event_expand),
             onLongPress =
-                onTranslateMessage?.let { callback ->
+                onLongPress?.let { callback ->
                     { if (run.size == 1) callback(newest) else onExpandedChange(runIds, true) }
                 },
             onLineLongPress =
-                onTranslateMessage?.let { callback ->
+                onLongPress?.let { callback ->
                     { index -> callback(run[run.lastIndex - index]) }
                 },
             lineKey = { index -> run[run.lastIndex - index].id },

@@ -672,6 +672,7 @@
     <string name="network_settings_collapse">Collapse settings</string>
     <string name="system_event_expanded">Expanded</string>
     <string name="system_event_collapsed">Collapsed</string>
+    <string name="system_event_expand">Expand event group</string>
     <string name="network_settings_unsaved_title">Discard unsaved changes?</string>
     <string name="network_settings_unsaved_message">Your network edits have not been saved.</string>
     <string name="network_settings_keep_editing">Keep editing</string>
@@ -965,6 +966,11 @@
     <string name="action_back">Back</string>
     <string name="action_continue">Continue</string>
     <string name="action_more">More actions</string>
+    <string name="chat_message_actions">Message actions</string>
+    <string name="chat_message_info">Message info</string>
+    <string name="chat_message_info_sender">Sender: %1$s</string>
+    <string name="chat_message_info_time">Time: %1$s</string>
+    <string name="chat_message_info_id">Message ID: %1$s</string>
     <string name="chat_action_reply">Reply</string>
     <string name="chat_reply_sender_not_in_channel">%1$s isn’t currently in this channel</string>
     <string name="chat_reply_target_unavailable">Original message not available</string>

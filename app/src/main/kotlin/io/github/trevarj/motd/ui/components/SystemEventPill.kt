@@ -91,6 +91,7 @@ internal fun SystemEventPill(
     onExpandedChange: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
     forceCollapsible: Boolean = false,
+    onLongPressLabel: String = stringResource(R.string.chat_message_actions),
     onLongPress: (() -> Unit)? = null,
     onLineLongPress: ((Int) -> Unit)? = null,
     lineKey: ((Int) -> Any)? = null,
@@ -132,7 +133,7 @@ internal fun SystemEventPill(
                 if (collapsible || onLongPress != null) {
                     Modifier.combinedClickable(
                         onClick = { if (collapsible) onExpandedChange(!showLines) },
-                        onLongClickLabel = stringResource(R.string.ai_text_translate),
+                        onLongClickLabel = onLongPressLabel,
                         onLongClick = onLongPress,
                     )
                 } else {
@@ -172,7 +173,7 @@ internal fun SystemEventPill(
                                             if (separateSource || onLineLongPress != null) {
                                                 Modifier.combinedClickable(
                                                     onClick = { if (separateSource) onExpandedChange(false) },
-                                                    onLongClickLabel = stringResource(R.string.ai_text_translate),
+                                                    onLongClickLabel = stringResource(R.string.chat_message_actions),
                                                     onLongClick = onLineLongPress?.let { callback -> { callback(index) } } ?: onLongPress,
                                                 )
                                             } else {
