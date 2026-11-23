@@ -995,6 +995,17 @@ class ConnectionManagerImpl
                     ?.connection as? IrcClientConnection
             )?.client
 
+        override fun readyClientForRoute(
+            networkId: Long,
+            expectedFingerprint: String,
+        ): IrcClient? {
+            val snapshot = registry.snapshot.value
+            val actor = snapshot.actors[networkId] ?: return null
+            if (!actor.isAlive || actor.fingerprint != expectedFingerprint || snapshot.states[networkId] !is IrcClientState.Ready) return null
+            val client = (actor.connection as? IrcClientConnection)?.client ?: return null
+            return client.takeIf { it.state.value is IrcClientState.Ready && registry.isCurrent(networkId, actor.generation) }
+        }
+
         // -- lifecycle ----------------------------------------------------------
 
         override suspend fun startAll() {

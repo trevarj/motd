@@ -72,7 +72,9 @@ import io.github.trevarj.motd.data.sync.historySource
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.dcc.DccSendUnavailableException
 import io.github.trevarj.motd.dcc.DccTransferController
+import io.github.trevarj.motd.dcc.PreparedDccSend
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -141,12 +143,14 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.getAndUpdate
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.mapNotNull
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -2096,53 +2100,143 @@ class ChatViewModel
             dccTransferController.saveToDownloads(transferId)
         }
 
-        internal data class DccSendFailure(
-            val attemptId: Long,
+        private data class DccSendTarget(
             val bufferId: Long,
-            val source: Uri,
-            val canSendOriginal: Boolean,
+            val networkId: Long,
+            val normalizedPeer: String,
+            val peerNick: String,
         )
 
-        private var dccSendAttemptId = 0L
+        private fun BufferEntity.dccSendTarget(): DccSendTarget? =
+            if (type == BufferType.QUERY && !dismissed && pendingCloseAt == null && redirectToRoomId == null) {
+                DccSendTarget(id, networkId, name, displayName)
+            } else {
+                null
+            }
+
+        private class DccSendAttempt(
+            val target: DccSendTarget,
+            val source: Uri,
+        )
+
+        internal class DccSendFailure(
+            val canSendOriginal: Boolean,
+            val message: String? = null,
+        )
+
+        private var dccSendAttempt: DccSendAttempt? = null
+        private var dccPrepareJob: Job? = null
         private val _dccSendFailure = MutableStateFlow<DccSendFailure?>(null)
         internal val dccSendFailure: StateFlow<DccSendFailure?> = _dccSendFailure.asStateFlow()
+        private val _dccSendReview = MutableStateFlow<PreparedDccSend?>(null)
+        internal val dccSendReview: StateFlow<PreparedDccSend?> = _dccSendReview.asStateFlow()
+        private val _preparingDccSend = MutableStateFlow(false)
+        internal val preparingDccSend: StateFlow<Boolean> = _preparingDccSend.asStateFlow()
 
-        fun sendDccFile(source: Uri) {
-            val request = DccSendFailure(++dccSendAttemptId, operationalBufferId.value, source, false)
+        init {
+            viewModelScope.launch {
+                buffer.map { it?.dccSendTarget() }.distinctUntilChanged().collect { target ->
+                    if (dccSendAttempt?.target != target) clearDccSendAttempt()
+                }
+            }
+        }
+
+        private fun clearDccSendAttempt() {
+            dccSendAttempt = null
+            dccPrepareJob?.cancel()
+            dccPrepareJob = null
+            _preparingDccSend.value = false
             _dccSendFailure.value = null
-            launchDccSend(request, allowOriginalMetadata = false)
+            _dccSendReview.getAndUpdate { null }?.close()
+        }
+
+        private fun isCurrent(attempt: DccSendAttempt): Boolean = dccSendAttempt === attempt && buffer.value?.dccSendTarget() == attempt.target
+
+        internal fun sendDccFile(source: Uri) {
+            clearDccSendAttempt()
+            val target = buffer.value?.dccSendTarget() ?: return
+            val attempt = DccSendAttempt(target, source)
+            dccSendAttempt = attempt
+            prepareDccSend(attempt, allowOriginalMetadata = false)
         }
 
         internal fun dismissDccSendFailure(failure: DccSendFailure) {
-            _dccSendFailure.compareAndSet(failure, null)
+            if (_dccSendFailure.value === failure) clearDccSendAttempt()
         }
 
         internal fun sendDccOriginal(failure: DccSendFailure) {
-            if (!failure.canSendOriginal || failure.attemptId != dccSendAttemptId) return
+            val attempt = dccSendAttempt ?: return
+            if (!failure.canSendOriginal || !isCurrent(attempt)) return
             if (!_dccSendFailure.compareAndSet(failure, null)) return
-            launchDccSend(failure, allowOriginalMetadata = true)
+            prepareDccSend(attempt, allowOriginalMetadata = true)
         }
 
-        private fun launchDccSend(
-            request: DccSendFailure,
-            allowOriginalMetadata: Boolean,
-        ) {
-            viewModelScope.launch {
+        internal fun dismissDccSendReview(review: PreparedDccSend) {
+            if (_dccSendReview.value === review) clearDccSendAttempt()
+        }
+
+        internal fun confirmDccSend(review: PreparedDccSend) {
+            val attempt = dccSendAttempt ?: return
+            if (_dccSendReview.value !== review) return
+            if (!isCurrent(attempt)) {
+                clearDccSendAttempt()
+                return
+            }
+            _dccSendReview.value = null
+            viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
                 try {
-                    dccTransferController.sendFile(
-                        request.bufferId,
-                        request.source,
-                        allowOriginalMetadata = allowOriginalMetadata,
-                    )
+                    coroutineContext.ensureActive()
+                    dccTransferController.sendPrepared(review)
+                    if (isCurrent(attempt)) clearDccSendAttempt()
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
-                    if (request.attemptId == dccSendAttemptId) {
-                        _dccSendFailure.value =
-                            request.copy(canSendOriginal = !allowOriginalMetadata && failure is MetadataNotSupportedException)
+                    if (isCurrent(attempt)) {
+                        _dccSendFailure.value = DccSendFailure(false, (failure as? DccSendUnavailableException)?.message)
                     }
+                } finally {
+                    review.close()
                 }
             }
+        }
+
+        private fun prepareDccSend(
+            attempt: DccSendAttempt,
+            allowOriginalMetadata: Boolean,
+        ) {
+            _preparingDccSend.value = true
+            dccPrepareJob =
+                viewModelScope.launch {
+                    try {
+                        val target = attempt.target
+                        val prepared = dccTransferController.prepareSend(target.bufferId, attempt.source, allowOriginalMetadata)
+                        if (!isActive || !isCurrent(attempt)) {
+                            prepared.close()
+                            return@launch
+                        }
+                        if (prepared.bufferId != target.bufferId ||
+                            prepared.networkId != target.networkId ||
+                            prepared.normalizedPeer != target.normalizedPeer ||
+                            prepared.peerNick != target.peerNick
+                        ) {
+                            prepared.close()
+                            throw DccSendUnavailableException("The recipient or network changed. Choose the file again.")
+                        }
+                        _dccSendReview.value = prepared
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (failure: Exception) {
+                        if (isActive && isCurrent(attempt)) {
+                            _dccSendFailure.value =
+                                DccSendFailure(
+                                    !allowOriginalMetadata && failure is MetadataNotSupportedException,
+                                    (failure as? DccSendUnavailableException)?.message,
+                                )
+                        }
+                    } finally {
+                        if (isCurrent(attempt)) _preparingDccSend.value = false
+                    }
+                }
         }
 
         private fun createReplyPreviewFlow(
@@ -2251,6 +2345,7 @@ class ChatViewModel
         }
 
         fun onPause() {
+            clearDccSendAttempt()
             readAloudController.stop()
             AutoFollowTrace.record("chat_pause", operationalBufferId.value)
             foregroundBufferTracker.set(null)
@@ -3177,6 +3272,7 @@ class ChatViewModel
         }
 
         override fun onCleared() {
+            clearDccSendAttempt()
             invalidateAiDraftTransform()
         }
 

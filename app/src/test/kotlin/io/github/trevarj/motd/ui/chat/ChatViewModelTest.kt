@@ -3,11 +3,17 @@ package io.github.trevarj.motd.ui.chat
 import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.SavedStateHandle
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.ViewModelStore
 import androidx.lifecycle.viewModelScope
 import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.attachment.AttachmentSource
+import io.github.trevarj.motd.attachment.MetadataNotSupportedException
+import io.github.trevarj.motd.attachment.PreparedUpload
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -78,7 +84,9 @@ import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityReader
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
+import io.github.trevarj.motd.dcc.DccSendUnavailableException
 import io.github.trevarj.motd.dcc.DccTransferController
+import io.github.trevarj.motd.dcc.PreparedDccSend
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
@@ -162,9 +170,12 @@ import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import org.junit.Rule
 import org.junit.Test
+import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.io.File
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -262,6 +273,8 @@ class ChatViewModelTest {
             )
     }
 
+    @get:Rule val temporary = TemporaryFolder()
+
     private val dispatcher = StandardTestDispatcher()
     private lateinit var db: MotdDatabase
     private lateinit var network: NetworkEntity
@@ -332,32 +345,45 @@ class ChatViewModelTest {
     fun dccOriginalConsentIsBoundToOneAttemptAndNeverOfferedForOtherFailures() =
         runTest(dispatcher) {
             val calls = mutableListOf<Triple<Long, Uri, Boolean>>()
-            var failure: Exception? =
-                io.github.trevarj.motd.attachment
-                    .MetadataNotSupportedException()
+            val staged = temporary.newFile()
+            var failure: Exception? = MetadataNotSupportedException()
             val controller =
                 FakeDccTransferController { bufferId, uri, allowOriginal ->
                     calls += Triple(bufferId, uri, allowOriginal)
                     failure?.let { throw it }
+                    stagedReview(query, staged)
                 }
             val vm = externalTranslationFixture(db, query, backgroundScope, dccTransfers = controller)
             val first = Uri.parse("content://files/first")
             val second = Uri.parse("content://files/second")
             try {
+                runCurrent()
                 vm.sendDccFile(first)
                 runCurrent()
                 val consent = requireNotNull(vm.dccSendFailure.value)
                 assertTrue(consent.canSendOriginal)
+                assertNull(vm.dccSendReview.value)
                 failure = null
                 vm.sendDccOriginal(consent)
                 vm.sendDccOriginal(consent)
                 runCurrent()
                 assertEquals(listOf(Triple(query.id, first, false), Triple(query.id, first, true)), calls)
                 assertNull(vm.dccSendFailure.value)
+                val review = requireNotNull(vm.dccSendReview.value)
+                assertEquals("staged.bin", review.filename)
+                assertEquals(staged.length(), review.sizeBytes)
+                assertEquals(query.displayName, review.peerNick)
+                assertEquals(network.name, review.networkName)
+                assertTrue(staged.exists())
+                assertTrue(controller.sent.isEmpty())
+                vm.confirmDccSend(review)
+                vm.confirmDccSend(review)
+                runCurrent()
+                assertEquals(listOf(review), controller.sent)
+                assertNull(vm.dccSendReview.value)
+                assertFalse(staged.exists())
 
-                failure =
-                    io.github.trevarj.motd.attachment
-                        .MetadataNotSupportedException()
+                failure = MetadataNotSupportedException()
                 vm.sendDccFile(second)
                 runCurrent()
                 val nextConsent = requireNotNull(vm.dccSendFailure.value)
@@ -372,6 +398,8 @@ class ChatViewModelTest {
                 runCurrent()
                 val error = requireNotNull(vm.dccSendFailure.value)
                 assertFalse(error.canSendOriginal)
+                assertNull(error.message)
+                assertNull(vm.dccSendReview.value)
                 vm.sendDccOriginal(error)
                 runCurrent()
                 assertEquals(4, calls.size)
@@ -391,6 +419,171 @@ class ChatViewModelTest {
                 vm.viewModelScope.cancel()
             }
         }
+
+    @Test
+    fun dccReviewClosesOnDismissReplacementAndQueryChange() =
+        runTest(dispatcher) {
+            val files = List(3) { temporary.newFile() }
+            val staged = files.iterator()
+            val buffers = FakeBufferRepository(query)
+            val controller = FakeDccTransferController { _, _, _ -> stagedReview(query, staged.next()) }
+            val vm = externalTranslationFixture(db, query, backgroundScope, buffers = buffers, dccTransfers = controller)
+            val source = Uri.parse("content://files/generated")
+            try {
+                runCurrent()
+                vm.sendDccFile(source)
+                runCurrent()
+                val dismissed = requireNotNull(vm.dccSendReview.value)
+                vm.dismissDccSendReview(dismissed)
+                assertFalse(files[0].exists())
+                assertNull(vm.dccSendReview.value)
+
+                vm.sendDccFile(source)
+                runCurrent()
+                val replaced = requireNotNull(vm.dccSendReview.value)
+                vm.sendDccFile(source)
+                runCurrent()
+                val active = requireNotNull(vm.dccSendReview.value)
+                assertEquals(1, temporary.root.list()?.size)
+                vm.dismissDccSendReview(replaced)
+                assertSame(active, vm.dccSendReview.value)
+                vm.confirmDccSend(dismissed)
+                vm.confirmDccSend(replaced)
+                assertTrue(controller.sent.isEmpty())
+
+                buffers.update(query.copy(name = "bob", displayName = "Bob"))
+                runCurrent()
+                vm.confirmDccSend(active)
+                assertTrue(controller.sent.isEmpty())
+                assertNull(vm.dccSendReview.value)
+                assertEquals(0, temporary.root.list()?.size)
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun dccOriginalConsentCannotMoveToAnotherQuery() =
+        runTest(dispatcher) {
+            val buffers = FakeBufferRepository(query)
+            val calls = mutableListOf<Pair<Long, Boolean>>()
+            val controller =
+                FakeDccTransferController { id, _, allowOriginal ->
+                    calls += id to allowOriginal
+                    throw MetadataNotSupportedException()
+                }
+            val vm = externalTranslationFixture(db, query, backgroundScope, buffers = buffers, dccTransfers = controller)
+            try {
+                runCurrent()
+                vm.sendDccFile(Uri.parse("content://files/generated"))
+                runCurrent()
+                val consent = requireNotNull(vm.dccSendFailure.value)
+                buffers.update(query.copy(id = query.id + 1, name = "bob", displayName = "Bob"))
+                runCurrent()
+                vm.sendDccOriginal(consent)
+                runCurrent()
+                assertEquals(listOf(query.id to false), calls)
+                assertNull(vm.dccSendFailure.value)
+                assertNull(vm.dccSendReview.value)
+                assertTrue(controller.sent.isEmpty())
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    @Test
+    fun dccCancelledPreparationDiscardsLateResultAndViewModelClearingClosesReview() =
+        runTest(dispatcher) {
+            val late = temporary.newFile()
+            val active = temporary.newFile()
+            val first = Uri.parse("content://files/first")
+            val second = Uri.parse("content://files/second")
+            val release = CompletableDeferred<Unit>()
+            val controller =
+                FakeDccTransferController { _, uri, _ ->
+                    if (uri == first) {
+                        withContext(NonCancellable) { release.await() }
+                        stagedReview(query, late)
+                    } else {
+                        stagedReview(query, active)
+                    }
+                }
+            val store = ViewModelStore()
+            val factory =
+                object : ViewModelProvider.Factory {
+                    @Suppress("UNCHECKED_CAST")
+                    override fun <T : ViewModel> create(modelClass: Class<T>): T = externalTranslationFixture(db, query, backgroundScope, dccTransfers = controller) as T
+                }
+            val vm = ViewModelProvider(store, factory)[ChatViewModel::class.java]
+            try {
+                runCurrent()
+                vm.sendDccFile(first)
+                runCurrent()
+                assertTrue(vm.preparingDccSend.value)
+                assertNull(vm.dccSendReview.value)
+                vm.sendDccFile(second)
+                runCurrent()
+                val current = requireNotNull(vm.dccSendReview.value)
+                assertFalse(vm.preparingDccSend.value)
+
+                release.complete(Unit)
+                runCurrent()
+                assertFalse(late.exists())
+                assertTrue(active.exists())
+                assertSame(current, vm.dccSendReview.value)
+                assertTrue(controller.sent.isEmpty())
+            } finally {
+                release.complete(Unit)
+                store.clear()
+            }
+            assertFalse(active.exists())
+            assertNull(vm.dccSendReview.value)
+        }
+
+    @Test
+    fun dccConfirmFailureShowsOnlySafeValidationReason() =
+        runTest(dispatcher) {
+            val file = temporary.newFile()
+            val controller = FakeDccTransferController { _, _, _ -> stagedReview(query, file) }
+            val vm = externalTranslationFixture(db, query, backgroundScope, dccTransfers = controller)
+            try {
+                runCurrent()
+                for (reason in listOf(IllegalStateException("private resolver detail"), DccSendUnavailableException("Query changed"))) {
+                    vm.sendDccFile(Uri.parse("content://files/generated"))
+                    runCurrent()
+                    controller.sendFailure = reason
+                    vm.confirmDccSend(requireNotNull(vm.dccSendReview.value))
+                    runCurrent()
+                    val error = requireNotNull(vm.dccSendFailure.value)
+                    assertEquals((reason as? DccSendUnavailableException)?.message, error.message)
+                    assertFalse(error.canSendOriginal)
+                    assertNull(vm.dccSendReview.value)
+                    assertFalse(file.exists())
+                }
+            } finally {
+                vm.viewModelScope.cancel()
+            }
+        }
+
+    private fun DccTransferController.stagedReview(
+        room: BufferEntity,
+        file: File,
+    ): PreparedDccSend {
+        file.writeText("generated fixture")
+        val source = AttachmentSource.LocalFile(file, "staged.bin", "application/octet-stream")
+        return PreparedDccSend(
+            bufferId = room.id,
+            networkId = room.networkId,
+            filename = source.name,
+            sizeBytes = file.length(),
+            peerNick = room.displayName,
+            networkName = network.name,
+            normalizedPeer = room.name,
+            owner = this,
+            upload = PreparedUpload(source, file),
+            requireCurrentTarget = { error("Fake owns confirmation") },
+        )
+    }
 
     @Test
     fun forwardPayloadQuotesEveryPhysicalLineWithOptionalSender() {
@@ -7167,8 +7360,13 @@ class ChatViewModelTest {
     )
 
     private class FakeDccTransferController(
-        private val onSendFile: suspend (Long, Uri, Boolean) -> Unit = { _, _, _ -> },
+        private val onPrepareSend: suspend FakeDccTransferController.(Long, Uri, Boolean) -> PreparedDccSend = { _, _, _ ->
+            error("DCC preparation must be set up by the test")
+        },
     ) : DccTransferController {
+        val sent = mutableListOf<PreparedDccSend>()
+        var sendFailure: Exception? = null
+
         override fun observeAll(): Flow<List<DccTransferEntity>> = flowOf(emptyList())
 
         override fun observeForNetwork(networkId: Long): Flow<List<DccTransferEntity>> = flowOf(emptyList())
@@ -7185,12 +7383,16 @@ class ChatViewModelTest {
 
         override suspend fun saveToDownloads(transferId: Long) = Unit
 
-        override suspend fun sendFile(
+        override suspend fun prepareSend(
             bufferId: Long,
             sourceUri: Uri,
-            secure: Boolean,
             allowOriginalMetadata: Boolean,
-        ) = onSendFile(bufferId, sourceUri, allowOriginalMetadata)
+        ): PreparedDccSend = onPrepareSend(bufferId, sourceUri, allowOriginalMetadata)
+
+        override suspend fun sendPrepared(prepared: PreparedDccSend) {
+            sent += prepared
+            sendFailure?.let { throw it }
+        }
     }
 
     private class FakeConnectionManager(

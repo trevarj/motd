@@ -666,6 +666,11 @@ flowchart TD
   Cancellation promptly stops the owning flow and requests HTTP disconnect or closes
   DCC sockets. Temporary files have explicit success/error/cancellation ownership,
   with bounded buffers rather than bitmap decoding, transcoding or whole-file copies.
+- Outgoing DCC review shows the staged wire filename and byte count, recipient, owning
+  network, and the unencrypted TCP/IP disclosure. Original metadata consent opens
+  this review rather than sending. Only confirmation can create a transfer record;
+  the offer rechecks the same private chat and live IRC route, and never advertises
+  a private address or bypasses a proxy.
 - Hosted upload confirmation checks the known size against the selected destination and
   keeps the local full-image review separate from transport. Successful uploads retain
   bounded, local previews in backup-excluded Recent uploads: image/video/PDF thumbnails,

@@ -5,11 +5,15 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import androidx.core.net.toUri
+import androidx.room.withTransaction
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
+import io.github.trevarj.motd.attachment.PreparedUpload
 import io.github.trevarj.motd.attachment.UploadMetadataSanitizer
+import io.github.trevarj.motd.attachment.isLocalMediaUri
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.DccAddressKind
 import io.github.trevarj.motd.data.db.DccDirection
 import io.github.trevarj.motd.data.db.DccTransferDao
 import io.github.trevarj.motd.data.db.DccTransferEntity
@@ -21,8 +25,11 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.di.ApplicationScope
+import io.github.trevarj.motd.irc.client.IrcClient
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.LocalSocksProvider
+import io.github.trevarj.motd.service.networkFingerprint
 import io.github.trevarj.motd.service.resolveTransportProxy
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -42,6 +49,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.Closeable
+import java.io.File
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
@@ -51,12 +59,42 @@ import java.net.Proxy
 import java.net.ServerSocket
 import java.net.Socket
 import java.util.UUID
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 import javax.inject.Singleton
 import javax.net.ssl.SSLContext
 import javax.net.ssl.SSLSocket
 import javax.net.ssl.SSLSocketFactory
 import javax.net.ssl.X509TrustManager
+
+internal class DccSendUnavailableException(
+    message: String,
+) : IllegalStateException(message)
+
+/** Owns the exact staged bytes shown in the review until confirmation or close. */
+class PreparedDccSend internal constructor(
+    internal val bufferId: Long,
+    internal val networkId: Long,
+    val filename: String,
+    val sizeBytes: Long,
+    val peerNick: String,
+    val networkName: String,
+    internal val normalizedPeer: String,
+    private val owner: DccTransferController,
+    upload: PreparedUpload,
+    internal val requireCurrentTarget: suspend () -> IrcClient,
+) : Closeable {
+    private val pending = AtomicReference<PreparedUpload?>(upload)
+
+    internal fun claim(controller: DccTransferController): PreparedUpload? {
+        if (owner !== controller) throw DccSendUnavailableException("File review is no longer available")
+        return pending.getAndSet(null)
+    }
+
+    override fun close() {
+        pending.getAndSet(null)?.close()
+    }
+}
 
 interface DccTransferController {
     fun observeAll(): Flow<List<DccTransferEntity>>
@@ -75,12 +113,13 @@ interface DccTransferController {
 
     suspend fun saveToDownloads(transferId: Long)
 
-    suspend fun sendFile(
+    suspend fun prepareSend(
         bufferId: Long,
         sourceUri: Uri,
-        secure: Boolean = false,
         allowOriginalMetadata: Boolean = false,
-    )
+    ): PreparedDccSend
+
+    suspend fun sendPrepared(prepared: PreparedDccSend)
 }
 
 @Singleton
@@ -188,76 +227,156 @@ class DccTransferControllerImpl
             }
         }
 
-        override suspend fun sendFile(
+        override suspend fun prepareSend(
             bufferId: Long,
             sourceUri: Uri,
-            secure: Boolean,
             allowOriginalMetadata: Boolean,
-        ) {
+        ): PreparedDccSend {
+            if (!sourceUri.isLocalMediaUri()) throw DccSendUnavailableException("Direct file sending requires a local file")
+            val target = currentSendTarget(bufferId)
             val stripMetadata = attachmentPrefs.config.first().stripMetadata
-            val buffer = db.bufferDao().observeById(bufferId) ?: return
-            if (buffer.type != BufferType.QUERY) return
-            val endpointNetwork = effectiveNetworkFor(buffer.networkId) ?: return
-            val meta = queryMeta(sourceUri)
-            val prepared =
-                metadataSanitizer.prepare(
-                    AttachmentSource.Document(sourceUri, meta.name, context.contentResolver.getType(sourceUri), meta.sizeBytes),
-                    MAX_DCC_FILE_SIZE_BYTES,
-                    allowOriginalMetadata,
-                    stripMetadata = stripMetadata,
-                )
-            var handedOff = false
-            try {
-                val source = prepared.source as AttachmentSource.LocalFile
-                val filename = sanitizeDccDisplayFilename(source.name)
-                val now = System.currentTimeMillis()
-                val token =
-                    UUID
-                        .randomUUID()
-                        .toString()
-                        .replace("-", "")
-                        .take(16)
-                val id =
-                    transfers.insertIgnore(
-                        DccTransferEntity(
-                            networkId = buffer.networkId,
-                            timelineEventId = null,
-                            offerKey = "dcc:outgoing:$token",
-                            direction = DccDirection.OUTGOING,
-                            protocol = DccTransferProtocol.SEND,
-                            peerNick = buffer.displayName,
-                            normalizedPeer = buffer.name,
-                            filename = filename,
-                            displayFilename = filename,
-                            address = "0",
-                            addressKind = io.github.trevarj.motd.data.db.DccAddressKind.IPV4_INTEGER,
-                            port = 0,
-                            sizeBytes = source.size,
-                            token = token,
-                            state = DccTransferState.ACCEPTING,
-                            createdAt = now,
-                            expiresAt = now + OUTGOING_OFFER_TIMEOUT_MS,
-                            acceptedAt = now,
-                            updatedAt = now,
-                        ),
-                    )
-                if (id <= 0) return
-                withContext(NonCancellable) {
-                    launchTransfer(id, onComplete = { prepared.close() }) {
-                        sendOutgoing(
-                            transferId = id,
-                            endpointNetwork = endpointNetwork,
-                            clientNetworkId = buffer.networkId,
-                            peerTarget = buffer.ircTarget,
-                            sourceUri = source.file.toUri(),
-                        )
-                    }
-                    handedOff = true
+            val document =
+                withContext(Dispatchers.IO) {
+                    val meta = queryMeta(sourceUri)
+                    AttachmentSource.Document(sourceUri, meta.name, context.contentResolver.getType(sourceUri), meta.sizeBytes)
                 }
-            } finally {
-                if (!handedOff) prepared.close()
+            val upload = metadataSanitizer.prepare(document, MAX_DCC_FILE_SIZE_BYTES, allowOriginalMetadata, stripMetadata)
+            try {
+                val source = upload.source as AttachmentSource.LocalFile
+                requireSameSendTarget(bufferId, target)
+                currentCoroutineContext().ensureActive()
+                return PreparedDccSend(
+                    bufferId = bufferId,
+                    networkId = target.networkId,
+                    filename = sanitizeDccDisplayFilename(source.name),
+                    sizeBytes = source.file.length(),
+                    peerNick = target.peerNick,
+                    networkName = target.networkName,
+                    normalizedPeer = target.normalizedPeer,
+                    owner = this,
+                    upload = upload,
+                    requireCurrentTarget = { requireSameSendTarget(bufferId, target) },
+                )
+            } catch (failure: Throwable) {
+                upload.close()
+                throw failure
             }
         }
+
+        override suspend fun sendPrepared(prepared: PreparedDccSend) {
+            val upload = prepared.claim(this) ?: return
+            val confirming = currentCoroutineContext()
+            var handedOff = false
+            try {
+                val source = upload.source as AttachmentSource.LocalFile
+                stateLock.withLock {
+                    // Once recorded, hand the staged file to the application job even if the UI leaves.
+                    withContext(NonCancellable) {
+                        val id =
+                            db.withTransaction {
+                                prepared.requireCurrentTarget()
+                                confirming.ensureActive()
+                                val now = System.currentTimeMillis()
+                                val token =
+                                    UUID
+                                        .randomUUID()
+                                        .toString()
+                                        .replace("-", "")
+                                        .take(16)
+                                transfers.insertIgnore(
+                                    DccTransferEntity(
+                                        networkId = prepared.networkId,
+                                        timelineEventId = null,
+                                        offerKey = "dcc:outgoing:$token",
+                                        direction = DccDirection.OUTGOING,
+                                        protocol = DccTransferProtocol.SEND,
+                                        peerNick = prepared.peerNick,
+                                        normalizedPeer = prepared.normalizedPeer,
+                                        filename = prepared.filename,
+                                        displayFilename = prepared.filename,
+                                        address = "0",
+                                        addressKind = DccAddressKind.IPV4_INTEGER,
+                                        port = 0,
+                                        sizeBytes = prepared.sizeBytes,
+                                        token = token,
+                                        state = DccTransferState.ACCEPTING,
+                                        createdAt = now,
+                                        expiresAt = now + OUTGOING_OFFER_TIMEOUT_MS,
+                                        acceptedAt = now,
+                                        updatedAt = now,
+                                    ),
+                                )
+                            }
+                        if (id <= 0) throw DccSendUnavailableException("Unable to record the direct file transfer")
+                        launchTransfer(id, onComplete = upload::close) {
+                            withContext(Dispatchers.IO) { sendOutgoing(id, prepared, source.file) }
+                        }
+                        handedOff = true
+                    }
+                }
+            } finally {
+                if (!handedOff) upload.close()
+            }
+        }
+
+        private suspend fun requireSameSendTarget(
+            bufferId: Long,
+            expected: SendTarget,
+        ): IrcClient {
+            val current = currentSendTarget(bufferId)
+            if (current != expected) throw DccSendUnavailableException("The recipient or network changed. Choose the file again.")
+            return current.client
+        }
+
+        private suspend fun currentSendTarget(bufferId: Long): SendTarget {
+            val query = db.bufferDao().observeById(bufferId)
+            if (query == null || query.id != bufferId || query.redirectToRoomId != null ||
+                query.type != BufferType.QUERY || query.dismissed || query.pendingCloseAt != null
+            ) {
+                throw DccSendUnavailableException("Direct file sending requires an open private chat")
+            }
+            val network =
+                db.networkDao().byId(query.networkId)
+                    ?: throw DccSendUnavailableException("The IRC network is no longer available")
+            val root =
+                if (network.role == NetworkRole.BOUNCER_CHILD) {
+                    network.parentId
+                        ?.let { db.networkDao().byId(it) }
+                        ?.takeIf { it.role == NetworkRole.BOUNCER_ROOT }
+                        ?: throw DccSendUnavailableException("The bouncer connection is no longer available")
+                } else {
+                    null
+                }
+            if (usesProxy(root ?: network)) {
+                throw DccSendUnavailableException("Direct file sending is unavailable while this network uses a proxy")
+            }
+            val fingerprint = networkFingerprint(network, root)
+            val client =
+                connectionManager.readyClientForRoute(network.id, fingerprint)
+                    ?: throw DccSendUnavailableException("The IRC network is not ready")
+            val peer = query.ircTarget
+            val isupport = client.isupport
+            val identityRules = isupport.identityRules
+            if (!client.targetClassificationReady.value) throw DccSendUnavailableException("The IRC network is not ready")
+            if (peer.isEmpty() || peer.first() in ":$" || peer.any { it.isISOControl() || it.isWhitespace() || it in ",@!%*?" } ||
+                identityRules.isChannel(peer) || identityRules.isChannel(peer.trimStart { it in isupport["STATUSMSG"].orEmpty() })
+            ) {
+                throw DccSendUnavailableException("Direct file sending requires a private nickname")
+            }
+            return SendTarget(network.id, network.name, query.name, peer, network.role, root?.id, fingerprint, identityRules, client)
+        }
+
+        private data class SendTarget(
+            val networkId: Long,
+            val networkName: String,
+            val normalizedPeer: String,
+            val peerNick: String,
+            val role: NetworkRole,
+            val rootId: Long?,
+            val fingerprint: String,
+            val identityRules: IrcIdentityRules,
+            val client: IrcClient,
+        )
 
         private suspend fun receiveIncoming(
             transferId: Long,
@@ -340,33 +459,21 @@ class DccTransferControllerImpl
 
         private suspend fun sendOutgoing(
             transferId: Long,
-            endpointNetwork: NetworkEntity,
-            clientNetworkId: Long,
-            peerTarget: String,
-            sourceUri: Uri,
+            prepared: PreparedDccSend,
+            source: File,
         ) {
             runCatching {
-                if (usesProxy(endpointNetwork)) {
-                    error("Direct file sending is unavailable while this network uses a proxy")
+                val current = transfers.byId(transferId) ?: throw DccSendUnavailableException("Transfer no longer exists")
+                prepared.requireCurrentTarget()
+                val advertised = chooseAdvertisedAddress()
+                if (dccEndpointRisk(advertised) != DccEndpointRisk.PUBLIC) {
+                    throw DccSendUnavailableException("No public local address is available for direct file sending")
                 }
+                val (wireAddress, addressKind) = advertiseDccAddress(advertised)
+                val client = prepared.requireCurrentTarget()
                 val server = ServerSocket(0)
                 withDccSocket(server) { listening ->
                     listening.soTimeout = ACCEPT_TIMEOUT_MS
-                    val advertised = chooseAdvertisedAddress()
-                    if (dccEndpointRisk(advertised) != DccEndpointRisk.PUBLIC) {
-                        error("No public local address is available for direct file sending")
-                    }
-                    val (wireAddress, addressKind) = advertiseDccAddress(advertised)
-                    val current = transfers.byId(transferId) ?: error("Transfer no longer exists")
-                    transitions(transferId) { transfer, now ->
-                        transfer.copy(
-                            address = wireAddress,
-                            addressKind = addressKind,
-                            port = listening.localPort,
-                            state = DccTransferState.OFFERED,
-                            updatedAt = now,
-                        )
-                    }
                     val offer =
                         DccOutgoingOffer(
                             protocol = DccTransferProtocol.SEND,
@@ -376,17 +483,27 @@ class DccTransferControllerImpl
                             sizeBytes = current.sizeBytes,
                             token = current.token,
                         )
-                    check(sendCtcp(clientNetworkId, peerTarget, dccSendCtcp(offer))) { "IRC rejected the file offer" }
-                    withContext(Dispatchers.IO) {
-                        val accepted = listening.accept()
-                        withDccSocket(accepted) { active ->
-                            transitions(transferId) { transfer, now ->
-                                transfer.copy(state = DccTransferState.ACTIVE, error = null, updatedAt = now)
-                            }
-                            context.contentResolver.openInputStream(sourceUri).use { input ->
-                                requireNotNull(input) { "Unable to open source" }
-                                sendBytes(transferId, input, active.getOutputStream(), current.sizeBytes)
-                            }
+                    val sent =
+                        client.sendGuardedMessage(prepared.peerNick, dccSendCtcp(offer), label = "motd-${UUID.randomUUID()}") {
+                            prepared.requireCurrentTarget() === client
+                        }
+                    if (!sent) throw DccSendUnavailableException("IRC rejected the file offer")
+                    transitions(transferId) { transfer, now ->
+                        transfer.copy(
+                            address = wireAddress,
+                            addressKind = addressKind,
+                            port = listening.localPort,
+                            state = DccTransferState.OFFERED,
+                            updatedAt = now,
+                        )
+                    }
+                    val accepted = listening.accept()
+                    withDccSocket(accepted) { active ->
+                        transitions(transferId) { transfer, now ->
+                            transfer.copy(state = DccTransferState.ACTIVE, error = null, updatedAt = now)
+                        }
+                        source.inputStream().use { input ->
+                            sendBytes(transferId, input, active.getOutputStream(), current.sizeBytes)
                         }
                     }
                     transitions(transferId) { transfer, now ->
@@ -402,17 +519,14 @@ class DccTransferControllerImpl
             }.onFailure { error ->
                 if (error is CancellationException) throw error
                 currentCoroutineContext().ensureActive()
-                failTransfer(transferId, error.message ?: "DCC send failed")
+                val message =
+                    when (error) {
+                        is DccSendUnavailableException -> error.message ?: "DCC send failed"
+                        is java.net.SocketTimeoutException -> "The direct file transfer timed out"
+                        else -> "DCC send failed"
+                    }
+                failTransfer(transferId, message)
             }
-        }
-
-        private suspend fun sendCtcp(
-            networkId: Long,
-            target: String,
-            ctcp: String,
-        ): Boolean {
-            val client = connectionManager.clientFor(networkId) ?: return false
-            return client.sendMessage(target, ctcp, replyToMsgid = null, label = "motd-${UUID.randomUUID()}")
         }
 
         private suspend fun receiveBytes(

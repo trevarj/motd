@@ -186,6 +186,11 @@ interface ConnectionManager {
     /** Live client for a connected network, null otherwise. */
     fun clientFor(networkId: Long): IrcClient?
 
+    fun readyClientForRoute(
+        networkId: Long,
+        expectedFingerprint: String,
+    ): IrcClient? = null
+
     /** Start/stop the whole subsystem (invoked by service / delivery-mode changes). */
     suspend fun startAll()
 

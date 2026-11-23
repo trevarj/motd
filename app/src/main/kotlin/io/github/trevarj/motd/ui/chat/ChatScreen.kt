@@ -505,6 +505,8 @@ fun ChatScreen(
     val forwardState by viewModel.forwardState.collectAsStateWithLifecycle()
     val forwardTargets by viewModel.forwardTargets.collectAsStateWithLifecycle()
     val dccSendFailure by viewModel.dccSendFailure.collectAsStateWithLifecycle()
+    val dccSendReview by viewModel.dccSendReview.collectAsStateWithLifecycle()
+    val preparingDccSend by viewModel.preparingDccSend.collectAsStateWithLifecycle()
     // The visit owns the lease; the root host owns native items and viewport across its disposal.
     // A pending descriptor is not an empty PagingData and must never reset a retained viewport.
     val pagingGeneration by androidx.compose.runtime.produceState<ChatPagingGeneration?>(null, viewModel, pageCache) {
@@ -712,6 +714,7 @@ fun ChatScreen(
         onRemoveDccTransfer = viewModel::removeDccTransfer,
         onSaveDccToDownloads = viewModel::saveDccToDownloads,
         onSendDccFile = viewModel::sendDccFile,
+        preparingDccSend = preparingDccSend,
         memberNicks = memberNicks,
         knownNicks = knownNicks,
         channelSenderPrefixes = channelSenderPrefixes,
@@ -952,16 +955,37 @@ fun ChatScreen(
         AiCustomStylesSheet(aiLabsState.customStyles, aiTextViewModel::upsertCustomStyle, aiTextViewModel::deleteCustomStyle, { managingAiStyles = false })
     }
 
+    dccSendReview?.let { review ->
+        DccSendReviewDialog(
+            filename = review.filename,
+            sizeBytes = review.sizeBytes,
+            peerNick = review.peerNick,
+            networkName = review.networkName,
+            onConfirm = { viewModel.confirmDccSend(review) },
+            onDismiss = { viewModel.dismissDccSendReview(review) },
+        )
+    }
+
     dccSendFailure?.let { failure ->
         AlertDialog(
             onDismissRequest = { viewModel.dismissDccSendFailure(failure) },
-            title = { Text(if (failure.canSendOriginal) "Send original file?" else "Could not send file") },
+            modifier =
+                Modifier
+                    .semantics { testTagsAsResourceId = true }
+                    .testTag(if (failure.canSendOriginal) "chat_dcc_send_metadata_warning" else "chat_dcc_send_failure"),
+            title = {
+                Text(
+                    stringResource(
+                        if (failure.canSendOriginal) R.string.dcc_send_original_title else R.string.dcc_send_failure_title,
+                    ),
+                )
+            },
             text = {
                 Text(
                     if (failure.canSendOriginal) {
-                        "Metadata cannot be removed from this file. Sending the original may expose location, author, or other private information."
+                        stringResource(R.string.dcc_send_original_body)
                     } else {
-                        "The file could not be prepared or sent. Please try again."
+                        failure.message ?: stringResource(R.string.dcc_send_failure_body)
                     },
                 )
             },
@@ -975,8 +999,10 @@ fun ChatScreen(
                             viewModel.dismissDccSendFailure(failure)
                         }
                     },
+                    modifier =
+                        Modifier.testTag(if (failure.canSendOriginal) "chat_dcc_send_metadata_continue" else "chat_dcc_send_failure_close"),
                 ) {
-                    Text(if (failure.canSendOriginal) "Send original" else "OK")
+                    Text(stringResource(if (failure.canSendOriginal) R.string.dcc_send_review_original else R.string.action_ok))
                 }
             },
             dismissButton = {
@@ -1168,6 +1194,52 @@ fun ChatScreen(
     }
 }
 
+@Composable
+internal fun DccSendReviewDialog(
+    filename: String,
+    sizeBytes: Long,
+    peerNick: String,
+    networkName: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chat_dcc_send_review"),
+        title = { Text(stringResource(R.string.dcc_send_review_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(stringResource(R.string.dcc_send_review_file, filename), modifier = Modifier.testTag("chat_dcc_send_review_file"))
+                Text(stringResource(R.string.dcc_send_review_size, sizeBytes), modifier = Modifier.testTag("chat_dcc_send_review_size"))
+                Text(stringResource(R.string.dcc_send_review_peer, peerNick), modifier = Modifier.testTag("chat_dcc_send_review_peer"))
+                Text(stringResource(R.string.dcc_send_review_network, networkName), modifier = Modifier.testTag("chat_dcc_send_review_network"))
+                Text(stringResource(R.string.dcc_send_review_disclosure), modifier = Modifier.testTag("chat_dcc_send_review_disclosure"))
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = onConfirm,
+                colors = readableTextButtonColors(),
+                modifier = Modifier.testTag("chat_dcc_send_review_confirm"),
+            ) {
+                Text(stringResource(R.string.dcc_send_review_confirm))
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = onDismiss,
+                colors = readableTextButtonColors(),
+                modifier = Modifier.testTag("chat_dcc_send_review_cancel"),
+            ) {
+                Text(stringResource(R.string.action_cancel))
+            }
+        },
+    )
+}
+
 private fun String.containsDraftUploadUrl(url: String): Boolean {
     val start = indexOf(url)
     if (start < 0) return false
@@ -1280,6 +1352,7 @@ internal fun ChatContent(
     onRemoveDccTransfer: (Long) -> Unit = {},
     onSaveDccToDownloads: (suspend (Long) -> Unit)? = null,
     onSendDccFile: (Uri) -> Unit = {},
+    preparingDccSend: Boolean = false,
     memberNicks: List<String> = emptyList(),
     knownNicks: Set<String> = emptySet(),
     channelSenderPrefixes: Map<String, Char> = emptyMap(),
@@ -4167,6 +4240,23 @@ internal fun ChatContent(
                                     Text(stringResource(R.string.account_setup_title))
                                 }
                             }
+                        }
+                    }
+                    if (preparingDccSend) {
+                        Row(
+                            modifier =
+                                Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                                    .semantics {
+                                        liveRegion = LiveRegionMode.Polite
+                                        testTagsAsResourceId = true
+                                    }.testTag("chat_dcc_send_preparing"),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                            Text(stringResource(R.string.dcc_send_preparing))
                         }
                     }
                 }
