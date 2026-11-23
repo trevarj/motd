@@ -397,6 +397,34 @@ class IrcClientTest {
         }
 
     @Test
+    fun `labeled ban denial accepts missing context but not another channel`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+            val unrelated = mutableListOf<IrcEvent.StandardReply>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.StandardReply>().toList(unrelated)
+            }
+
+            val bans = async { client.listChannelBans("#Room") }
+            runCurrent()
+            val label = responseLabel(ft.sent.last())
+            ft.feed("@label=$label :srv FAIL MODE FORBIDDEN #Other :Another channel")
+            runCurrent()
+            assertFalse(bans.isCompleted)
+            assertEquals(listOf("#Other"), unrelated.single().context)
+
+            ft.feed("@label=$label :srv FAIL MODE FORBIDDEN :Permission denied")
+            runCurrent()
+            assertTrue(bans.isCompleted)
+            assertEquals(ChannelBanListResult.Denied, bans.await())
+            assertEquals(1, unrelated.size)
+        }
+
+    @Test
     fun `raw channel ban reads still publish replies without contaminating active bans`() =
         runTest {
             val ft = FakeTransport()

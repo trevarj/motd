@@ -55,7 +55,7 @@ private fun IrcMessage.isBanEnd(): Boolean = command == "368" && params.size == 
 private fun IrcMessage.isBanDenial(): Boolean =
     when (command) {
         "403", "442", "482" -> params.size == 3
-        "FAIL" -> params.size >= 4 && params[0].equals("MODE", ignoreCase = true)
+        "FAIL" -> params.size >= 3 && params[0].equals("MODE", ignoreCase = true)
         else -> false
     }
 
@@ -69,7 +69,7 @@ private fun IrcMessage.banReplyTarget(
         }
 
         "FAIL" -> {
-            params.getOrNull(2)?.takeIf { isBanDenial() }
+            if (params.size >= 4 && isBanDenial()) params[2] else null
         }
 
         else -> {
@@ -91,6 +91,8 @@ internal class ChannelBanRequest(
     ): Boolean {
         val target = message.banReplyTarget(nick, mapping)
         if (target != null) return mapping.normalize(target) == mapping.normalize(channel)
+        // Without context, only the label identifies the failed MODE request.
+        if (message.command == "FAIL") return message.params.size == 3 && message.isBanDenial()
         // A matched label can identify a malformed row or terminator missing a channel, but never
         // one addressed to a different recipient or channel.
         return (message.command == "367" || message.command == "368") && message.params.size < 2 &&
