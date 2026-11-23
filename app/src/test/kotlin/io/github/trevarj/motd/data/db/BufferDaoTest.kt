@@ -711,35 +711,40 @@ class BufferDaoTest {
 
             val legacy = dao.observeChatList().first()
             val messages = dao.observeChatList(messagesOnly = true).first()
-            assertEquals(listOf(original, events, notices), messages.map(ChatListRow::bufferId))
+            assertEquals(listOf(original, events, notices), legacy.map(ChatListRow::bufferId))
+            assertEquals(listOf(notices, original, events), messages.map(ChatListRow::bufferId))
             assertEquals(
                 listOf(Triple("nick change", "nick", 5_000L), Triple("file offer", "peer", 4_000L), Triple("notice", "server", 3_000L)),
                 legacy.map { Triple(it.lastMessageText, it.lastMessageSender, it.previewTime) },
             )
             assertEquals(
-                listOf(Triple("waves", "me", 2_000L), Triple(null, null, null), Triple("notice", "server", 3_000L)),
+                listOf(Triple("notice", "server", 3_000L), Triple("waves", "me", 2_000L), Triple(null, null, null)),
                 messages.map { Triple(it.lastMessageText, it.lastMessageSender, it.previewTime) },
             )
+            val legacyByRoom = legacy.associateBy(ChatListRow::bufferId)
             assertEquals(
-                legacy,
-                messages.zip(legacy) { current, before ->
-                    current.copy(
-                        lastMessageText = before.lastMessageText,
-                        lastMessageSender = before.lastMessageSender,
-                        previewTime = before.previewTime,
-                    )
+                legacyByRoom,
+                messages.associate { current ->
+                    val before = legacyByRoom.getValue(current.bufferId)
+                    current.bufferId to
+                        current.copy(
+                            lastMessageText = before.lastMessageText,
+                            lastMessageSender = before.lastMessageSender,
+                            previewTime = before.previewTime,
+                        )
                 },
             )
-            assertEquals(listOf(3, 1, 1), messages.map(ChatListRow::unreadCount))
-            assertEquals(listOf(1, 0, 0), messages.map(ChatListRow::mentionCount))
-            assertFalse(messages.first().advertisedUnread)
+            assertEquals(listOf(1, 3, 1), messages.map(ChatListRow::unreadCount))
+            assertEquals(listOf(0, 1, 0), messages.map(ChatListRow::mentionCount))
+            val originalMessages = messages.single { it.bufferId == original }
+            assertFalse(originalMessages.advertisedUnread)
 
             dao.advanceAdvertisedLatest(original, 6_000)
             val pending = dao.observeChatList(original, messagesOnly = true).first().single()
             assertTrue(pending.advertisedUnread)
             dao.clampAdvertisedLatestToVisible(original, provenLatest = 6_000)
             assertEquals(5_000L, dao.rawById(original)?.advertisedLatestTime)
-            assertEquals(messages.first(), dao.observeChatList(original, messagesOnly = true).first().single())
+            assertEquals(originalMessages, dao.observeChatList(original, messagesOnly = true).first().single())
         }
 
     @Test

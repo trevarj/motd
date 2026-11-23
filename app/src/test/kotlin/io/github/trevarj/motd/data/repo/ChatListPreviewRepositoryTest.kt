@@ -48,10 +48,12 @@ class ChatListPreviewRepositoryTest {
                     )
                 val networkId = db.networkDao().insert(network())
                 val room = buffers.insert(buffer(networkId, "#chat"))
+                val otherRoom = buffers.insert(buffer(networkId, "#other"))
                 messages.insertAll(
                     listOf(
-                        message(room, "hello", "bob", 1_000, "chat"),
+                        message(room, "hello", "bob", 1_000, "chat", hasMention = true),
                         message(room, "mode change", "op", 2_000, "mode", kind = MessageKind.MODE),
+                        message(otherRoom, "newer message", "alice", 1_500, "other"),
                     ),
                 )
                 context.settingsDataStore.edit {
@@ -62,22 +64,28 @@ class ChatListPreviewRepositoryTest {
                 for (showRedacted in listOf(true, false)) {
                     settings.setShowRedactedMessages(showRedacted)
                     repository.observeChatList().test {
-                        val initial = awaitItem().single()
-                        assertEquals("hello", initial.lastMessageText)
-                        assertEquals("bob", initial.lastMessageSender)
-                        assertEquals(1_000L, initial.previewTime)
-                        assertEquals(2_000L, initial.lastMessageTime)
+                        val initial = awaitItem()
+                        assertEquals(listOf(otherRoom, room), initial.map { it.bufferId })
+                        val preview = initial.last()
+                        assertEquals("hello", preview.lastMessageText)
+                        assertEquals("bob", preview.lastMessageSender)
+                        assertEquals(1_000L, preview.previewTime)
+                        assertEquals(2_000L, preview.lastMessageTime)
+                        assertEquals(1, preview.unreadCount)
+                        assertEquals(1, preview.mentionCount)
 
                         settings.setChatListMessagesOnly(false)
-                        val legacy = awaitItem().single()
                         assertEquals(
-                            initial.copy(lastMessageText = "mode change", lastMessageSender = "op", previewTime = 2_000L),
-                            legacy,
+                            listOf(
+                                preview.copy(lastMessageText = "mode change", lastMessageSender = "op", previewTime = 2_000L),
+                                initial.first(),
+                            ),
+                            awaitItem(),
                         )
                         assertEquals("false", context.settingsDataStore.data.first()[PrefKeys.CHAT_LIST_MESSAGES_ONLY])
                         assertFalse(DataStoreSettingsRepository(context).settings.first().chatListMessagesOnly)
                         settings.setChatListMessagesOnly(true)
-                        assertEquals(initial, awaitItem().single())
+                        assertEquals(initial, awaitItem())
                     }
                 }
             } finally {

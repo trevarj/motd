@@ -134,8 +134,8 @@ flowchart TD
   the X action still closes search directly.
 - Chat-list and folder previews default to the latest visible message, notice or
   `/me` action; Settings → Chat can include system events. Preview text, sender
-  and time come from the same row. This choice does not change row ordering,
-  unread counts, timeline visibility or history activity.
+  and time come from the same row. Unanchored, unpinned chats sort by that preview time.
+  The setting does not change unread counts, timeline visibility or history activity.
 - The chat-list canvas, section headers and chat rows share theme `surface`; other utility
   canvases keep `surfaceContainerLowest`. The scrolling viewport extends to the Scaffold's
   window top, including the status area. Its initial content padding reserves the measured

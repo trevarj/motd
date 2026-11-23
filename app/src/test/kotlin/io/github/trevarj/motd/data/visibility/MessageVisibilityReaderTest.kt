@@ -87,7 +87,7 @@ class MessageVisibilityReaderTest {
         }
 
     @Test
-    fun messagesOnlyKeepsFoolAndRedactionFilteringWithoutChangingEntryOrSort() =
+    fun messagesOnlySortsByFilteredPreviewWhileKeepingFoolAndRedactionFiltering() =
         runTest {
             val otherRoom = db.bufferDao().insert(buffer(networkId, "#other"))
             db.messageDao().insertAll(
@@ -108,11 +108,13 @@ class MessageVisibilityReaderTest {
                 val legacy = reader.resolveChatList(legacyRaw, spec)
                 val messages = reader.resolveChatList(raw, spec, messagesOnly = true)
 
-                assertEquals(listOf(bufferId, otherRoom), messages.map { it.bufferId })
-                assertEquals(legacy, listOf(checkNotNull(reader.chatListRow(bufferId, spec)), messages.last()))
-                val preview = messages.first()
+                assertEquals(listOf(otherRoom, bufferId), messages.map { it.bufferId })
+                assertEquals(listOf(bufferId, otherRoom), legacy.map { it.bufferId })
+                assertEquals(legacy, listOf(checkNotNull(reader.chatListRow(bufferId, spec)), messages.first()))
+                val preview = messages.last()
                 val activity = legacy.first()
                 assertEquals(if (showRedacted) "deleted" else "mode change", activity.lastMessageText)
+                assertEquals(if (showRedacted) 500L else 400L, activity.previewTime)
                 assertEquals(if (showRedacted) 500L else 400L, preview.lastMessageTime)
                 assertEquals("latest conversation", preview.lastMessageText)
                 assertEquals("bob", preview.lastMessageSender)

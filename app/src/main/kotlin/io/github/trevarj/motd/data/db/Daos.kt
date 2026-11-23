@@ -328,7 +328,7 @@ interface BufferDao {
     // backlog cannot turn every invalidation into a full-buffer scan.
     // Entry can scope this same projection to one canonical room before any counts or previews run;
     // the default null roomId retains the whole chat list.
-    // Sort by anchor/pin placement, then stored activity (never CHATHISTORY TARGETS).
+    // Anchors and pins retain their placement; other rows sort by the visible preview time.
     // `advertisedUnread` is a badge: the server says this room moved past
     // both the read floor and everything held locally, but the rows are not here yet. It carries no
     // number because discovery reports a timestamp, not a count, and it extinguishes itself when
@@ -1195,7 +1195,7 @@ data class ChatListRow(
     val muted: Boolean,
     val lastMessageText: String?,
     val lastMessageSender: String?,
-    /** Stored activity for ordering, independent of the displayed preview. */
+    /** Latest eligible stored activity, which may be newer than the displayed preview. */
     val lastMessageTime: Long?,
     val unreadCount: Int,
     val mentionCount: Int,
@@ -3164,7 +3164,6 @@ internal const val CHAT_LIST_SQL =
         )
     END
     ORDER BY (b.anchorOrder IS NULL), b.anchorOrder, b.pinned DESC,
-             (COALESCE(lm.serverTime, 0) = 0) ASC,
-             COALESCE(lm.serverTime, 0) DESC,
+             NULLIF(CASE WHEN b.pinned OR b.anchorOrder IS NOT NULL THEN lastMessageTime ELSE previewTime END, 0) DESC,
              b.id DESC
     )"""
