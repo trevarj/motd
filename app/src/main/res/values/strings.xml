@@ -83,6 +83,7 @@
     <string name="chatlist_seasonal_halloween">Make the bat flap</string>
     <string name="chatlist_seasonal_christmas">Shake loose snowflakes</string>
     <string name="chatlist_seasonal_new_year">Celebrate %1$s</string>
+    <string name="chatlist_seasonal_orthodox_easter">Light the Orthodox Easter cross</string>
     <string name="network_activity_unavailable">History unavailable</string>
     <string name="network_activity_certificate_pending">Certificate decision pending in the security dialog</string>
     <string name="network_activity_connection_issue">Connection failed</string>
@@ -279,6 +280,8 @@
     <string name="settings_show_folder_chats_in_all">Include folder chats in All</string>
     <string name="settings_show_folder_chats_in_all_desc">Include chats assigned to folders in the All tab.</string>
     <string name="settings_show_folder_chats_in_all_disabled_explanation">Choose Tabs in Chat list folders to change this setting.</string>
+    <string name="settings_seasonal_wordmarks">Seasonal Easter eggs</string>
+    <string name="settings_seasonal_wordmarks_desc">Show tappable holiday artwork on the chat-list wordmark.</string>
     <string name="settings_delivery">Message delivery</string>
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_summary">Alerts, watches, and message previews</string>

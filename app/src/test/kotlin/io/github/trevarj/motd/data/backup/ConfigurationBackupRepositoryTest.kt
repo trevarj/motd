@@ -1794,31 +1794,38 @@ class ConfigurationBackupRepositoryTest {
                 settings.setFolderDisplayMode(FolderDisplayMode.TABS)
                 settings.setShowFolderChatsInAll(false)
                 settings.setChatListSwipeAction(ChatListSwipeAction.MARK_READ)
+                settings.setSeasonalWordmarksEnabled(false)
                 val raw = backup.exportToString(mode = BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
 
                 settings.setFolderDisplayMode(FolderDisplayMode.INLINE)
                 settings.setShowFolderChatsInAll(true)
                 settings.setChatListSwipeAction(ChatListSwipeAction.ARCHIVE)
+                settings.setSeasonalWordmarksEnabled(true)
                 backup.import(raw, importMode = BackupImportMode.MERGE)
                 assertEquals(FolderDisplayMode.TABS, settings.settings.first().folderDisplayMode)
                 assertFalse(settings.settings.first().showFolderChatsInAll)
                 assertEquals(ChatListSwipeAction.MARK_READ, settings.settings.first().chatListSwipeAction)
+                assertFalse(settings.settings.first().seasonalWordmarksEnabled)
 
                 val oldRaw =
                     raw
                         .replace(Regex(",\\s*\"folderDisplayMode\"\\s*:\\s*\"TABS\""), "")
                         .replace(Regex(",\\s*\"showFolderChatsInAll\"\\s*:\\s*false"), "")
                         .replace(Regex(",\\s*\"chatListSwipeAction\"\\s*:\\s*\"MARK_READ\""), "")
+                        .replace(Regex(",\\s*\"seasonalWordmarksEnabled\"\\s*:\\s*false"), "")
                 assertFalse(oldRaw.contains("folderDisplayMode"))
                 assertFalse(oldRaw.contains("showFolderChatsInAll"))
+                assertFalse(oldRaw.contains("seasonalWordmarksEnabled"))
                 backup.import(oldRaw, importMode = BackupImportMode.MERGE)
                 assertEquals(FolderDisplayMode.INLINE, settings.settings.first().folderDisplayMode)
                 assertTrue(settings.settings.first().showFolderChatsInAll)
                 assertEquals(ChatListSwipeAction.ARCHIVE, settings.settings.first().chatListSwipeAction)
+                assertTrue(settings.settings.first().seasonalWordmarksEnabled)
             } finally {
                 settings.setFolderDisplayMode(FolderDisplayMode.INLINE)
                 settings.setShowFolderChatsInAll(true)
                 settings.setChatListSwipeAction(ChatListSwipeAction.ARCHIVE)
+                settings.setSeasonalWordmarksEnabled(true)
             }
         }
 

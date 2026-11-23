@@ -46,6 +46,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListSyncChrome
 import io.github.trevarj.motd.ui.chatlist.ChatListTitleActivityStatus
+import io.github.trevarj.motd.ui.chatlist.LocalSeasonalWordmarkCountry
 import io.github.trevarj.motd.ui.chatlist.LocalSeasonalWordmarkDate
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityAction
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityIssue
@@ -551,6 +552,75 @@ class ChatListTitleConnectivityUiTest {
         assertEquals("Returning to the default title must not restore the year", 0, yearInk())
         compose.mainClock.advanceTimeBy(768)
         assertEquals("Returning to the default title must not replay the reveal", 0, yearInk())
+    }
+
+    @Test
+    fun orthodoxEasterCrossReplacesTheLetterAndAllSeasonsHonorTheToggle() {
+        val date = mutableStateOf(LocalDate.of(2027, 5, 2))
+        val country = mutableStateOf("US")
+        val state = mutableStateOf(ChatListState(loading = false))
+        val snackbar = SnackbarHostState()
+        compose.setContent {
+            CompositionLocalProvider(LocalSeasonalWordmarkDate provides date.value, LocalSeasonalWordmarkCountry provides country.value) {
+                MotdTheme(dynamicColor = false) {
+                    ChatListContent(
+                        state = state.value,
+                        snackbarHostState = snackbar,
+                        onOpenBuffer = {},
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
+                }
+            }
+        }
+
+        val resources = RuntimeEnvironment.getApplication().resources
+        val wordmark = resources.getString(R.string.app_name)
+        val title = compose.onNodeWithTag("chatlist_title", useUnmergedTree = true)
+        val action = compose.onNodeWithTag("chatlist_seasonal_action")
+        val bar = compose.onNodeWithTag("chatlist_top_app_bar")
+
+        fun toolbarPixels() = bar.captureToImage().asAndroidBitmap()
+
+        fun titleBounds() = title.assertTextEquals(wordmark).fetchSemanticsNode().boundsInRoot
+        action.assertDoesNotExist()
+        val originalBounds = titleBounds()
+        val ordinary = toolbarPixels()
+        compose.runOnIdle { country.value = "GR" }
+        assertEquals(
+            resources.getString(R.string.chatlist_seasonal_orthodox_easter),
+            action
+                .assertIsDisplayed()
+                .fetchSemanticsNode()
+                .config[SemanticsActions.OnClick]
+                .label,
+        )
+        assertEquals("Replacing the t must not shift or resize the title", originalBounds, titleBounds())
+        val resting = toolbarPixels()
+        assertFalse("The Easter title must visibly replace the t", ordinary.sameAs(resting))
+
+        compose.mainClock.autoAdvance = false
+        action.performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(256)
+        assertFalse("Tapping must light the cross", resting.sameAs(toolbarPixels()))
+        compose.mainClock.advanceTimeBy(1_300)
+        assertTrue("The cross must settle at its original appearance", resting.sameAs(toolbarPixels()))
+        compose.mainClock.autoAdvance = true
+
+        for (holiday in listOf(date.value, LocalDate.of(2027, 10, 31), LocalDate.of(2027, 12, 25), LocalDate.of(2028, 1, 1))) {
+            compose.runOnIdle {
+                date.value = holiday
+                state.value = state.value.copy(seasonalWordmarksEnabled = false)
+            }
+            action.assertDoesNotExist()
+            assertTrue("The switch must remove the $holiday art, not only the action", ordinary.sameAs(toolbarPixels()))
+            compose.runOnIdle { state.value = state.value.copy(seasonalWordmarksEnabled = true) }
+            action.assertIsDisplayed()
+        }
     }
 
     @Test

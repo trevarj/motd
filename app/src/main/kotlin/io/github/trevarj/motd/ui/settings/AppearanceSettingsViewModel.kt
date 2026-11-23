@@ -232,6 +232,8 @@ class AppearanceSettingsViewModel
 
         fun setShowFolderChatsInAll(value: Boolean) = launch { settingsRepository.setShowFolderChatsInAll(value) }
 
+        fun setSeasonalWordmarksEnabled(value: Boolean) = launch { settingsRepository.setSeasonalWordmarksEnabled(value) }
+
         fun setAvatarStyle(value: AvatarStyle) = launch { settingsRepository.setAvatarStyle(value) }
 
         fun setNickColorsEnabled(value: Boolean) = launch { settingsRepository.setNickColorsEnabled(value) }

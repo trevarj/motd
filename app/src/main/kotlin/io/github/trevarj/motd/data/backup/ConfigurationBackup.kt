@@ -984,6 +984,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setShowChannelPrefixes(it.showChannelPrefixes)
                 settingsRepository.setFolderDisplayMode(it.folderDisplayMode)
                 settingsRepository.setShowFolderChatsInAll(it.showFolderChatsInAll)
+                settingsRepository.setSeasonalWordmarksEnabled(it.seasonalWordmarksEnabled)
                 settingsRepository.setChatListSwipeAction(it.chatListSwipeAction)
                 settingsRepository.setMentionsEnabled(it.mentionsEnabled)
                 settingsRepository.setMentionsPlacement(it.mentionsPlacement)

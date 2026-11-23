@@ -162,6 +162,7 @@ enum class SettingsTarget {
     LICENSE,
     PROJECT,
     HIDE_RECENTS_PREVIEWS,
+    SEASONAL_WORDMARKS,
 }
 
 /** Optional search anchors must not prevent restoring a screen after an anchor is removed. */

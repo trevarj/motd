@@ -52,6 +52,19 @@ class FolderDisplayModeSettingsTest {
         }
 
     @Test
+    fun seasonalWordmarksPreferenceDefaultsOnAndRoundTrips() =
+        runTest {
+            assertEquals(true, repository.settings.first().seasonalWordmarksEnabled)
+            try {
+                repository.setSeasonalWordmarksEnabled(false)
+                assertEquals(false, repository.settings.first().seasonalWordmarksEnabled)
+            } finally {
+                repository.setSeasonalWordmarksEnabled(true)
+            }
+            assertEquals(true, repository.settings.first().seasonalWordmarksEnabled)
+        }
+
+    @Test
     fun invalidPreferenceDefaultsInline() {
         assertEquals(FolderDisplayMode.INLINE, folderDisplayModeFromPreference("GRID"))
         assertEquals(FolderDisplayMode.INLINE, folderDisplayModeFromPreference(null))

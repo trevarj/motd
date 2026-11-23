@@ -175,7 +175,9 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -779,7 +781,12 @@ fun ChatListContent(
                 containerColor = MaterialTheme.colorScheme.surface,
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
-                    val season = if (topBarMode == ChatListTopBarMode.DEFAULT) rememberSeasonalWordmark() else null
+                    val season =
+                        if (topBarMode == ChatListTopBarMode.DEFAULT && !state.loading && state.seasonalWordmarksEnabled) {
+                            rememberSeasonalWordmark()
+                        } else {
+                            null
+                        }
                     val seasonalPlayback = season?.let { rememberSeasonalWordmarkPlayback(it) }
                     ChatListTopBar(
                         modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
@@ -3254,15 +3261,24 @@ internal fun ChatListDefaultTitle(
     showStatus: Boolean,
     modifier: Modifier = Modifier,
     onTextLayout: ((TextLayoutResult) -> Unit)? = null,
+    maskedLetter: Int? = null,
 ) {
+    val wordmark = stringResource(R.string.app_name)
+    val title =
+        remember(wordmark, maskedLetter) {
+            buildAnnotatedString {
+                append(wordmark)
+                if (maskedLetter != null) addStyle(SpanStyle(color = Color.Transparent), maskedLetter, maskedLetter + 1)
+            }
+        }
     Text(
-        text = stringResource(R.string.app_name),
+        text = title,
         style = if (showStatus) MaterialTheme.typography.titleMedium else MaterialTheme.typography.titleLarge,
         fontWeight = FontWeight.Bold,
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier.testTag("chatlist_title"),
-        onTextLayout = onTextLayout,
+        onTextLayout = onTextLayout ?: {},
     )
 }
 

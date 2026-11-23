@@ -430,6 +430,25 @@ class AppearanceFolderLayoutUiTest {
     }
 
     @Test
+    fun seasonalWordmarksSearchTargetTogglesInInlineLayout() {
+        val settings = mutableStateOf(Settings(folderDisplayMode = FolderDisplayMode.INLINE))
+        setContent(
+            settingsProvider = { settings.value },
+            targetProvider = { SettingsTarget.SEASONAL_WORDMARKS },
+            onSeasonalWordmarksEnabled = { settings.value = settings.value.copy(seasonalWordmarksEnabled = it) },
+        )
+
+        compose
+            .onNodeWithTag("settings_target_highlight_SEASONAL_WORDMARKS", useUnmergedTree = true)
+            .assertIsDisplayed()
+            .assertIsOn()
+            .performClick()
+            .assertIsOff()
+            .performClick()
+            .assertIsOn()
+    }
+
+    @Test
     fun searchTargetsScrollToReorganizedControlsAndKeepBothPreviewsLive() {
         val context = RuntimeEnvironment.getApplication()
         val entries = buildSettingsSearchEntries(emptyList(), { context.getString(it) }, { network, section -> "$network · $section" })
@@ -1658,6 +1677,7 @@ class AppearanceFolderLayoutUiTest {
         onOpenPalettes: () -> Unit = {},
         onFolderDisplayMode: (FolderDisplayMode) -> Unit = {},
         onShowFolderChatsInAll: (Boolean) -> Unit = {},
+        onSeasonalWordmarksEnabled: (Boolean) -> Unit = {},
         onAvatarStyle: (AvatarStyle) -> Unit = {},
         onTimeFormat: (TimeFormat) -> Unit = {},
         lifecycleOwner: LifecycleOwner? = null,
@@ -1730,6 +1750,7 @@ class AppearanceFolderLayoutUiTest {
                         onUiIconSet = onUiIconSet,
                         onFolderDisplayMode = onFolderDisplayMode,
                         onShowFolderChatsInAll = onShowFolderChatsInAll,
+                        onSeasonalWordmarksEnabled = onSeasonalWordmarksEnabled,
                         onAvatarStyle = onAvatarStyle,
                         onNickColorsEnabled = {},
                         onNickColorPalette = {},

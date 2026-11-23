@@ -83,8 +83,11 @@ adb -s <serial> shell am start -S -n io.github.trevarj.motd.debug/io.github.trev
 ```
 
 Use `2026-10-31` for Halloween, `2026-12-24` for Christmas, or `2026-12-31`
-for New Year. Tap the chat-list wordmark to play or replay the effect.
-Cold-start without the extra to return to the device date.
+for New Year. For Orthodox Easter, use `2027-05-02` and add
+`--es io.github.trevarj.motd.debug.SEASONAL_COUNTRY GR` to preview in an eligible
+region without changing the device's system locale. Tap the chat-list wordmark to
+play or replay the effect. The Appearance setting still applies in previews.
+Cold-start without extras to return to the device date and region.
 
 ## Verification
 

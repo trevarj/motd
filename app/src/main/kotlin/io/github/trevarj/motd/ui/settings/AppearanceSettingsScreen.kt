@@ -212,6 +212,7 @@ fun AppearanceSettingsScreen(
         onUiIconSet = viewModel::setUiIconSet,
         onFolderDisplayMode = viewModel::setFolderDisplayMode,
         onShowFolderChatsInAll = viewModel::setShowFolderChatsInAll,
+        onSeasonalWordmarksEnabled = viewModel::setSeasonalWordmarksEnabled,
         onAvatarStyle = viewModel::setAvatarStyle,
         onNickColorsEnabled = viewModel::setNickColorsEnabled,
         onNickColorPalette = viewModel::setNickColorPalette,
@@ -264,6 +265,7 @@ fun AppearanceSettingsContent(
     onUiIconSet: (UiIconSet) -> Unit = {},
     onFolderDisplayMode: (FolderDisplayMode) -> Unit,
     onShowFolderChatsInAll: (Boolean) -> Unit = {},
+    onSeasonalWordmarksEnabled: (Boolean) -> Unit = {},
     onAvatarStyle: (AvatarStyle) -> Unit,
     onNickColorsEnabled: (Boolean) -> Unit,
     onNickColorPalette: (NickColorPalette) -> Unit,
@@ -569,6 +571,17 @@ fun AppearanceSettingsContent(
                     summary = stringResource(R.string.settings_chat_card_shape_desc),
                     modifier = targetModifier.testTag("settings_chat_card_shape_picker"),
                     onClick = { choiceSheet = AppearanceChoice.CHAT_CARD_SHAPE },
+                )
+            }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SettingsTarget(target?.name, SettingsTarget.SEASONAL_WORDMARKS.name) { targetModifier ->
+                SwitchRow(
+                    title = stringResource(R.string.settings_seasonal_wordmarks),
+                    subtitle = stringResource(R.string.settings_seasonal_wordmarks_desc),
+                    checked = settings.seasonalWordmarksEnabled,
+                    onCheckedChange = onSeasonalWordmarksEnabled,
+                    switchTag = "settings_switch_seasonal_wordmarks",
+                    modifier = targetModifier,
                 )
             }
         }

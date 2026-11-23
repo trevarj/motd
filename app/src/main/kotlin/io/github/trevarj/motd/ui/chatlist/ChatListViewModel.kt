@@ -171,6 +171,7 @@ data class ChatListState(
     val folders: List<ChatFolderEntity> = emptyList(),
     val folderDisplayMode: FolderDisplayMode = FolderDisplayMode.INLINE,
     val showFolderChatsInAll: Boolean = true,
+    val seasonalWordmarksEnabled: Boolean = true,
     val chatListSwipeAction: ChatListSwipeAction = ChatListSwipeAction.ARCHIVE,
     val connection: Map<Long, IrcClientState> = emptyMap(),
     val queryPresence: Map<Long, PresenceState> = emptyMap(),
@@ -651,6 +652,7 @@ class ChatListViewModel
                     folders = folders,
                     folderDisplayMode = settings.folderDisplayMode,
                     showFolderChatsInAll = settings.showFolderChatsInAll,
+                    seasonalWordmarksEnabled = settings.seasonalWordmarksEnabled,
                     chatListSwipeAction = settings.chatListSwipeAction,
                     connection = connection,
                     queryPresence =

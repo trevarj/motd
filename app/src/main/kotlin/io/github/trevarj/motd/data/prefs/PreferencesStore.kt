@@ -51,6 +51,7 @@ internal object PrefKeys {
     val SHOW_CHANNEL_PREFIXES = stringPreferencesKey("show_channel_prefixes")
     val FOLDER_DISPLAY_MODE = stringPreferencesKey("folder_display_mode")
     val SHOW_FOLDER_CHATS_IN_ALL = stringPreferencesKey("show_folder_chats_in_all")
+    val SEASONAL_WORDMARKS_ENABLED = stringPreferencesKey("seasonal_wordmarks_enabled")
     val CHAT_LIST_SWIPE_ACTION = stringPreferencesKey("chat_list_swipe_action")
     val MENTIONS_ENABLED = stringPreferencesKey("mentions_enabled")
     val MENTIONS_PLACEMENT = stringPreferencesKey("mentions_placement")
@@ -256,6 +257,7 @@ class DataStoreSettingsRepository
                     autoAwayMessage = prefs[PrefKeys.AUTO_AWAY_MESSAGE].orEmpty(),
                     folderDisplayMode = folderDisplayModeFromPreference(prefs[PrefKeys.FOLDER_DISPLAY_MODE]),
                     showFolderChatsInAll = prefs[PrefKeys.SHOW_FOLDER_CHATS_IN_ALL]?.toBooleanStrictOrNull() ?: true,
+                    seasonalWordmarksEnabled = prefs[PrefKeys.SEASONAL_WORDMARKS_ENABLED]?.toBooleanStrictOrNull() ?: true,
                     chatListSwipeAction = chatListSwipeActionFromPreference(prefs[PrefKeys.CHAT_LIST_SWIPE_ACTION]),
                     mentionsEnabled = mentionsEnabledFromPreference(prefs[PrefKeys.MENTIONS_ENABLED]),
                     mentionsPlacement = mentionsPlacementFromPreference(prefs[PrefKeys.MENTIONS_PLACEMENT]),
@@ -309,6 +311,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setShowFolderChatsInAll(enabled: Boolean) {
             store.edit { it[PrefKeys.SHOW_FOLDER_CHATS_IN_ALL] = enabled.toString() }
+        }
+
+        override suspend fun setSeasonalWordmarksEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.SEASONAL_WORDMARKS_ENABLED] = enabled.toString() }
         }
 
         override suspend fun setChatListSwipeAction(action: ChatListSwipeAction) {

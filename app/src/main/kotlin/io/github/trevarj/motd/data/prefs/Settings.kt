@@ -388,6 +388,7 @@ data class Settings(
     val folderDisplayMode: FolderDisplayMode = FolderDisplayMode.INLINE,
     /** Include chats assigned to folders in the All tab. */
     val showFolderChatsInAll: Boolean = true,
+    val seasonalWordmarksEnabled: Boolean = true,
     /** End-to-start action on active chat-list rows; archived rows always unarchive. */
     val chatListSwipeAction: ChatListSwipeAction = ChatListSwipeAction.ARCHIVE,
     /** Show the cross-network feed of stored messages that mention or reply to you. */
@@ -436,6 +437,8 @@ interface SettingsRepository {
     suspend fun setFolderDisplayMode(mode: FolderDisplayMode) {}
 
     suspend fun setShowFolderChatsInAll(enabled: Boolean) {}
+
+    suspend fun setSeasonalWordmarksEnabled(enabled: Boolean) {}
 
     suspend fun setChatListSwipeAction(action: ChatListSwipeAction) {}
 
