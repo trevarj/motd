@@ -11,6 +11,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
@@ -18,6 +19,8 @@ import kotlinx.coroutines.flow.channelFlow
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonArray
@@ -33,6 +36,7 @@ import java.net.URI
 import java.net.URL
 import java.nio.charset.StandardCharsets
 import java.util.Locale
+import java.util.UUID
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -76,6 +80,7 @@ class AttachmentUploaderImpl
         // without standing up Room.
         private val routeProvider: MediaRouteResolver,
         private val metadataSanitizer: UploadMetadataSanitizer,
+        private val prefs: AttachmentPrefs,
     ) : AttachmentUploader {
         private val resolver: ContentResolver = context.contentResolver
 
@@ -92,54 +97,68 @@ class AttachmentUploaderImpl
                 val knownSize = source.sizeOrNull()
                 if (knownSize != null && knownSize > safe.sizeLimitBytes) throw UploadException("File exceeds the configured upload limit")
                 require(safe.backend.supports(source)) { "${safe.backend.label} does not support this attachment type" }
-                metadataSanitizer.prepare(source, safe.sizeLimitBytes, allowOriginal = context.allowOriginalMetadata, stripMetadata = safe.stripMetadata).use { prepared ->
-                    val sanitized = prepared.source
-                    val progress: suspend (Long, Long?) -> Unit = { sent, total ->
-                        send(UploadProgress.Transferring(sent, total))
-                    }
-                    val completed =
-                        when (safe.protocol) {
-                            PasteProtocol.TERMBIN -> {
-                                uploadTermbin(sanitized as AttachmentSource.Text, safe)
-                            }
+                val prepared =
+                    metadataSanitizer.prepare(source, safe.sizeLimitBytes, allowOriginal = context.allowOriginalMetadata, stripMetadata = safe.stripMetadata)
+                val completed =
+                    prepared.use {
+                        val sanitized = it.source
+                        val progress: suspend (Long, Long?) -> Unit = { sent, total ->
+                            send(UploadProgress.Transferring(sent, total))
+                        }
+                        val receipt =
+                            when (safe.protocol) {
+                                PasteProtocol.TERMBIN -> {
+                                    uploadTermbin(sanitized as AttachmentSource.Text, safe)
+                                }
 
-                            PasteProtocol.MULTIPART_0X0 -> {
-                                if (safe.backend == AttachmentBackend.CUSTOM_0X0) {
-                                    uploadCustom(sanitized, safe, progress)
-                                } else {
-                                    upload0x0(sanitized, safe, progress)
+                                PasteProtocol.MULTIPART_0X0 -> {
+                                    if (safe.backend == AttachmentBackend.CUSTOM_0X0) {
+                                        uploadCustom(sanitized, safe, progress)
+                                    } else {
+                                        upload0x0(sanitized, safe, progress)
+                                    }
+                                }
+
+                                PasteProtocol.RAW_CNET -> {
+                                    uploadCNet(sanitized, safe, progress)
+                                }
+
+                                PasteProtocol.MULTIPART_UGUU -> {
+                                    uploadUguu(sanitized, safe, progress)
+                                }
+
+                                PasteProtocol.MULTIPART_CATBOX -> {
+                                    uploadCatbox(sanitized, safe, progress)
+                                }
+
+                                PasteProtocol.SOJU_FILEHOST -> {
+                                    uploadSojuFileHost(sanitized, safe, context, progress)
                                 }
                             }
-
-                            PasteProtocol.RAW_CNET -> {
-                                uploadCNet(sanitized, safe, progress)
+                        val preview =
+                            withTimeoutOrNull(PREVIEW_TIMEOUT_MS) {
+                                // Native decoders may finish after the deadline; discard their result
+                                // rather than detach work that could keep the staged file alive.
+                                localUploadPreview(sanitized).also { currentCoroutineContext().ensureActive() }
                             }
-
-                            PasteProtocol.MULTIPART_UGUU -> {
-                                uploadUguu(sanitized, safe, progress)
-                            }
-
-                            PasteProtocol.MULTIPART_CATBOX -> {
-                                uploadCatbox(sanitized, safe, progress)
-                            }
-
-                            PasteProtocol.SOJU_FILEHOST -> {
-                                uploadSojuFileHost(sanitized, safe, context, progress)
-                            }
-                        }
-                    currentCoroutineContext().ensureActive()
-                    val preview = localUploadPreview(sanitized)
-                    currentCoroutineContext().ensureActive()
-                    send(if (preview == null) completed else UploadProgress.Complete(completed.record.copy(preview = preview)))
+                        if (preview == null) receipt else receipt.copy(preview = preview)
+                    }
+                completed.preview?.let {
+                    try {
+                        withTimeoutOrNull(PREVIEW_TIMEOUT_MS) { prefs.updateUploadPreview(completed, it) }
+                    } catch (_: IOException) {
+                        // The hosting receipt is already durable; the Recent preview is optional.
+                    }
                 }
+                send(UploadProgress.Complete(completed))
             }.flowOn(Dispatchers.IO)
 
         private suspend fun uploadCustom(
             source: AttachmentSource,
             config: PasteBackendConfig,
             progress: suspend (Long, Long?) -> Unit,
-        ): UploadProgress.Complete {
-            val boundary = "motd-${java.util.UUID.randomUUID()}"
+        ): UploadRecord {
+            val boundary = "motd-${UUID.randomUUID()}"
             val fields =
                 buildList {
                     addAll(multipart0x0Fields(config))
@@ -173,14 +192,14 @@ class AttachmentUploaderImpl
                 if (code in 300..399 && !isCustomUploadRedirect(config.endpoint, location)) {
                     throw UploadException("Upload returned an unexpected redirect.")
                 }
-                UploadProgress.Complete(record(source, config, customResultUrl(config.endpoint, location, body)))
+                record(source, config, customResultUrl(config.endpoint, location, body))
             }
         }
 
         private suspend fun uploadTermbin(
             source: AttachmentSource.Text,
             config: PasteBackendConfig,
-        ): UploadProgress.Complete {
+        ): UploadRecord {
             val bytes = source.text.toByteArray(StandardCharsets.UTF_8)
             if (bytes.size > config.sizeLimitBytes) throw UploadException("Paste exceeds the configured upload limit")
             Socket().use { socket ->
@@ -193,7 +212,9 @@ class AttachmentUploaderImpl
                 socket.shutdownOutput()
                 val url = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8)).readLine()?.trim()
                 if (url.isNullOrBlank()) throw UploadException("Termbin returned an empty response")
-                return UploadProgress.Complete(UploadRecord(url, AttachmentBackend.TERMBIN, source.name, "text/plain", bytes.size.toLong()))
+                return persistReceipt(
+                    UploadRecord(url, AttachmentBackend.TERMBIN, source.name, "text/plain", bytes.size.toLong(), receiptId = UUID.randomUUID().toString()),
+                )
             }
         }
 
@@ -201,7 +222,7 @@ class AttachmentUploaderImpl
             source: AttachmentSource,
             config: PasteBackendConfig,
             progress: suspend (Long, Long?) -> Unit,
-        ): UploadProgress.Complete =
+        ): UploadRecord =
             uploadMultipart(
                 source = source,
                 config = config,
@@ -210,7 +231,7 @@ class AttachmentUploaderImpl
                 progress = progress,
                 parse = { body, connection ->
                     val resultUrl = firstHttpsUrl(body)
-                    UploadProgress.Complete(record(source, config, resultUrl, connection.getHeaderField("X-Token")))
+                    record(source, config, resultUrl, connection.getHeaderField("X-Token"))
                 },
             )
 
@@ -218,7 +239,7 @@ class AttachmentUploaderImpl
             source: AttachmentSource,
             config: PasteBackendConfig,
             progress: suspend (Long, Long?) -> Unit,
-        ): UploadProgress.Complete =
+        ): UploadRecord =
             uploadMultipart(
                 source = source,
                 config = config,
@@ -226,7 +247,7 @@ class AttachmentUploaderImpl
                 fields = emptyList(),
                 progress = progress,
                 parse = { body, _ ->
-                    UploadProgress.Complete(record(source, config, BackendResponses.uguu(body)))
+                    record(source, config, BackendResponses.uguu(body))
                 },
             )
 
@@ -234,7 +255,7 @@ class AttachmentUploaderImpl
             source: AttachmentSource,
             config: PasteBackendConfig,
             progress: suspend (Long, Long?) -> Unit,
-        ): UploadProgress.Complete =
+        ): UploadRecord =
             uploadMultipart(
                 source = source,
                 config = config,
@@ -247,14 +268,14 @@ class AttachmentUploaderImpl
                         }
                     },
                 progress = progress,
-                parse = { body, _ -> UploadProgress.Complete(record(source, config, firstHttpsUrl(body))) },
+                parse = { body, _ -> record(source, config, firstHttpsUrl(body)) },
             )
 
         private suspend fun uploadCNet(
             source: AttachmentSource,
             config: PasteBackendConfig,
             progress: suspend (Long, Long?) -> Unit,
-        ): UploadProgress.Complete {
+        ): UploadRecord {
             val connection =
                 connection(config.endpoint, "PUT").apply {
                     doOutput = true
@@ -268,7 +289,7 @@ class AttachmentUploaderImpl
                 connection.outputStream.use { output -> streamSource(source, config, output, progress) }
                 val response = response(connection)
                 val (url, deleteKey) = BackendResponses.cnet(response)
-                UploadProgress.Complete(record(source, config, url, deleteKey))
+                record(source, config, url, deleteKey)
             }
         }
 
@@ -277,7 +298,7 @@ class AttachmentUploaderImpl
             config: PasteBackendConfig,
             context: AttachmentUploadContext,
             progress: suspend (Long, Long?) -> Unit,
-        ): UploadProgress.Complete {
+        ): UploadRecord {
             val networkId =
                 context.networkId
                     ?: throw UploadException("Choose a chat with a connected Soju file host.")
@@ -326,7 +347,7 @@ class AttachmentUploaderImpl
                             sojuUploadFailureMessage(code, readBodySnippet(connection), acceptPost, source.mimeType()),
                         )
                     }
-                    UploadProgress.Complete(record(source, config.copy(endpoint = endpoint), resolveSojuLocation(endpoint, location)))
+                    record(source, config.copy(endpoint = endpoint), resolveSojuLocation(endpoint, location))
                 }
             }
         }
@@ -370,9 +391,9 @@ class AttachmentUploaderImpl
             fieldName: String,
             fields: List<Pair<String, String>>,
             progress: suspend (Long, Long?) -> Unit,
-            parse: (String, HttpURLConnection) -> UploadProgress.Complete,
-        ): UploadProgress.Complete {
-            val boundary = "motd-${java.util.UUID.randomUUID()}"
+            parse: (String, HttpURLConnection) -> UploadRecord,
+        ): UploadRecord {
+            val boundary = "motd-${UUID.randomUUID()}"
             val connection =
                 connection(config.endpoint, "POST").apply {
                     doOutput = true
@@ -412,7 +433,7 @@ class AttachmentUploaderImpl
                         setFixedLengthStreamingMode(payload.size)
                     }
                 }
-            executeUpload(connection) {
+            executeRequest(connection) {
                 payload?.let { connection.outputStream.use { output -> output.write(it) } }
                 if (connection.responseCode !in 200..299) throw UploadException("Delete failed (HTTP ${connection.responseCode})")
             }
@@ -452,7 +473,19 @@ class AttachmentUploaderImpl
             }
         }
 
-        private suspend fun <T> executeUpload(
+        private suspend fun executeUpload(
+            connection: HttpURLConnection,
+            block: suspend () -> UploadRecord,
+        ): UploadRecord = executeRequest(connection) { persistReceipt(block()) }
+
+        private suspend fun persistReceipt(record: UploadRecord): UploadRecord {
+            // A parsed host response can outlive the cancelled UI continuation. Commit it in
+            // the worker before returning, and never make the optional decode non-cancellable.
+            withContext(NonCancellable) { prefs.addUpload(record) }
+            return record
+        }
+
+        private suspend fun <T> executeRequest(
             connection: HttpURLConnection,
             block: suspend () -> T,
         ): T =
@@ -677,6 +710,7 @@ private fun record(
     sizeBytes = source.sizeOrNull(),
     deletionToken = deletionToken,
     endpoint = config.endpoint,
+    receiptId = UUID.randomUUID().toString(),
 )
 
 internal object BackendResponses {
@@ -762,6 +796,7 @@ internal class UploadProgressThrottle(
 
 private const val CONNECT_TIMEOUT_MS = 15_000
 private const val READ_TIMEOUT_MS = 60_000
+private const val PREVIEW_TIMEOUT_MS = 5_000L
 private const val STREAM_BUFFER_BYTES = 32 * 1024
 private const val MAX_RESPONSE_CHARS = 64 * 1024
 private const val USER_AGENT = "motd-Android (https://github.com/trevarj/motd)"

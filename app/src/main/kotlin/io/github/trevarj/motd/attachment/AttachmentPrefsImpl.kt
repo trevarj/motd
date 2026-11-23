@@ -65,6 +65,21 @@ class AttachmentPrefsImpl
             }
         }
 
+        override suspend fun updateUploadPreview(
+            record: UploadRecord,
+            preview: LocalUploadPreview,
+        ) {
+            val receiptId = record.receiptId ?: return
+            store.edit { prefs ->
+                val records = prefs[HISTORY]?.let(::decodeHistory) ?: return@edit
+                val index = records.indexOfFirst { it.url == record.url && it.receiptId == receiptId }
+                if (index == -1) return@edit
+                val updated = records.toMutableList()
+                updated[index] = records[index].copy(preview = preview)
+                prefs[HISTORY] = encodeHistory(updated)
+            }
+        }
+
         override suspend fun removeUpload(url: String) {
             store.edit { prefs -> prefs[HISTORY] = encodeHistory(prefs[HISTORY]?.let(::decodeHistory).orEmpty().filterNot { it.url == url }) }
         }
@@ -131,6 +146,7 @@ class AttachmentPrefsImpl
                             put("at", r.uploadedAt)
                             put("token", r.deletionToken)
                             put("endpoint", r.endpoint)
+                            r.receiptId?.let { put("receiptId", it) }
                             r.preview?.takeIf { it.isBounded() }?.let {
                                 put("preview", json.encodeToJsonElement(LocalUploadPreview.serializer(), it))
                             }
@@ -166,6 +182,7 @@ class AttachmentPrefsImpl
                                     .getOrNull()
                                     ?.takeIf { it.isBounded() }
                             },
+                            receiptId = (o["receiptId"] as? JsonPrimitive)?.contentOrNull,
                         )
                     }.take(MAX_UPLOAD_HISTORY)
             }.getOrDefault(emptyList())

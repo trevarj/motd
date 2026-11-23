@@ -112,6 +112,7 @@ data class UploadRecord(
     val deletionToken: String? = null,
     val endpoint: String? = null,
     val preview: LocalUploadPreview? = null,
+    internal val receiptId: String? = null,
 )
 
 @Serializable
@@ -147,12 +148,18 @@ interface AttachmentPrefs {
 
     suspend fun addUpload(record: UploadRecord)
 
+    suspend fun updateUploadPreview(
+        record: UploadRecord,
+        preview: LocalUploadPreview,
+    )
+
     suspend fun removeUpload(url: String)
 
     suspend fun clearUploadHistory()
 }
 
 interface AttachmentUploader {
+    /** Stores the hosting receipt before attempting a local preview or emitting [UploadProgress.Complete]. */
     fun upload(
         source: AttachmentSource,
         config: PasteBackendConfig,

@@ -12,8 +12,10 @@ import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.audio.MediaRouteResolver
 import io.github.trevarj.motd.testing.NoopConnectionManager
 import io.github.trevarj.motd.ui.chat.AttachmentViewModel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.filterNotNull
@@ -73,11 +75,12 @@ class AttachmentUploaderMetadataTest {
             val store = ViewModelStore()
             try {
                 val context = ApplicationProvider.getApplicationContext<Context>()
-                val uploader = AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context))
+                val prefs = AttachmentPrefsImpl(context)
+                val uploader = AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context), prefs)
                 val factory =
                     object : ViewModelProvider.Factory {
                         @Suppress("UNCHECKED_CAST")
-                        override fun <T : ViewModel> create(modelClass: Class<T>): T = AttachmentViewModel(AttachmentPrefsImpl(context), uploader) as T
+                        override fun <T : ViewModel> create(modelClass: Class<T>): T = AttachmentViewModel(prefs, uploader) as T
                     }
                 val firstScreen = ViewModelProvider(store, factory)[AttachmentViewModel::class.java]
                 val original = temporary.newFile("private.pdf").apply { writeText("%PDF-1.7 private author") }
@@ -117,21 +120,9 @@ class AttachmentUploaderMetadataTest {
                 object : ContextWrapper(ApplicationProvider.getApplicationContext<Context>()) {
                     override fun getCacheDir(): File = cache
                 }
-            val uploader = AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context))
-            val password = "media-test".toCharArray()
-            val store = KeyStore.getInstance("PKCS12")
-            javaClass.getResourceAsStream("/network-media.p12")!!.use { store.load(it, password) }
-            val keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(store, password) }
-            val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
-            val tls = SSLContext.getInstance("TLS").apply { init(keys.keyManagers, trust.trustManagers, null) }
-            val previousTls = HttpsURLConnection.getDefaultSSLSocketFactory()
-            val previousVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
-            val server = MockWebServer()
-            server.useHttps(tls.socketFactory, false)
-            HttpsURLConnection.setDefaultSSLSocketFactory(tls.socketFactory)
-            HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
-            try {
-                server.start()
+            val prefs = AttachmentPrefsImpl(context)
+            val uploader = AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context), prefs)
+            withUploadServer { server ->
                 val config = PasteBackendConfig(backend = AttachmentBackend.CUSTOM_0X0, customEndpoint = server.url("/upload").toString())
                 val original = temporary.newFile("private-location.png")
                 val encoded = ByteArrayOutputStream().also { ImageIO.write(BufferedImage(2, 3, BufferedImage.TYPE_INT_ARGB), "png", it) }.toByteArray()
@@ -155,6 +146,7 @@ class AttachmentUploaderMetadataTest {
                 val before = original.readBytes()
                 server.enqueue(MockResponse().setBody("https://example.com/clean.png"))
                 val record = (uploader.upload(AttachmentSource.LocalFile(original, original.name, "image/png"), config).last() as UploadProgress.Complete).record
+                assertEquals(record, prefs.recentUploads.first().single { it.url == record.url })
                 val thumbnail = decodePreview(record.preview)
                 assertEquals(2, thumbnail.outWidth)
                 assertEquals(3, thumbnail.outHeight)
@@ -253,12 +245,92 @@ class AttachmentUploaderMetadataTest {
                         withContext(NonCancellable) { stalled.cancelAndJoin() }
                     }
                 }
-            } finally {
-                server.shutdown()
-                HttpsURLConnection.setDefaultSSLSocketFactory(previousTls)
-                HttpsURLConnection.setDefaultHostnameVerifier(previousVerifier)
             }
         }
+
+    @Test
+    fun hostedReceiptIsDurableWhenUploadIsCancelledDuringOptionalPreview() =
+        runBlocking {
+            val cache = temporary.newFolder()
+            val context =
+                object : ContextWrapper(ApplicationProvider.getApplicationContext<Context>()) {
+                    override fun getCacheDir(): File = cache
+                }
+            val prefs = AttachmentPrefsImpl(context)
+            prefs.clearUploadHistory()
+            val started = CompletableDeferred<LocalUploadPreview>()
+            var saves = 0
+            val pausingPrefs =
+                object : AttachmentPrefs by prefs {
+                    override suspend fun addUpload(record: UploadRecord) {
+                        saves++
+                        prefs.addUpload(record)
+                    }
+
+                    override suspend fun updateUploadPreview(
+                        record: UploadRecord,
+                        preview: LocalUploadPreview,
+                    ) {
+                        started.complete(preview)
+                        awaitCancellation()
+                    }
+                }
+            val uploader = AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context), pausingPrefs)
+            val file = temporary.newFile("receipt.txt").apply { writeText("local preview") }
+            withUploadServer { server ->
+                val config =
+                    PasteBackendConfig(
+                        backend = AttachmentBackend.CUSTOM_0X0,
+                        customEndpoint = server.url("/upload").toString(),
+                        stripMetadata = false,
+                    )
+                server.enqueue(MockResponse().setBody("https://example.com/receipt.txt"))
+                val upload =
+                    launch {
+                        uploader.upload(AttachmentSource.LocalFile(file, file.name, "text/plain"), config).collect {
+                            if (it is UploadProgress.Complete) fail("Cancelled upload emitted Complete")
+                        }
+                    }
+                val receipt =
+                    try {
+                        assertEquals("local preview", withTimeout(5_000) { started.await() }.textSnippet)
+                        assertTrue("Preview enrichment retained staged bytes", cache.listFiles().orEmpty().isEmpty())
+                        AttachmentPrefsImpl(context).recentUploads.first().single()
+                    } finally {
+                        upload.cancelAndJoin()
+                    }
+                assertEquals("https://example.com/receipt.txt", receipt.url)
+                assertEquals(config.customEndpoint, receipt.endpoint)
+                assertEquals(file.name, receipt.displayName)
+                assertNull(receipt.preview)
+                assertEquals(receipt, AttachmentPrefsImpl(context).recentUploads.first().single())
+                assertEquals(1, saves)
+                assertEquals(1, server.requestCount)
+            }
+        }
+
+    private suspend fun withUploadServer(test: suspend (MockWebServer) -> Unit) {
+        val password = "media-test".toCharArray()
+        val store = KeyStore.getInstance("PKCS12")
+        javaClass.getResourceAsStream("/network-media.p12")!!.use { store.load(it, password) }
+        val keys = KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm()).apply { init(store, password) }
+        val trust = TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()).apply { init(store) }
+        val tls = SSLContext.getInstance("TLS").apply { init(keys.keyManagers, trust.trustManagers, null) }
+        val previousTls = HttpsURLConnection.getDefaultSSLSocketFactory()
+        val previousVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
+        val server = MockWebServer()
+        server.useHttps(tls.socketFactory, false)
+        HttpsURLConnection.setDefaultSSLSocketFactory(tls.socketFactory)
+        HttpsURLConnection.setDefaultHostnameVerifier { _, _ -> true }
+        try {
+            server.start()
+            test(server)
+        } finally {
+            server.shutdown()
+            HttpsURLConnection.setDefaultSSLSocketFactory(previousTls)
+            HttpsURLConnection.setDefaultHostnameVerifier(previousVerifier)
+        }
+    }
 
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)

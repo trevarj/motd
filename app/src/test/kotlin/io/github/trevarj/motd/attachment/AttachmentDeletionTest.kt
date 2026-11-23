@@ -36,6 +36,7 @@ class AttachmentDeletionTest {
                 NoopConnectionManager(),
                 MediaRouteResolver { null },
                 UploadMetadataSanitizer(ApplicationProvider.getApplicationContext<Context>()),
+                AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>()),
             )
 
         try {

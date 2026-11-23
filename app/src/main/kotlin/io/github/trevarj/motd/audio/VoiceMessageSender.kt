@@ -173,7 +173,6 @@ class VoiceMessageSenderImpl
             val record =
                 (result as? UploadProgress.Complete)?.record
                     ?: throw VoiceSendException("Upload did not complete.")
-            attachmentPrefs.addUpload(record)
             return VoiceUploadRecord(record.url, voiceExpiryFor(selected, record.uploadedAt))
         }
 

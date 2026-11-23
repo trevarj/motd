@@ -674,9 +674,9 @@ flowchart TD
   Preparation, metadata consent, and final review survive rotation of the same chat visit;
   navigating to another chat or leaving the app abandons them.
 - Hosted upload confirmation checks the known size against the selected destination and
-  keeps the local full-image review separate from transport. Successful uploads retain
-  bounded, local previews in backup-excluded Recent uploads: image/video/PDF thumbnails,
-  text excerpts, and media duration when available. History retention owns these previews.
+  keeps the local full-image review separate from transport. Backup-excluded Recent uploads
+  saves the hosting receipt before generating optional, bounded local previews: image/video/PDF
+  thumbnails, text excerpts, and media duration. History retention owns those previews.
   The most recently uploaded image can appear beside its ordinary, editable draft URL;
   the preview itself never enters the IRC message.
 - Network-owned images, avatars, icons, video, and image Save use `NetworkMediaHttp`

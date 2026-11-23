@@ -9,6 +9,7 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.LocalUploadPreview
 import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadMetadataSanitizer
@@ -198,6 +199,11 @@ class VoiceMessageSenderMetadataTest {
         }
 
         override suspend fun addUpload(record: UploadRecord) = Unit
+
+        override suspend fun updateUploadPreview(
+            record: UploadRecord,
+            preview: LocalUploadPreview,
+        ) = Unit
 
         override suspend fun removeUpload(url: String) = Unit
 

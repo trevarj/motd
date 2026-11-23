@@ -180,7 +180,7 @@ class AttachmentConfirmationSheetUiTest {
         val attachments =
             AttachmentViewModel(
                 prefs,
-                AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context)),
+                AttachmentUploaderImpl(context, NoopConnectionManager(), MediaRouteResolver { null }, UploadMetadataSanitizer(context), prefs),
             )
         var settingsVisible by mutableStateOf(true)
         try {
@@ -823,6 +823,11 @@ class AttachmentConfirmationSheetUiTest {
                         override suspend fun updateConfig(transform: (PasteBackendConfig) -> PasteBackendConfig) = Unit
 
                         override suspend fun addUpload(record: UploadRecord) = Unit
+
+                        override suspend fun updateUploadPreview(
+                            record: UploadRecord,
+                            preview: LocalUploadPreview,
+                        ) = Unit
 
                         override suspend fun removeUpload(url: String) = Unit
 

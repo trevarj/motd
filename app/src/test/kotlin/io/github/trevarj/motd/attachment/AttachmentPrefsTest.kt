@@ -118,6 +118,32 @@ class AttachmentPrefsTest {
         }
 
     @Test
+    fun latePreviewUpdatesOnlyItsExistingReceipt() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            prefs.clearUploadHistory()
+            val receipt = UploadRecord("https://files.example/one", AttachmentBackend.CRAFTERBIN, "one", receiptId = "first")
+            val preview = LocalUploadPreview(textSnippet = "local text")
+            prefs.addUpload(receipt)
+            prefs.updateUploadPreview(receipt, preview)
+            assertEquals(listOf(receipt.copy(preview = preview)), prefs.recentUploads.first())
+
+            prefs.removeUpload(receipt.url)
+            prefs.updateUploadPreview(receipt, preview)
+            assertEquals(emptyList<UploadRecord>(), prefs.recentUploads.first())
+
+            prefs.addUpload(receipt)
+            prefs.clearUploadHistory()
+            prefs.updateUploadPreview(receipt, preview)
+            assertEquals(emptyList<UploadRecord>(), prefs.recentUploads.first())
+
+            val replacement = receipt.copy(receiptId = "second")
+            prefs.addUpload(replacement)
+            prefs.updateUploadPreview(receipt, preview)
+            assertEquals(listOf(replacement), prefs.recentUploads.first())
+        }
+
+    @Test
     fun legacyAndMalformedPreviewsKeepTheirUploadRecords() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()

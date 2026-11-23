@@ -73,7 +73,6 @@ class AttachmentViewModel
                         uploader.upload(source, destination, context).collect { update ->
                             _progress.value = update
                             if (update is UploadProgress.Complete) {
-                                prefs.addUpload(update.record)
                                 _attempt.value = null
                                 onComplete(update.record)
                             }
