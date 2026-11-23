@@ -48,10 +48,21 @@ internal fun isExactIgnoreNick(
     nick: String,
     rules: IrcIdentityRules,
 ): Boolean {
-    if (nick.isEmpty() || rules.isChannel(nick) || !nick[0].isIrcNickInitial()) return false
-    for (index in 1 until nick.length) {
-        val ch = nick[index]
-        if (!ch.isIrcNickInitial() && ch !in '0'..'9' && ch != '-') return false
+    if (nick.isEmpty() || rules.isChannel(nick)) return false
+    var index = 0
+    while (index < nick.length) {
+        val point = nick.codePointAt(index)
+        val valid =
+            if (point <= 0x7f) {
+                val ch = point.toChar()
+                ch.isIrcNickInitial() || (index != 0 && (ch in '0'..'9' || ch == '-'))
+            } else {
+                // Non-ASCII nick alphabets are server-specific; keep literal code points, not separators or controls.
+                !Character.isSpaceChar(point) && !Character.isISOControl(point) &&
+                    point !in 0xd800..0xdfff && Character.getType(point) != Character.FORMAT.toInt()
+            }
+        if (!valid) return false
+        index += Character.charCount(point)
     }
     return true
 }

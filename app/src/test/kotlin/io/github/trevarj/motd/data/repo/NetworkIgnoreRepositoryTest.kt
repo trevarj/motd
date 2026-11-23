@@ -10,6 +10,7 @@ import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.test.runTest
 import org.junit.After
@@ -103,6 +104,33 @@ class NetworkIgnoreRepositoryTest {
             assertTrue(created.enabled)
             repository.setExactNickIgnored(network, "{LICE", rules, ignored = false).getOrThrow()
             assertEquals(listOf(existing, created.copy(enabled = false)), dao.allForNetwork(network))
+        }
+
+    @Test
+    fun `unicode nick actions reuse retained masks under the IRC casemap`() =
+        runTest {
+            val network = network()
+            val rules = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+            val nick = "ÉLODIE{"
+            val source = Prefix(nick, "ident", "example.net")
+            repository.addIgnore(network, "Élodie[").getOrThrow()
+            val retained = dao.allForNetwork(network).single()
+            assertEquals("Élodie[!*@*", retained.pattern)
+            assertTrue(hasExactNickIgnore(cache.enabledForNetwork(network), nick, rules))
+            assertTrue(ignoredBy(cache.enabledForNetwork(network), source, rules))
+
+            repository.setExactNickIgnored(network, nick, rules, ignored = false).getOrThrow()
+            assertEquals(listOf(retained.copy(enabled = false)), dao.allForNetwork(network))
+            assertFalse(ignoredBy(cache.enabledForNetwork(network), source, rules))
+            repository.setExactNickIgnored(network, nick, rules, ignored = true).getOrThrow()
+            assertEquals(listOf(retained), dao.allForNetwork(network))
+            assertTrue(ignoredBy(cache.enabledForNetwork(network), source, rules))
+
+            val differentNick = "élodie{"
+            assertFalse(hasExactNickIgnore(cache.enabledForNetwork(network), differentNick, rules))
+            assertFalse(ignoredBy(cache.enabledForNetwork(network), source.copy(nick = differentNick), rules))
+            repository.setExactNickIgnored(network, differentNick, rules, ignored = true).getOrThrow()
+            assertEquals(listOf(retained.pattern, "$differentNick!*@*"), dao.allForNetwork(network).map { it.pattern })
         }
 
     @Test

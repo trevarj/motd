@@ -67,6 +67,18 @@ class NetworkIgnorePolicyTest {
         assertTrue(isExactIgnoreNick("[lice", IrcIdentityRules()))
     }
 
+    @Test fun `exact ignore accepts literal unicode nicks but rejects unsafe tokens`() {
+        val rules = IrcIdentityRules()
+        for (nick in listOf("Élodie", "E\u0301lodie", "東京", "\uD801\uDC00nick")) {
+            assertTrue(nick, isExactIgnoreNick(nick, rules))
+        }
+        for (nick in listOf("Él*", "Él?", "Él!u", "Él@h", "Él/discord", "Él\u00A0x", "Él\u2028x", "Él\u202Ex", "Él\uD800")) {
+            assertFalse(nick, isExactIgnoreNick(nick, rules))
+        }
+        assertFalse(isExactIgnoreNick("#東京", rules))
+        assertFalse(isExactIgnoreNick("東京", IrcIdentityRules(advertisedChanTypes = "東")))
+    }
+
     @Test fun `exact ignore state counts only enabled unrestricted nick masks under the network casemap`() {
         val rules = IrcIdentityRules(IrcCaseMapping.Rfc1459)
         val nonExact =
