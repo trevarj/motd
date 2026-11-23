@@ -50,6 +50,7 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import java.io.Closeable
 import java.io.File
+import java.io.IOException
 import java.io.InputStream
 import java.io.OutputStream
 import java.net.InetAddress
@@ -139,6 +140,19 @@ class DccTransferControllerImpl
         private val stateLock = Mutex()
         private val jobs = LinkedHashMap<Long, Job>()
         private val jobLock = Mutex()
+
+        // The app has one process and one controller. Reap before staging, never while a review or transfer owns a file.
+        private val sendStagingDirectory =
+            lazy {
+                File(context.cacheDir, "dcc-send-staging").also { directory ->
+                    if (directory.exists()) {
+                        val staleFiles = directory.listFiles() ?: throw IOException("Unable to read DCC staging directory")
+                        for (file in staleFiles) {
+                            if (!file.delete() && file.exists()) throw IOException("Unable to clear DCC staging directory")
+                        }
+                    }
+                }
+            }
 
         override fun observeAll(): Flow<List<DccTransferEntity>> = transfers.observeAll()
 
@@ -237,10 +251,18 @@ class DccTransferControllerImpl
             val stripMetadata = attachmentPrefs.config.first().stripMetadata
             val document =
                 withContext(Dispatchers.IO) {
+                    sendStagingDirectory.value // Run the one-time reaping on IO.
                     val meta = queryMeta(sourceUri)
                     AttachmentSource.Document(sourceUri, meta.name, context.contentResolver.getType(sourceUri), meta.sizeBytes)
                 }
-            val upload = metadataSanitizer.prepare(document, MAX_DCC_FILE_SIZE_BYTES, allowOriginalMetadata, stripMetadata)
+            val upload =
+                metadataSanitizer.prepare(
+                    document,
+                    MAX_DCC_FILE_SIZE_BYTES,
+                    allowOriginal = allowOriginalMetadata,
+                    stripMetadata = stripMetadata,
+                    stagingDirectory = sendStagingDirectory.value,
+                )
             try {
                 val source = upload.source as AttachmentSource.LocalFile
                 requireSameSendTarget(bufferId, target)

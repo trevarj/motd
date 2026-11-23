@@ -673,6 +673,8 @@ flowchart TD
   a private address or bypasses a proxy.
   Preparation, metadata consent, and final review survive rotation of the same chat visit;
   navigating to another chat or leaving the app abandons them.
+  The first staging operation after a process restart reclaims abandoned direct-send files
+  without touching normal upload or media caches.
 - Hosted upload confirmation checks the known size against the selected destination and
   keeps the local full-image review separate from transport. Backup-excluded Recent uploads
   saves the hosting receipt before generating optional, bounded local previews: image/video/PDF

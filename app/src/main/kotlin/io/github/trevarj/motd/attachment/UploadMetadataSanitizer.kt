@@ -38,11 +38,12 @@ class UploadMetadataSanitizer
             limitBytes: Long,
             allowOriginal: Boolean = false,
             stripMetadata: Boolean = true,
+            stagingDirectory: File? = null,
         ): PreparedUpload {
             var prepared: PreparedUpload? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    stage(source, limitBytes, allowOriginal, stripMetadata).also { prepared = it }
+                    stage(source, limitBytes, allowOriginal, stripMetadata, stagingDirectory).also { prepared = it }
                 }
             } catch (failure: Throwable) {
                 prepared?.close()
@@ -55,10 +56,15 @@ class UploadMetadataSanitizer
             limitBytes: Long,
             allowOriginal: Boolean,
             stripMetadata: Boolean,
+            stagingDirectory: File?,
         ): PreparedUpload {
             require(limitBytes > 0)
             if (source is AttachmentSource.Text) return PreparedUpload(source)
-            val input = File.createTempFile("upload-input-", ".tmp", context.cacheDir)
+            val directory = stagingDirectory ?: context.cacheDir
+            if (stagingDirectory != null && !directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) {
+                throw IOException("Unable to create upload staging directory")
+            }
+            val input = File.createTempFile("upload-input-", ".tmp", directory)
             var output: File? = null
             var retained: File? = null
             try {
@@ -99,7 +105,7 @@ class UploadMetadataSanitizer
                 currentCoroutineContext().ensureActive()
                 val media =
                     if (stripMetadata) {
-                        val sanitized = File.createTempFile("upload-clean-", ".tmp", context.cacheDir)
+                        val sanitized = File.createTempFile("upload-clean-", ".tmp", directory)
                         output = sanitized
                         stripImageMetadata(input, sanitized) ?: stripAudioVideoMetadata(input, sanitized)
                     } else {

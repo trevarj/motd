@@ -64,6 +64,39 @@ class DccTransferMetadataTest {
     val temporary = TemporaryFolder()
 
     @Test
+    fun firstReviewReapsPreviousProcessFilesWithoutDisturbingOtherCacheOrLiveReviews() =
+        runBlocking {
+            withController { fixture ->
+                val staging = fixture.stagingDirectory.apply { assertTrue(mkdir()) }
+                val staleInput = File(staging, "upload-input-old.tmp").apply { writeText("private input") }
+                val staleOutput = File(staging, "upload-clean-old.tmp").apply { writeText("reviewed bytes") }
+                val otherUpload = File(fixture.cache, staleInput.name).apply { writeText("unrelated upload") }
+                val otherCache = File(fixture.cache, "other-private-cache").apply { assertTrue(mkdir()) }
+                val otherFile = File(otherCache, staleOutput.name).apply { writeText("unrelated private cache") }
+                fixture.prefs.setConfig(PasteBackendConfig(stripMetadata = false))
+                val first = temporary.newFile("first.txt").apply { writeText("first review") }
+                val second = temporary.newFile("second.txt").apply { writeText("second review") }
+
+                fixture.controller.prepareSend(fixture.bufferId, first.toUri()).use {
+                    assertFalse(staleInput.exists())
+                    assertFalse(staleOutput.exists())
+                    val liveFile = fixture.stagedFiles().single()
+                    fixture.controller.prepareSend(fixture.bufferId, second.toUri()).use {
+                        assertEquals(setOf("first review", "second review"), fixture.stagedFiles().map { it.readText() }.toSet())
+                        fixture.assertNoOffer()
+                    }
+                    assertEquals(listOf(liveFile), fixture.stagedFiles())
+                    assertEquals("first review", liveFile.readText())
+                }
+
+                assertTrue(fixture.stagedFiles().isEmpty())
+                assertEquals("unrelated upload", otherUpload.readText())
+                assertEquals("unrelated private cache", otherFile.readText())
+                fixture.assertNoOffer()
+            }
+        }
+
+    @Test
     fun disabledPolicyStagesOriginalButClosePreventsAnySend() =
         runBlocking {
             withController { fixture ->
@@ -320,7 +353,9 @@ class DccTransferMetadataTest {
         val connections: ReadyConnection,
         val transport: RecordingTransport,
     ) {
-        fun stagedFiles(): List<File> = cache.listFiles().orEmpty().filter { it.name.startsWith("upload-") }
+        val stagingDirectory = File(cache, "dcc-send-staging")
+
+        fun stagedFiles(): List<File> = stagingDirectory.listFiles().orEmpty().toList()
 
         suspend fun assertNoOffer() {
             assertTrue(controller.observeAll().first().isEmpty())
