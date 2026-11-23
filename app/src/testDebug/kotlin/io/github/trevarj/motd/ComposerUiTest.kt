@@ -978,7 +978,7 @@ class ComposerUiTest {
     }
 
     @Test
-    fun replyWarning_isAboveReplyContentAndInput() {
+    fun departedNickWarningSharesTheReplyCardBackground() {
         val preset = mutableStateOf(ColorThemePreset.AYU_LIGHT)
         var fill = Color.Unspecified
         compose.setContent {
@@ -996,11 +996,7 @@ class ComposerUiTest {
         }
 
         val warning =
-            compose
-                .onNodeWithTag("chat_composer_reply_warning")
-                .assertIsDisplayed()
-                .fetchSemanticsNode()
-                .boundsInRoot
+            compose.onNodeWithTag("chat_composer_reply_warning", useUnmergedTree = true).assertIsDisplayed()
         val reply =
             compose
                 .onNodeWithText("original")
@@ -1008,11 +1004,20 @@ class ComposerUiTest {
                 .fetchSemanticsNode()
                 .boundsInRoot
         val input = compose.onNodeWithTag("chat_composer_input_row").fetchSemanticsNode().boundsInRoot
-        assertTrue(warning.bottom <= reply.top)
-        assertTrue(warning.bottom <= input.top)
+        assertTrue(warning.fetchSemanticsNode().boundsInRoot.top >= reply.bottom)
+        assertTrue(warning.fetchSemanticsNode().boundsInRoot.bottom <= input.top)
         val sender = RuntimeEnvironment.getApplication().getString(R.string.chat_composer_replying_to, "alice")
         for (theme in listOf(ColorThemePreset.AYU_LIGHT, ColorThemePreset.AYU_DARK)) {
             compose.runOnIdle { preset.value = theme }
+            val warningPixels = warning.captureToImage().asAndroidBitmap()
+            assertEquals(fill.toArgb(), warningPixels.getPixel(0, warningPixels.height - 1))
+            val warningLayouts = mutableListOf<TextLayoutResult>()
+            warning.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(warningLayouts) }
+            val warningInk =
+                warningLayouts
+                    .single()
+                    .layoutInput.style.color
+            assertTrue(contrastRatio(warningInk, fill) >= MESSAGE_TEXT_CONTRAST)
             val bodyLayouts = mutableListOf<TextLayoutResult>()
             compose.onNodeWithText("original", useUnmergedTree = true).performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(bodyLayouts) }
             assertTrue(

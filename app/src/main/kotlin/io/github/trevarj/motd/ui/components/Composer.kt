@@ -87,6 +87,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Mood
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -1110,23 +1111,7 @@ fun Composer(
                     enter = expandVertically(animationSpec = MotdMotion.contentSize) + fadeIn(MotdMotion.fadeIn),
                     exit = shrinkVertically(animationSpec = MotdMotion.contentSize) + fadeOut(MotdMotion.microFadeOut),
                 ) {
-                    Column {
-                        replyWarning?.let { warning ->
-                            Text(
-                                text = warning,
-                                modifier =
-                                    Modifier
-                                        .fillMaxWidth()
-                                        .padding(start = 20.dp, end = 76.dp, top = 6.dp)
-                                        .testTag("chat_composer_reply_warning"),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (floatingPill) MaterialTheme.colorScheme.onSurfaceVariant else composerInk,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
-                        reply?.let { ReplyBar(it, onCancelReply) }
-                    }
+                    reply?.let { ReplyBar(it, replyWarning, onCancelReply) }
                 }
 
                 Box(
@@ -2572,6 +2557,7 @@ private fun EmojiAutocompletePanel(
 @Composable
 private fun ReplyBar(
     reply: ComposerReply,
+    warning: String?,
     onCancel: () -> Unit,
 ) {
     val fill = MaterialTheme.colorScheme.primaryContainer
@@ -2614,6 +2600,20 @@ private fun ReplyBar(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                if (warning != null) {
+                    Row(
+                        modifier = Modifier.padding(top = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Icon(Icons.Outlined.Info, contentDescription = null, modifier = Modifier.size(14.dp), tint = bodyColor)
+                        Text(
+                            text = warning,
+                            modifier = Modifier.testTag("chat_composer_reply_warning"),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = bodyColor,
+                        )
+                    }
+                }
             }
             IconButton(onClick = onCancel, modifier = Modifier.size(44.dp)) {
                 Icon(Icons.Filled.Close, stringResource(R.string.chat_composer_cancel_reply))
