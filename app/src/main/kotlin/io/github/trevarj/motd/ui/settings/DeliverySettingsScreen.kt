@@ -134,11 +134,13 @@ internal fun DeliverySettingsContent(
                     onFixNotifications = { context.startActivity(notificationSettingsIntent(context.packageName)) },
                 )
             }
-            SettingsNavigationRow(
-                title = stringResource(R.string.settings_test_alert),
-                modifier = Modifier.testTag("settings_test_alert"),
-                onClick = { showTestAlert = true },
-            )
+            SettingsTarget(target?.name, SettingsTarget.TEST_ALERT.name) { targetModifier ->
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_test_alert),
+                    modifier = targetModifier.testTag("settings_test_alert"),
+                    onClick = { showTestAlert = true },
+                )
+            }
         }
         SettingsGroup(title = stringResource(R.string.settings_background_reliability)) {
             SettingsTarget(target?.name, SettingsTarget.START_ON_BOOT.name) { targetModifier ->

@@ -145,6 +145,7 @@ enum class SettingsTarget {
     FOOLS_MODE,
     PERSISTENT_DELIVERY,
     UNIFIED_PUSH,
+    TEST_ALERT,
     START_ON_BOOT,
     BATTERY,
     UPLOAD_PROVIDER,

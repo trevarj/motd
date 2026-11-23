@@ -222,6 +222,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_compact_database, R.string.settings_compact_database_search_desc, "vacuum storage database size free space", SettingsSearchPage.HISTORY, SettingsTarget.COMPACT_DATABASE),
         spec(R.string.settings_delivery_socket, R.string.settings_delivery_socket_desc, "persistent connection", SettingsSearchPage.DELIVERY, SettingsTarget.PERSISTENT_DELIVERY),
         spec(R.string.settings_delivery_push, R.string.settings_delivery_push_desc, "unified push distributor", SettingsSearchPage.DELIVERY, SettingsTarget.UNIFIED_PUSH),
+        spec(R.string.settings_test_alert, R.string.settings_test_alert_explanation, "test notification local android", SettingsSearchPage.DELIVERY, SettingsTarget.TEST_ALERT),
         spec(R.string.settings_start_on_boot, R.string.settings_start_on_boot_desc, "restart reconnect", SettingsSearchPage.DELIVERY, SettingsTarget.START_ON_BOOT),
         spec(R.string.settings_battery, R.string.settings_battery_desc, "optimization background", SettingsSearchPage.DELIVERY, SettingsTarget.BATTERY),
         spec(R.string.settings_upload_destination, R.string.settings_uploads_summary, "provider backend service", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOAD_PROVIDER),

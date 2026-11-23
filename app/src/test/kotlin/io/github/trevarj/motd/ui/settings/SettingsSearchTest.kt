@@ -61,6 +61,14 @@ class SettingsSearchTest {
     }
 
     @Test
+    fun testAlertIsSearchableByItsVisibleTitle() {
+        val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
+        val result = searchSettings("Test this alert", entries).first()
+        assertEquals("Test this alert", result.title)
+        assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.DELIVERY, SettingsTarget.TEST_ALERT), result.destination)
+    }
+
+    @Test
     fun removedLabsFeatureIsNotSearchable() {
         val entries = buildSettingsSearchEntries(emptyList(), ::resolve, ::networkTitle)
         assertTrue(searchSettings("agentwire", entries).isEmpty())
@@ -307,6 +315,7 @@ class SettingsSearchTest {
         when (id) {
             R.string.settings_notifications -> "Notifications"
             R.string.settings_notifications_summary -> "Global, server, and channel alerts and watches"
+            R.string.settings_test_alert -> "Test this alert"
             R.string.settings_composer_formatting_tools -> "Formatting tools"
             R.string.settings_composer_formatting_tools_desc -> "Show rich text controls"
             R.string.settings_voice_message_button -> "Show voice-message button"
