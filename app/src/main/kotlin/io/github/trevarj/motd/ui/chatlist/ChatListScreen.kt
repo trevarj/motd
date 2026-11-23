@@ -84,6 +84,7 @@ import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Lan
 import androidx.compose.material.icons.outlined.Mail
+import androidx.compose.material.icons.outlined.MarkChatUnread
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
@@ -203,6 +204,7 @@ import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.isUnreadChat
 import io.github.trevarj.motd.service.unreadChatRows
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
@@ -1061,9 +1063,10 @@ fun ChatListContent(
                                                     }
                                                 }
                                                 DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chatlist_more_menu")) {
-                                                    if (!state.loading && !unreadOnly) {
+                                                    if (!state.loading && !unreadOnly && scopedRows.any(::isUnreadChat)) {
                                                         DropdownMenuItem(
                                                             text = { Text(stringResource(R.string.chatlist_show_unread)) },
+                                                            leadingIcon = { Icon(Icons.Outlined.MarkChatUnread, contentDescription = null) },
                                                             modifier = Modifier.testTag("chatlist_show_unread"),
                                                             onClick = {
                                                                 moreOpen = false

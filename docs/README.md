@@ -119,6 +119,8 @@ shape of the launcher artwork; Android controls its tint and system app badge.
 
 The drawer's Networks header shows total mentions, not total unread messages.
 Per-network unread badges and the scoped Mark all as read action remain available.
+The chat-list overflow shows **Unread Chats** only when the current folder or
+network view contains an unmuted chat with unread messages.
 The fallback three-node server badge fills one node when disconnected or failed,
 two while connecting or registering, and all three when connected. It fills left
 to right in every language, with only the last filled node using the theme's

@@ -209,6 +209,11 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_row_3").assertIsDisplayed()
 
         compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_show_unread").assertDoesNotExist()
+        compose.runOnIdle {
+            state.value = state.value.copy(rows = listOf(readPin, lowerBound, advertisedOnly, incompleteOnly, otherFolderUnread))
+        }
+        compose.onNodeWithTag("chatlist_show_unread").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_show_unread").performClick()
         compose.onNodeWithTag("chatlist_folder_tab_8").performClick().assertIsSelected()
         compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()
@@ -232,6 +237,7 @@ class ChatFolderUiTest {
         val readDev = row()
         val unreadDev = row(2, "#unread-dev").copy(unreadCount = 1)
         val readOther = row(3, "#read-other", folderId = 8)
+        val unreadOther = row(4, "#unread-other", folderId = 8).copy(unreadCount = 1)
         val scoped =
             ChatListState(
                 rows = listOf(readDev, unreadDev, readOther),
@@ -264,7 +270,7 @@ class ChatFolderUiTest {
         compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_unread_empty").assertIsDisplayed()
 
-        val remainingFolder = scoped.copy(rows = listOf(readOther), folders = scoped.folders.drop(1))
+        val remainingFolder = scoped.copy(rows = listOf(readOther, unreadOther), folders = scoped.folders.drop(1))
         compose.runOnIdle { state.value = remainingFolder }
         compose.onNodeWithTag("chatlist_folder_tab_8").assertIsSelected()
         compose.onNodeWithTag("chatlist_unread_chip").assertDoesNotExist()

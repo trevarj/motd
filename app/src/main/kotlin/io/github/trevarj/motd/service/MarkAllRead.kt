@@ -13,10 +13,10 @@ import kotlinx.coroutines.CancellationException
  * decision of *which* rows participate is the interesting part, and it stays testable on plain data.
  */
 
+internal fun isUnreadChat(row: ChatListRow): Boolean = !row.muted && row.type != BufferType.SERVER && row.unreadCount > 0
+
 /** Rows a read sweep or an unread jump may land on, in chat-list order. */
-internal fun unreadChatRows(rows: List<ChatListRow>): List<ChatListRow> =
-    rows
-        .filter { !it.muted && it.type != BufferType.SERVER && it.unreadCount > 0 }
+internal fun unreadChatRows(rows: List<ChatListRow>): List<ChatListRow> = rows.filter(::isUnreadChat)
 
 /** Pure selection seam: muted/SERVER/zero-unread rows never participate in mark-all. */
 internal fun unreadBufferIds(rows: List<ChatListRow>): List<Long> = unreadChatRows(rows).map(ChatListRow::bufferId).distinct()
