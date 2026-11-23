@@ -126,6 +126,12 @@ status color. Server-provided artwork and bouncer badges keep their corner dot.
 Mentions refreshes load newer and older rows around the reader together in one bounded
 window, rather than dropping newer rows and then loading them back page by page.
 
+On Oct 30–31, Dec 20–26, and Dec 31–Jan 1, the main chat-list wordmark has a
+small seasonal detail. Tap the wordmark to send the wide-eyed bat into flight,
+shake snow from the tilted Santa hat across the full toolbar, or light the `d`
+as a colorful sparkler that reveals the incoming year. Dates follow the
+device's local calendar. With system animations off, tapping shows a still effect.
+
 Comfortable chat sends grow the actual formatted message bubble from the composer
 over a 500ms morph, keeping its body and metadata aligned through the landing.
 Replies and denser message styles retain their ordinary send-flight presentation.

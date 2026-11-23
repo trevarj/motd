@@ -174,6 +174,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
+import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
@@ -777,9 +778,12 @@ fun ChatListContent(
                 containerColor = MaterialTheme.colorScheme.surface,
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
+                    val season = if (topBarMode == ChatListTopBarMode.DEFAULT) rememberSeasonalWordmark() else null
+                    val seasonalPlayback = season?.let { rememberSeasonalWordmarkPlayback(it) }
                     ChatListTopBar(
                         modifier = Modifier.testTag(if (selectionActive) "chatlist_selection_top_app_bar" else "chatlist_top_app_bar"),
                         backdrop = folderBackdrop,
+                        snowPlayback = seasonalPlayback.takeIf { season?.kind == SeasonalWordmarkKind.CHRISTMAS },
                         title = {
                             Box(Modifier.fillMaxWidth().testTag("chatlist_header")) {
                                 Column {
@@ -838,10 +842,17 @@ fun ChatListContent(
                                 }
                                 if (topBarMode == ChatListTopBarMode.DEFAULT) {
                                     // Keep the compact title above outgoing status until its native fade has finished.
-                                    ChatListDefaultTitle(
-                                        showStatus = compactDefaultTitle,
-                                        modifier = Modifier.align(if (compactDefaultTitle) Alignment.TopStart else Alignment.CenterStart),
-                                    )
+                                    val titleModifier = Modifier.align(if (compactDefaultTitle) Alignment.TopStart else Alignment.CenterStart)
+                                    if (season == null || seasonalPlayback == null) {
+                                        ChatListDefaultTitle(showStatus = compactDefaultTitle, modifier = titleModifier)
+                                    } else {
+                                        SeasonalChatListTitle(
+                                            season = season,
+                                            showStatus = compactDefaultTitle,
+                                            modifier = titleModifier,
+                                            playback = seasonalPlayback,
+                                        )
+                                    }
                                 }
                             }
                         },
@@ -3227,6 +3238,7 @@ const val CHAT_LIST_TITLE_ATTENTION_TAG = "chatlist_title_attention"
 internal fun ChatListDefaultTitle(
     showStatus: Boolean,
     modifier: Modifier = Modifier,
+    onTextLayout: ((TextLayoutResult) -> Unit)? = null,
 ) {
     Text(
         text = stringResource(R.string.app_name),
@@ -3235,6 +3247,7 @@ internal fun ChatListDefaultTitle(
         maxLines = 1,
         overflow = TextOverflow.Ellipsis,
         modifier = modifier.testTag("chatlist_title"),
+        onTextLayout = onTextLayout,
     )
 }
 
@@ -3372,6 +3385,7 @@ internal fun ChatListTitleActivityStatus(
 private fun ChatListTopBar(
     modifier: Modifier = Modifier,
     backdrop: SurfaceBackdropSource?,
+    snowPlayback: SeasonalWordmarkPlayback?,
     title: @Composable () -> Unit,
     navigationIcon: @Composable () -> Unit,
     actions: @Composable RowScope.() -> Unit,
@@ -3384,8 +3398,15 @@ private fun ChatListTopBar(
     var titleHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
     val expandedHeight = maxOf(TopAppBarDefaults.TopAppBarExpandedHeight, with(density) { titleHeightPx.toDp() } + 16.dp)
+    val backing = modifier.folderCapsuleBackdrop(backdrop, RectangleShape)
+    val decorated =
+        if (snowPlayback != null) {
+            backing.seasonalToolbarSnow(snowPlayback, TopAppBarDefaults.windowInsets.getTop(density).toFloat())
+        } else {
+            backing
+        }
     TopAppBar(
-        modifier = modifier.folderCapsuleBackdrop(backdrop, RectangleShape),
+        modifier = decorated,
         title = {
             // Measure natural font/wrapping height independently of the app bar's current height.
             Box(Modifier.wrapContentHeight(unbounded = true).onSizeChanged { titleHeightPx = it.height }) {

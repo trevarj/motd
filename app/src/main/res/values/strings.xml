@@ -81,6 +81,9 @@
     <string name="network_activity_offline">Offline</string>
     <string name="network_activity_syncing">Syncing History</string>
     <string name="chatlist_sync_progress">Syncing History · %1$d%%</string>
+    <string name="chatlist_seasonal_halloween">Make the bat flap</string>
+    <string name="chatlist_seasonal_christmas">Shake loose snowflakes</string>
+    <string name="chatlist_seasonal_new_year">Celebrate %1$s</string>
     <string name="network_activity_unavailable">History unavailable</string>
     <string name="network_activity_certificate_pending">Certificate decision pending in the security dialog</string>
     <string name="network_activity_connection_issue">Connection failed</string>

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd
 
+import android.graphics.Color
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.SnackbarHostState
@@ -9,6 +10,7 @@ import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.ProgressBarRangeInfo
@@ -17,6 +19,8 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.captureToImage
+import androidx.compose.ui.test.click
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -42,6 +46,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListContent
 import io.github.trevarj.motd.ui.chatlist.ChatListState
 import io.github.trevarj.motd.ui.chatlist.ChatListSyncChrome
 import io.github.trevarj.motd.ui.chatlist.ChatListTitleActivityStatus
+import io.github.trevarj.motd.ui.chatlist.LocalSeasonalWordmarkDate
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityAction
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityIssue
 import io.github.trevarj.motd.ui.chatlist.NetworkActivityKind
@@ -58,6 +63,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.text.NumberFormat
+import java.time.LocalDate
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -422,6 +429,128 @@ class ChatListTitleConnectivityUiTest {
                 assertEquals("Recovery cannot move viewport", initial.drop(1), tags.drop(1).map { compose.onNodeWithTag(it, true).fetchSemanticsNode().boundsInRoot })
             }
         }
+    }
+
+    @Test
+    fun seasonalWordmarkPlaysInPlaceAndLeavesContextualTitlesAlone() {
+        val date = mutableStateOf(LocalDate.of(2026, 12, 30))
+        val network = NetworkEntity(id = 1, name = "Libera", role = NetworkRole.DIRECT, host = "irc.test", port = 6697, nick = "me", username = "me", realname = "Me")
+        val row = ChatListRow(bufferId = 7, networkId = 1, networkName = "Libera", displayName = "#kotlin", type = BufferType.CHANNEL, pinned = false, muted = false, lastMessageText = "hi", lastMessageSender = "alice", lastMessageTime = 1, unreadCount = 0, mentionCount = 0)
+        val state = mutableStateOf(ChatListState(rows = listOf(row), networks = listOf(network), loading = false))
+        val snackbar = SnackbarHostState()
+        compose.setContent {
+            CompositionLocalProvider(LocalSeasonalWordmarkDate provides date.value) {
+                MotdTheme(dynamicColor = false) {
+                    ChatListContent(
+                        state = state.value,
+                        syncChrome = ChatListSyncChrome.Syncing(3, 4),
+                        snackbarHostState = snackbar,
+                        onOpenBuffer = {},
+                        onOpenSettings = {},
+                        onOpenSearch = {},
+                        onSetPinned = { _, _ -> },
+                        onSetMuted = { _, _ -> },
+                        onJoinChannel = { _, _, _ -> },
+                        onMessageUser = { _, _ -> },
+                    )
+                }
+            }
+        }
+
+        val resources = RuntimeEnvironment.getApplication().resources
+        val wordmark = resources.getString(R.string.app_name)
+        val title = compose.onNodeWithTag("chatlist_title", useUnmergedTree = true)
+        val action = compose.onNodeWithTag("chatlist_seasonal_action")
+        val toolbar = compose.onNodeWithTag("chatlist_top_app_bar")
+        val subtitle = compose.onNodeWithTag(CHAT_LIST_TITLE_STATUS_TEXT_TAG, useUnmergedTree = true)
+        val tags = listOf("chatlist_title", "chatlist_top_app_bar", "chatlist_header", "chatlist_row_7", CHAT_LIST_TITLE_STATUS_TEXT_TAG, CHAT_LIST_TITLE_PROGRESS_TAG)
+
+        fun geometry() =
+            tags.map {
+                compose
+                    .onNodeWithTag(it, useUnmergedTree = true)
+                    .assertIsDisplayed()
+                    .fetchSemanticsNode()
+                    .boundsInRoot
+            }
+
+        fun titlePixels() = action.captureToImage().asAndroidBitmap()
+
+        fun yearInk(): Int {
+            val pixels = titlePixels()
+            val wordmarkWidth = title.fetchSemanticsNode().size.width
+            return (wordmarkWidth until pixels.width).sumOf { x ->
+                (pixels.height / 2 until pixels.height).count { y ->
+                    val color = pixels.getPixel(x, y)
+                    Color.red(color) - Color.green(color) >= 24 && Color.green(color) - Color.blue(color) >= 24
+                }
+            }
+        }
+
+        action.assertDoesNotExist()
+        title.assertTextEquals(wordmark)
+        subtitle.assertTextEquals(resources.getString(R.string.chatlist_sync_progress, 75))
+        val ordinaryGeometry = geometry()
+
+        compose.runOnIdle { date.value = LocalDate.of(2026, 12, 24) }
+        action.assertIsDisplayed()
+        compose.mainClock.autoAdvance = false
+        val dryBar = toolbar.captureToImage().asAndroidBitmap()
+        action.performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(720)
+        val snowyBar = toolbar.captureToImage().asAndroidBitmap()
+
+        fun changedIn(xRange: IntRange): Boolean = xRange.any { x -> (0 until snowyBar.height).any { y -> snowyBar.getPixel(x, y) != dryBar.getPixel(x, y) } }
+
+        assertTrue("Snow reaches the leading edge outside the wordmark", changedIn(0 until dryBar.width / 8))
+        assertTrue("Snow reaches the trailing edge near toolbar actions", changedIn(dryBar.width * 7 / 8 until dryBar.width))
+        compose.mainClock.advanceTimeBy(2_000)
+        assertTrue("The toolbar clears after snowfall", dryBar.sameAs(toolbar.captureToImage().asAndroidBitmap()))
+        compose.mainClock.autoAdvance = true
+
+        compose.runOnIdle { date.value = LocalDate.of(2026, 12, 31) }
+        val year = NumberFormat.getIntegerInstance(resources.configuration.locales[0]).apply { isGroupingUsed = false }.format(2027)
+        val newYearLabel = resources.getString(R.string.chatlist_seasonal_new_year, year)
+        val actionSemantics =
+            action
+                .assertIsDisplayed()
+                .assertTextEquals(wordmark)
+                .fetchSemanticsNode()
+                .config
+        assertEquals(newYearLabel, actionSemantics[SemanticsActions.OnClick].label)
+        assertEquals("Seasonal title must not move the native layout", ordinaryGeometry, geometry())
+
+        compose.mainClock.autoAdvance = false
+        val baseline = titlePixels()
+        assertEquals("No year before the tap", 0, yearInk())
+        action.performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(192)
+        assertFalse("Tapping must animate the visible sparkler", baseline.sameAs(titlePixels()))
+        assertEquals("Motion must not move the native layout", ordinaryGeometry, geometry())
+        subtitle.assertTextEquals(resources.getString(R.string.chatlist_sync_progress, 75))
+        compose.mainClock.advanceTimeBy(576)
+        assertTrue("The year must paint beside the native wordmark", yearInk() > 0)
+        compose.mainClock.advanceTimeBy(2_000)
+        assertTrue("The animation must return to the exact resting pixels", baseline.sameAs(titlePixels()))
+
+        action.performTouchInput { click() }
+        compose.mainClock.advanceTimeBy(192)
+        assertFalse("A settled animation must be playable again", baseline.sameAs(titlePixels()))
+
+        fun selectNetwork(id: Long?) {
+            compose.runOnUiThread {
+                state.value = state.value.copy(selectedNetworkId = id)
+                Snapshot.sendApplyNotifications()
+            }
+            compose.mainClock.advanceTimeBy(320)
+        }
+        selectNetwork(network.id)
+        action.assertDoesNotExist()
+        title.assertIsDisplayed().assertTextEquals("Libera")
+        selectNetwork(null)
+        assertEquals("Returning to the default title must not restore the year", 0, yearInk())
+        compose.mainClock.advanceTimeBy(768)
+        assertEquals("Returning to the default title must not replay the reveal", 0, yearInk())
     }
 
     @Test

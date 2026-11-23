@@ -74,6 +74,18 @@ arm64-v8a-only. APKs built from this source tree must not be installed on
 32-bit ARM or x86 devices. Other ABI support needs a separately pinned and
 verified libbox artifact.
 
+To preview a seasonal chat-list wordmark in a debug build without changing the
+device clock, cold-start the app with an ISO date:
+
+```sh
+adb -s <serial> shell am start -S -n io.github.trevarj.motd.debug/io.github.trevarj.motd.MainActivity \
+  --es io.github.trevarj.motd.debug.SEASONAL_DATE 2026-12-31
+```
+
+Use `2026-10-31` for Halloween, `2026-12-24` for Christmas, or `2026-12-31`
+for New Year. Tap the chat-list wordmark to play or replay the effect.
+Cold-start without the extra to return to the device date.
+
 ## Verification
 
 Use the authoritative local command matrix in
