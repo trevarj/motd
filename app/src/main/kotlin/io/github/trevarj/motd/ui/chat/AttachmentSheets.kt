@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.ContentResolver
 import android.content.ContentUris
 import android.content.Context
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
 import android.net.Uri
@@ -13,6 +14,7 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
 import android.provider.OpenableColumns
+import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -110,11 +112,13 @@ import io.github.trevarj.motd.attachment.AVAILABLE_ATTACHMENT_BACKENDS
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
+import io.github.trevarj.motd.attachment.HostedImageSnapshot
+import io.github.trevarj.motd.attachment.HostedImageTooLarge
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
-import io.github.trevarj.motd.attachment.isLocalMediaUri
+import io.github.trevarj.motd.attachment.isHostedAttachmentUri
 import io.github.trevarj.motd.attachment.normalizedConfig
 import io.github.trevarj.motd.attachment.sizeOrNull
 import io.github.trevarj.motd.attachment.supports
@@ -132,6 +136,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.UUID
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
@@ -146,6 +151,11 @@ private sealed interface AttachmentFlow {
     data object Photos : AttachmentFlow
 
     data object EditText : AttachmentFlow
+
+    data class Prepare(
+        val source: AttachmentSource,
+        val camera: Boolean = false,
+    ) : AttachmentFlow
 
     data class Confirm(
         val source: AttachmentSource,
@@ -223,6 +233,7 @@ fun AttachmentSheets(
     prepareUploadCompletion: ((replacedDraft: String?) -> (UploadRecord) -> Unit)? = null,
 ) {
     val context = LocalContext.current
+    val activity = LocalActivity.current
     val cameraStartError = stringResource(R.string.upload_camera_failed)
     val localMediaRequiredError = stringResource(R.string.settings_local_media_required)
     val defaultConfig by viewModel.config.collectAsStateWithLifecycle()
@@ -238,7 +249,10 @@ fun AttachmentSheets(
     var pasteText by remember { mutableStateOf("") }
     val attempt by viewModel.attempt.collectAsStateWithLifecycle()
     val lastAttempt = attempt?.let { AttachmentFlow.Confirm(it.source, it.replaceDraft, it.config.backend) }
-    var capturePath by rememberSaveable { mutableStateOf<String?>(null) }
+    val reviewSession = rememberSaveable { UUID.randomUUID().toString() }
+    val entryStarted = remember { mutableStateOf(false) }
+    var captureName by rememberSaveable { mutableStateOf<String?>(null) }
+    var captureReady by rememberSaveable { mutableStateOf(false) }
     var deleteTarget by remember { mutableStateOf<UploadRecord?>(null) }
     var backendPickerRequest by remember { mutableStateOf<AttachmentFlow.Confirm?>(null) }
     var cameraPermissionGranted by remember { mutableStateOf(context.hasCameraPermission()) }
@@ -256,6 +270,25 @@ fun AttachmentSheets(
                 }
         }
 
+    fun clearCameraCapture() {
+        cameraCaptureFile(context, captureName)?.let { file ->
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", file)
+            context.revokeUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            file.delete()
+        }
+        captureName = null
+        captureReady = false
+    }
+
+    DisposableEffect(viewModel, reviewSession) {
+        onDispose {
+            if (activity?.isChangingConfigurations != true) {
+                viewModel.replaceReviewedImage(reviewSession)
+                clearCameraCapture()
+            }
+        }
+    }
+
     LaunchedEffect(flow) {
         if (flow == AttachmentFlow.Photos) {
             cameraPermissionGranted = context.hasCameraPermission()
@@ -264,23 +297,36 @@ fun AttachmentSheets(
     }
 
     LaunchedEffect(open, startWithCurrentDraft, sharedFile) {
+        val restoring = !entryStarted.value
+        entryStarted.value = true
+        if (!open || !restoring) {
+            flow = AttachmentFlow.Idle
+            backendPickerRequest = null
+            contentUnavailable = false
+            viewModel.replaceReviewedImage(reviewSession)
+            clearCameraCapture()
+        }
         if (!open) return@LaunchedEffect
-        capturePath?.let(::File)?.let { captured ->
-            if (captured.length() > 0L) {
-                val source = AttachmentSource.LocalFile(captured, captured.name, "image/jpeg", captured.length())
-                flow = AttachmentFlow.Confirm(source, false)
-            } else {
-                captured.delete()
-                capturePath = null
-                flow = AttachmentFlow.Photos
+        if (restoring) {
+            viewModel.reviewedImage(reviewSession)?.let { review ->
+                if (viewModel.progress.value == null && viewModel.error.value == null) {
+                    flow = AttachmentFlow.Confirm(review.source, false)
+                }
+                return@LaunchedEffect
             }
-            return@LaunchedEffect
+            cameraCaptureFile(context, captureName)?.let { captured ->
+                if (captureReady) {
+                    flow = AttachmentFlow.Prepare(AttachmentSource.LocalFile(captured, captured.name, "image/jpeg"), camera = true)
+                }
+                // A pending camera contract is delivered by the activity result registry.
+                return@LaunchedEffect
+            }
         }
         flow =
             when {
                 sharedFile != null -> {
                     try {
-                        require(sharedFile.uri.isLocalMediaUri()) { "Shared files require a local content or file URI" }
+                        require(sharedFile.uri.isHostedAttachmentUri()) { "Shared files require a local content or file URI" }
                         val (mime, meta) =
                             withContext(Dispatchers.IO) {
                                 (sharedFile.mimeType ?: context.contentResolver.getType(sharedFile.uri)) to
@@ -292,7 +338,7 @@ fun AttachmentSheets(
                             } else {
                                 AttachmentSource.Document(sharedFile.uri, meta.first, mime, meta.second)
                             }
-                        AttachmentFlow.Confirm(source, false)
+                        AttachmentFlow.Prepare(source)
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (_: Exception) {
@@ -311,8 +357,50 @@ fun AttachmentSheets(
             }
     }
 
+    val preparing = flow as? AttachmentFlow.Prepare
+    LaunchedEffect(preparing) {
+        preparing ?: return@LaunchedEffect
+        try {
+            val limit = viewModel.imageReviewLimit()
+            val review = HostedImageSnapshot.capture(context, preparing.source, limit)
+            if (flow !== preparing) {
+                review?.close()
+                return@LaunchedEffect
+            }
+            viewModel.replaceReviewedImage(reviewSession, review)
+            flow = AttachmentFlow.Confirm(review?.source ?: preparing.source, false)
+            if (preparing.camera) clearCameraCapture()
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (oversized: HostedImageTooLarge) {
+            if (flow !== preparing) return@LaunchedEffect
+            val size = maxOf(oversized.minimumSize, preparing.source.sizeOrNull() ?: 0)
+            if (preparing.camera) clearCameraCapture()
+            flow = AttachmentFlow.Sources
+            val sizeLabel = formatBytes(size)
+            val limitLabel = formatBytes(oversized.limitBytes)
+            val exact = sizeLabel == limitLabel
+            viewModel.fail(
+                context.getString(
+                    R.string.upload_over_size_limit,
+                    if (exact) "$size B" else sizeLabel,
+                    if (exact) "${oversized.limitBytes} B" else limitLabel,
+                ),
+            )
+        } catch (_: Exception) {
+            if (flow !== preparing) return@LaunchedEffect
+            if (preparing.camera) clearCameraCapture()
+            contentUnavailable = true
+            flow = AttachmentFlow.Idle
+        }
+    }
+
     fun closeSourceSheet() {
         flow = AttachmentFlow.Idle
+        viewModel.replaceReviewedImage(reviewSession)
+        clearCameraCapture()
+        backendPickerRequest = null
+        contentUnavailable = false
         onDismiss()
     }
 
@@ -320,7 +408,7 @@ fun AttachmentSheets(
         uri: Uri,
         photo: Boolean,
     ) {
-        if (!uri.isLocalMediaUri()) {
+        if (!uri.isHostedAttachmentUri()) {
             viewModel.clearAttempt()
             flow = AttachmentFlow.Sources
             viewModel.fail(localMediaRequiredError)
@@ -333,7 +421,7 @@ fun AttachmentSheets(
             } else {
                 AttachmentSource.Document(uri, meta.first, context.contentResolver.getType(uri), meta.second)
             }
-        flow = AttachmentFlow.Confirm(source, false)
+        flow = AttachmentFlow.Prepare(source)
     }
 
     fun uploadConfig(
@@ -356,10 +444,13 @@ fun AttachmentSheets(
         val configured = viewModel.currentConfig()
         val requestStillCurrent = if (retry == null) flow === request else viewModel.attempt.value === retry
         if (!requestStillCurrent) return
+        val review = (request.source as? AttachmentSource.LocalFile)?.reviewedImage
+        if (review != null && viewModel.reviewedImage(reviewSession) !== review) return
         val currentContext = latestContext
         val config = uploadConfig(request, configured, currentContext.expectedSojuFileHostUrl != null, latestPreferSojuFileHost)
         val destinationChanged =
             !sameUploadConsent(disclosedConfig, config) ||
+                (review != null && disclosedConfig.stripMetadata && !config.stripMetadata) ||
                 (
                     config.backend == AttachmentBackend.SOJU_FILEHOST &&
                         (uploadContext != currentContext || currentContext.expectedSojuFileHostUrl == null)
@@ -385,7 +476,7 @@ fun AttachmentSheets(
                 onInsertUrl(record.url)
             }
             onUploaded?.invoke(record)
-            if (request.source.deleteCameraCapture()) capturePath = null
+            viewModel.replaceReviewedImage(reviewSession)
             onDismiss()
         }
     }
@@ -409,27 +500,28 @@ fun AttachmentSheets(
         }
     val takePicture =
         rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { ok ->
-            val file = capturePath?.let(::File)
+            val file = cameraCaptureFile(context, captureName)
             if (!ok || file == null || file.length() <= 0L) {
-                file?.delete()
-                capturePath = null
+                clearCameraCapture()
                 flow = AttachmentFlow.Photos
                 return@rememberLauncherForActivityResult
             }
-            val source = AttachmentSource.LocalFile(file, file.name, "image/jpeg", file.length())
-            flow = AttachmentFlow.Confirm(source, false)
+            captureReady = true
+            val source = AttachmentSource.LocalFile(file, file.name, "image/jpeg")
+            flow = AttachmentFlow.Prepare(source, camera = true)
         }
 
     fun launchCamera() {
         flow = AttachmentFlow.Idle
-        val file = cameraCaptureFile(context)
-        capturePath = file.absolutePath
-        val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", file)
         try {
+            clearCameraCapture()
+            val directory = File(context.cacheDir, "camera").also { it.mkdirs() }
+            val file = File.createTempFile("capture-", ".jpg", directory)
+            captureName = file.name
+            val uri = FileProvider.getUriForFile(context, "${context.packageName}.camera", file)
             takePicture.launch(uri)
         } catch (_: Exception) {
-            capturePath = null
-            file.delete()
+            clearCameraCapture()
             flow = AttachmentFlow.Photos
             viewModel.fail(cameraStartError)
         }
@@ -503,7 +595,7 @@ fun AttachmentSheets(
                 },
                 onPhoto = { photo ->
                     val source = AttachmentSource.Photo(photo.uri, photo.name, photo.mimeType, photo.size)
-                    flow = AttachmentFlow.Confirm(source, false)
+                    flow = AttachmentFlow.Prepare(source)
                 },
                 onDismiss = { flow = AttachmentFlow.Sources },
             )
@@ -520,6 +612,17 @@ fun AttachmentSheets(
             )
         }
 
+        is AttachmentFlow.Prepare -> {
+            AlertDialog(
+                onDismissRequest = ::closeSourceSheet,
+                title = { Text(stringResource(R.string.upload_confirm_title)) },
+                text = { LinearProgressIndicator(Modifier.fillMaxWidth()) },
+                confirmButton = {
+                    TextButton(onClick = ::closeSourceSheet) { Text(stringResource(R.string.action_cancel)) }
+                },
+            )
+        }
+
         is AttachmentFlow.Confirm -> {
             val disclosedConfig = uploadConfig(current)
             ConfirmationSheet(
@@ -530,10 +633,7 @@ fun AttachmentSheets(
                     backendPickerRequest = current
                     flow = AttachmentFlow.Idle
                 },
-                onDismiss = {
-                    if (current.source.deleteCameraCapture()) capturePath = null
-                    closeSourceSheet()
-                },
+                onDismiss = ::closeSourceSheet,
                 onUpload = { consentScope.launch { startUpload(current, disclosedConfig, disclosedContext) } },
                 onStripMetadataChange = viewModel::setStripMetadata,
             )
@@ -560,7 +660,7 @@ fun AttachmentSheets(
         UploadProgressSheet(
             progress = update,
             onCancel = {
-                val request = lastAttempt
+                val request = lastAttempt ?: viewModel.reviewedImage(reviewSession)?.let { AttachmentFlow.Confirm(it.source, false) }
                 viewModel.cancel()
                 request?.let { flow = it }
             },
@@ -598,7 +698,7 @@ fun AttachmentSheets(
                             colors = readableTextButtonColors(),
                             onClick = {
                                 viewModel.clearError()
-                                onDismiss()
+                                closeSourceSheet()
                                 onOpenNetworkSettings(id)
                             },
                         ) { Text(stringResource(R.string.upload_soju_open_network_settings)) }
@@ -1115,14 +1215,12 @@ internal fun ConfirmationSheet(
             is AttachmentSource.Document -> source.uri
             else -> null
         }
-    val unsupportedUri = sourceUri != null && !sourceUri.isLocalMediaUri()
-    val preview =
-        when (source) {
-            is AttachmentSource.Photo -> source.uri.takeUnless { unsupportedUri }
-            is AttachmentSource.Document -> source.uri.takeIf { !unsupportedUri && source.mimeType?.startsWith("image/") == true }
-            is AttachmentSource.LocalFile -> if (source.mimeType.startsWith("image/")) Uri.fromFile(source.file) else null
-            else -> null
-        }
+    val unsupportedUri = sourceUri != null && !sourceUri.isHostedAttachmentUri()
+    val preview = (source as? AttachmentSource.LocalFile)?.reviewedImage?.let { Uri.fromFile(it.file) }
+    val isUnreviewedImage =
+        source is AttachmentSource.Photo ||
+            (source is AttachmentSource.Document && source.mimeType?.startsWith("image/", ignoreCase = true) == true) ||
+            (source is AttachmentSource.LocalFile && source.mimeType.startsWith("image/", ignoreCase = true) && preview == null)
     var previewFailed by remember(source) { mutableStateOf(false) }
     var reviewing by remember(source) { mutableStateOf(false) }
     val sourceSize = remember(source) { source.sizeOrNull() }
@@ -1226,7 +1324,7 @@ internal fun ConfirmationSheet(
                 }
                 Button(
                     onClick = onUpload,
-                    enabled = !sojuUnavailable && !customUnavailable && !unsupportedUri && oversizedBytes == null,
+                    enabled = !sojuUnavailable && !customUnavailable && !unsupportedUri && !isUnreviewedImage && oversizedBytes == null,
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("attachment_upload"),
                 ) {
                     Icon(Icons.Outlined.CloudUpload, null)
@@ -1569,15 +1667,14 @@ private fun ContentResolver.recentGalleryPhotos(): List<GalleryPhoto> {
         }.orEmpty()
 }
 
-internal fun cameraCaptureFile(context: Context): File {
-    val dir = File(context.cacheDir, "camera").also { it.mkdirs() }
-    return File(dir, "capture-${System.currentTimeMillis()}.jpg")
+private fun cameraCaptureFile(
+    context: Context,
+    name: String?,
+): File? {
+    if (name == null || !name.matches(CAMERA_CAPTURE_NAME)) return null
+    val directory = File(context.cacheDir.canonicalFile, "camera")
+    val file = File(directory, name)
+    return file.takeIf { it.canonicalFile == file }
 }
 
-private fun AttachmentSource.deleteCameraCapture(): Boolean =
-    if (this is AttachmentSource.LocalFile && file.parentFile?.name == "camera") {
-        file.delete()
-        true
-    } else {
-        false
-    }
+private val CAMERA_CAPTURE_NAME = Regex("capture-[0-9]+\\.jpg")

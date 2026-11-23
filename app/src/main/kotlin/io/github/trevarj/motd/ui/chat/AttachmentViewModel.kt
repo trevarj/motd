@@ -7,12 +7,15 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.HostedImageSnapshot
+import io.github.trevarj.motd.attachment.MAX_X0AT_LIMIT_BYTES
 import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -54,6 +57,35 @@ class AttachmentViewModel
         private val _attempt = MutableStateFlow<AttachmentAttempt?>(null)
         val attempt: StateFlow<AttachmentAttempt?> = _attempt.asStateFlow()
         private var job: Job? = null
+        private var uploadingReview: HostedImageSnapshot? = null
+        private val reviews = mutableMapOf<String, HostedImageSnapshot>()
+
+        internal suspend fun imageReviewLimit(): Long =
+            prefs.config
+                .first()
+                .sizeLimitBytes
+                .coerceIn(1, MAX_X0AT_LIMIT_BYTES)
+
+        internal fun reviewedImage(session: String): HostedImageSnapshot? = reviews[session]
+
+        internal fun replaceReviewedImage(
+            session: String,
+            snapshot: HostedImageSnapshot? = null,
+        ) {
+            val old = reviews[session]
+            if (old === snapshot) return
+            if (old != null && uploadingReview === old) {
+                cancel()
+                clearError()
+            }
+            old?.close()
+            if (snapshot == null) reviews.remove(session) else reviews[session] = snapshot
+        }
+
+        override fun onCleared() {
+            reviews.values.forEach { it.close() }
+            reviews.clear()
+        }
 
         fun upload(
             source: AttachmentSource,
@@ -63,19 +95,23 @@ class AttachmentViewModel
             onComplete: (UploadRecord) -> Unit,
         ) {
             job?.cancel()
+            val review = (source as? AttachmentSource.LocalFile)?.reviewedImage
+            uploadingReview = review
             _error.value = null
             _attempt.value = null
             _progress.value = UploadProgress.Transferring(0, null)
             job =
-                viewModelScope.launch {
+                viewModelScope.launch(start = CoroutineStart.LAZY) {
                     try {
                         val snapshot = prefs.config.first()
-                        val destination = override.copy(stripMetadata = snapshot.stripMetadata)
+                        val stripMetadata = snapshot.stripMetadata || (review != null && override.stripMetadata)
+                        val destination = override.copy(stripMetadata = stripMetadata)
                         _attempt.value = AttachmentAttempt(source, destination, context.copy(allowOriginalMetadata = false), replaceDraft)
                         uploader.upload(source, destination, context).collect { update ->
                             _progress.value = update
                             if (update is UploadProgress.Complete) {
                                 _attempt.value = null
+                                uploadingReview = null
                                 onComplete(update.record)
                             }
                         }
@@ -89,9 +125,13 @@ class AttachmentViewModel
                                 failure is MetadataNotSupportedException,
                             )
                     } finally {
-                        _progress.value = null
+                        if (job === coroutineContext[Job]) {
+                            job = null
+                            _progress.value = null
+                        }
                     }
                 }
+            job?.start()
         }
 
         fun setStripMetadata(enabled: Boolean) =
@@ -106,6 +146,8 @@ class AttachmentViewModel
 
         fun cancel() {
             job?.cancel()
+            job = null
+            uploadingReview = null
             _progress.value = null
             _attempt.value = null
         }

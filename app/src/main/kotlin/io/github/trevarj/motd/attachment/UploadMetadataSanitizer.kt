@@ -17,9 +17,11 @@ class MetadataNotSupportedException : UploadException("Metadata removal is not s
 class PreparedUpload internal constructor(
     val source: AttachmentSource,
     private val temporaryFile: File? = null,
+    private val reviewLease: Closeable? = null,
 ) : Closeable {
     override fun close() {
         temporaryFile?.delete()
+        reviewLease?.close()
     }
 }
 
@@ -40,13 +42,15 @@ class UploadMetadataSanitizer
             stripMetadata: Boolean = true,
             stagingDirectory: File? = null,
         ): PreparedUpload {
+            val reviewed = (source as? AttachmentSource.LocalFile)?.takeIf { stagingDirectory == null && it.reviewedImage != null }
+            val lease = reviewed?.let { it.reviewedImage?.retain() ?: throw IOException("Image review is no longer available") }
             var prepared: PreparedUpload? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    stage(source, limitBytes, allowOriginal, stripMetadata, stagingDirectory).also { prepared = it }
+                    stage(source, limitBytes, allowOriginal, stripMetadata, stagingDirectory, reviewed, lease).also { prepared = it }
                 }
             } catch (failure: Throwable) {
-                prepared?.close()
+                if (prepared == null) lease?.close() else prepared.close()
                 throw failure
             }
         }
@@ -57,50 +61,23 @@ class UploadMetadataSanitizer
             allowOriginal: Boolean,
             stripMetadata: Boolean,
             stagingDirectory: File?,
+            reviewed: AttachmentSource.LocalFile?,
+            lease: Closeable?,
         ): PreparedUpload {
             require(limitBytes > 0)
             if (source is AttachmentSource.Text) return PreparedUpload(source)
-            val directory = stagingDirectory ?: context.cacheDir
+            val directory = stagingDirectory ?: reviewed?.file?.parentFile ?: context.cacheDir
             if (stagingDirectory != null && !directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) {
                 throw IOException("Unable to create upload staging directory")
             }
-            val input = File.createTempFile("upload-input-", ".tmp", directory)
+            val input = reviewed?.file ?: File.createTempFile("upload-input-", ".tmp", directory)
             var output: File? = null
             var retained: File? = null
             try {
-                val original =
-                    when (source) {
-                        is AttachmentSource.Document -> {
-                            require(source.uri.isLocalMediaUri()) { "Uploads require a local file" }
-                            context.contentResolver.openInputStream(source.uri)
-                        }
-
-                        is AttachmentSource.Photo -> {
-                            require(source.uri.isLocalMediaUri()) { "Uploads require a local file" }
-                            context.contentResolver.openInputStream(source.uri)
-                        }
-
-                        is AttachmentSource.LocalFile -> {
-                            source.file.inputStream()
-                        }
-
-                        is AttachmentSource.Text -> {
-                            error("Text does not require staging")
-                        }
-                    } ?: throw IOException("Unable to open attachment")
-                original.use { stream ->
-                    input.outputStream().buffered().use { staged ->
-                        val buffer = ByteArray(32 * 1024)
-                        var total = 0L
-                        while (true) {
-                            currentCoroutineContext().ensureActive()
-                            val count = stream.read(buffer)
-                            if (count < 0) break
-                            total += count
-                            if (total > limitBytes) throw UploadException("File exceeds the configured upload limit")
-                            staged.write(buffer, 0, count)
-                        }
-                    }
+                if (reviewed == null) {
+                    copyInput(source, input, limitBytes)
+                } else if (!input.isFile || input.length() != reviewed.size || input.length() > limitBytes) {
+                    throw UploadException("Reviewed image is unavailable or exceeds the configured upload limit")
                 }
                 currentCoroutineContext().ensureActive()
                 val media =
@@ -118,6 +95,7 @@ class UploadMetadataSanitizer
                         AttachmentSource.LocalFile(sanitized, "upload-${UUID.randomUUID()}${media.extension}", media.mimeType)
                     } else {
                         if (stripMetadata && !allowOriginal) throw MetadataNotSupportedException()
+                        if (reviewed != null) return PreparedUpload(reviewed, reviewLease = lease)
                         val name =
                             when (source) {
                                 is AttachmentSource.Document -> source.name
@@ -136,10 +114,51 @@ class UploadMetadataSanitizer
                     }
                 currentCoroutineContext().ensureActive()
                 retained = prepared.file
-                return PreparedUpload(prepared, prepared.file)
+                return PreparedUpload(prepared, prepared.file, lease)
             } finally {
-                if (retained !== input) input.delete()
+                if (reviewed == null && retained !== input) input.delete()
                 if (retained !== output) output?.delete()
+            }
+        }
+
+        private suspend fun copyInput(
+            source: AttachmentSource,
+            input: File,
+            limitBytes: Long,
+        ) {
+            val original =
+                when (source) {
+                    is AttachmentSource.Document -> {
+                        require(source.uri.isLocalMediaUri()) { "Uploads require a local file" }
+                        context.contentResolver.openInputStream(source.uri)
+                    }
+
+                    is AttachmentSource.Photo -> {
+                        require(source.uri.isLocalMediaUri()) { "Uploads require a local file" }
+                        context.contentResolver.openInputStream(source.uri)
+                    }
+
+                    is AttachmentSource.LocalFile -> {
+                        source.file.inputStream()
+                    }
+
+                    is AttachmentSource.Text -> {
+                        error("Text does not require staging")
+                    }
+                } ?: throw IOException("Unable to open attachment")
+            original.use { stream ->
+                input.outputStream().use { staged ->
+                    val buffer = ByteArray(32 * 1024)
+                    var total = 0L
+                    while (true) {
+                        currentCoroutineContext().ensureActive()
+                        val count = stream.read(buffer)
+                        if (count < 0) break
+                        total += count
+                        if (total > limitBytes) throw UploadException("File exceeds the configured upload limit")
+                        staged.write(buffer, 0, count)
+                    }
+                }
             }
         }
     }

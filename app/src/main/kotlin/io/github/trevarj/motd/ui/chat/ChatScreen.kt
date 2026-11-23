@@ -1902,8 +1902,8 @@ internal fun ChatContent(
                 onFlightSettled(token)
             }
         }
-        var attachmentSheetOpen by rememberSaveable { mutableStateOf(false) }
-        var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
+        var attachmentSheetOpen by key(traceBufferId) { rememberSaveable { mutableStateOf(false) } }
+        var uploadCurrentDraftDirectly by key(traceBufferId) { rememberSaveable { mutableStateOf(false) } }
         // A shared or pasted file opens the same upload confirmation without changing the draft.
         var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
         val activeComposerUpload = composerUpload?.takeIf { it.roomId == traceBufferId }
@@ -1930,7 +1930,7 @@ internal fun ChatContent(
                 attachmentSheetOpen = true
             }
         }
-        LaunchedEffect(attachmentSheetRequests) {
+        LaunchedEffect(traceBufferId, attachmentSheetRequests) {
             attachmentSheetRequests.collect {
                 sharedFile = null
                 uploadCurrentDraftDirectly = false

@@ -678,8 +678,8 @@ flowchart TD
 - Hosted upload confirmation checks the known size against the selected destination and
   requires new consent if the endpoint or storage policy changes before a request or retry.
   Authenticated Soju uploads also recheck the disclosed endpoint on the live IRC route.
-  The local full-image review stays separate from transport. Backup-excluded Recent uploads
-  saves the hosting receipt before generating optional, bounded local previews: image/video/PDF
+  The thumbnail, full-image review, and upload staging read the same private image snapshot.
+  Backup-excluded Recent uploads saves the hosting receipt before generating bounded local previews:
   thumbnails, text excerpts, and media duration. History retention owns those previews.
   A hosted image finishing during rotation restores its card beside the exact URL in the
   same chat draft. The preview itself never enters the IRC message.

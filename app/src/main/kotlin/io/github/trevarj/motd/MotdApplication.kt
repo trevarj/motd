@@ -11,6 +11,7 @@ import dagger.hilt.android.HiltAndroidApp
 import io.github.trevarj.motd.ai.AiExecutionCoordinator
 import io.github.trevarj.motd.ai.AiLabsRepository
 import io.github.trevarj.motd.appearance.LauncherIconController
+import io.github.trevarj.motd.attachment.HostedImageSnapshot
 import io.github.trevarj.motd.audio.AudioCacheStore
 import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.avatar.LocalAvatarStore
@@ -91,6 +92,7 @@ class MotdApplication :
             aiLabsRepository.reconcile()
         }
         applicationScope.launch(Dispatchers.IO) {
+            runCatching { HostedImageSnapshot.reapStale(this@MotdApplication) }
             audioCacheStore.pruneStaleLeases()
         }
         pushInstanceCoordinator.start()

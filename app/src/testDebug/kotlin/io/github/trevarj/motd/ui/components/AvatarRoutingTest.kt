@@ -57,6 +57,8 @@ import coil.request.ErrorResult
 import coil.request.ImageRequest
 import coil.request.SuccessResult
 import io.github.trevarj.motd.UiDispatcherResetRule
+import io.github.trevarj.motd.attachment.AttachmentSource
+import io.github.trevarj.motd.attachment.HostedImageSnapshot
 import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.audio.NetworkMediaHttpTest
 import io.github.trevarj.motd.audio.NetworkMediaRoute
@@ -91,6 +93,7 @@ import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.identityRamp
+import kotlinx.coroutines.runBlocking
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import okhttp3.mockwebserver.MockResponse
@@ -743,10 +746,10 @@ class AvatarRoutingTest {
     fun documentConfirmationRejectsRemoteUriBeforeImagePipeAndLoadsLocalImage() {
         Fixture().use { fixture ->
             val local = Uri.fromFile(temporaryFolder.newFile("document-proposal.png").apply { writeBytes(PNG) })
+            val context = ApplicationProvider.getApplicationContext<Context>()
             val source =
-                mutableStateOf(
-                    io.github.trevarj.motd.attachment.AttachmentSource
-                        .Document(Uri.parse(fixture.url("unbound-document")), "image.png", "image/png", null),
+                mutableStateOf<AttachmentSource>(
+                    AttachmentSource.Document(Uri.parse(fixture.url("unbound-document")), "image.png", "image/png", null),
                 )
             var uploads = 0
             compose.setContent {
@@ -770,13 +773,20 @@ class AvatarRoutingTest {
                 assertEquals(emptyList<String>(), fixture.started.toList())
                 assertEquals(0, uploads)
             }
-            compose.runOnIdle { source.value = source.value.copy(uri = local) }
-            compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(local.toString()) } }
-            compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
-            compose.onNodeWithTag("attachment_upload").assertIsEnabled()
-            compose.runOnIdle { assertEquals(0, uploads) }
-            assertEquals(0, fixture.server.requestCount)
-            assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+            val snapshot =
+                runBlocking {
+                    requireNotNull(HostedImageSnapshot.capture(context, AttachmentSource.Document(local, "image.png", "image/png", null), 1024))
+                }
+            snapshot.use {
+                compose.runOnIdle { source.value = snapshot.source }
+                val staged = Uri.fromFile(snapshot.file).toString()
+                compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(staged) } }
+                compose.onNodeWithTag("attachment_thumbnail").assertIsDisplayed()
+                compose.onNodeWithTag("attachment_upload").assertIsEnabled()
+                compose.runOnIdle { assertEquals(0, uploads) }
+                assertEquals(0, fixture.server.requestCount)
+                assertEquals(emptyList<Long>(), fixture.selectedNetworks.toList())
+            }
         }
     }
 

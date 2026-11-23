@@ -70,12 +70,18 @@ sealed interface AttachmentSource {
         val size: Long?,
     ) : AttachmentSource
 
-    data class LocalFile(
+    class LocalFile private constructor(
         val file: File,
         val name: String,
         val mimeType: String,
-        val size: Long? = file.length(),
-    ) : AttachmentSource
+        val size: Long?,
+        internal val reviewedImage: HostedImageSnapshot?,
+    ) : AttachmentSource {
+        constructor(file: File, name: String, mimeType: String, size: Long? = file.length()) : this(file, name, mimeType, size, null)
+
+        internal constructor(snapshot: HostedImageSnapshot, name: String, mimeType: String) :
+            this(snapshot.file, name, mimeType, snapshot.file.length(), snapshot)
+    }
 }
 
 internal fun AttachmentSource.sizeOrNull(): Long? =
