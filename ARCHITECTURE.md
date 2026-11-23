@@ -239,9 +239,9 @@ flowchart TD
   The localized `History sync progress` track keeps native range semantics, clamps engine
   progress to 0–1 and retains zero for unknown totals; no invented total text is shown.
   Waiting/queued work remains in per-network summaries without changing per-row waiting cues.
-  Outside Archived Chats, both overflow buttons show a static theme-accent dot for unseen active
-  unacknowledged issues, and their inspector entries pair a decorative network icon with
-  `Network activity · New`. Invitations keeps its always-available inspector action; Archived Chats
+  Outside Archived Chats, both overflow buttons and their `Network activity` entries show a static
+  theme-accent dot for unseen active unacknowledged issues. Screen readers announce the new state
+  without changing the label. Invitations keeps its always-available inspector action; Archived Chats
   has no inspector action or inspector-specific overflow attention, including during selection.
   Every inspector entry baselines the navigation-entry VM-owned seen watermark, without acknowledging
   or resolving issues. All-active-clear removes attention even with recent records. There is no hide latch.

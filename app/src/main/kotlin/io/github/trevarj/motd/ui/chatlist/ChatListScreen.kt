@@ -544,7 +544,6 @@ fun ChatListContent(
     val activitySheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val showNewNetworkActivity = hasUnseenNetworkActivity && networkActivity.unacknowledgedCount > 0
     val newNetworkActivityDescription = stringResource(R.string.network_activity_new)
-    val networkActivityMenuTitle = stringResource(if (showNewNetworkActivity) R.string.network_activity_title_new else R.string.network_activity_title)
 
     fun inspectNetworkActivity() {
         onNetworkActivitySeen()
@@ -954,15 +953,10 @@ fun ChatListContent(
                                                 }
                                                 DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
                                                     if (!archiveMode) {
-                                                        DropdownMenuItem(
-                                                            text = { Text(networkActivityMenuTitle) },
-                                                            leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
-                                                            modifier = Modifier.testTag("chatlist_network_activity"),
-                                                            onClick = {
-                                                                overflowOpen = false
-                                                                inspectNetworkActivity()
-                                                            },
-                                                        )
+                                                        NetworkActivityMenuItem(showNewNetworkActivity) {
+                                                            overflowOpen = false
+                                                            inspectNetworkActivity()
+                                                        }
                                                     }
                                                     if (dottedSelectedRows.isNotEmpty()) {
                                                         DropdownMenuItem(
@@ -1085,15 +1079,10 @@ fun ChatListContent(
                                                             },
                                                         )
                                                     }
-                                                    DropdownMenuItem(
-                                                        text = { Text(networkActivityMenuTitle) },
-                                                        leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
-                                                        modifier = Modifier.testTag("chatlist_network_activity"),
-                                                        onClick = {
-                                                            moreOpen = false
-                                                            inspectNetworkActivity()
-                                                        },
-                                                    )
+                                                    NetworkActivityMenuItem(showNewNetworkActivity) {
+                                                        moreOpen = false
+                                                        inspectNetworkActivity()
+                                                    }
                                                     DropdownMenuItem(
                                                         text = { Text(stringResource(R.string.folders_manage)) },
                                                         leadingIcon = { Icon(Icons.Outlined.FolderOpen, contentDescription = null) },
@@ -1555,6 +1544,29 @@ internal fun shouldOpenOnboarding(
 
 internal val ChatListState.isNormalChatListReady: Boolean
     get() = !loading && !shouldOpenOnboarding(this)
+
+@Composable
+private fun NetworkActivityMenuItem(
+    showDot: Boolean,
+    onClick: () -> Unit,
+) {
+    val newActivity = stringResource(R.string.network_activity_new)
+    DropdownMenuItem(
+        text = { Text(stringResource(R.string.network_activity_title)) },
+        leadingIcon = { Icon(Icons.Outlined.Lan, contentDescription = null, modifier = Modifier.testTag("chatlist_network_activity_icon")) },
+        trailingIcon =
+            if (showDot) {
+                { Badge(containerColor = MaterialTheme.colorScheme.primary, modifier = Modifier.testTag("chatlist_network_activity_menu_dot")) }
+            } else {
+                null
+            },
+        modifier =
+            Modifier.testTag("chatlist_network_activity").semantics {
+                if (showDot) stateDescription = newActivity
+            },
+        onClick = onClick,
+    )
+}
 
 @Composable
 private fun ScopeChip(
