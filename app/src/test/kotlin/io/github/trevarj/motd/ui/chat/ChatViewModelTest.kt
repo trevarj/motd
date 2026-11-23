@@ -4738,7 +4738,23 @@ class ChatViewModelTest {
             retainedLinkJumpReturnsOwnershipToEntry(pause = true)
         }
 
-    private suspend fun retainedLinkJumpReturnsOwnershipToEntry(pause: Boolean) {
+    @Test
+    fun removedRetainedLinkRestoresPublishedEntryAfterIgnoringItsStaleCallbacks() =
+        runTest(dispatcher) {
+            retainedLinkJumpReturnsOwnershipToEntry(pause = false, entryPublished = true)
+        }
+
+    @Test
+    fun completedRetainedLinkKeepsOwnershipAfterStaleInitialCallbacks() =
+        runTest(dispatcher) {
+            retainedLinkJumpReturnsOwnershipToEntry(pause = false, entryPublished = true, completesJump = true)
+        }
+
+    private suspend fun retainedLinkJumpReturnsOwnershipToEntry(
+        pause: Boolean,
+        entryPublished: Boolean = false,
+        completesJump: Boolean = false,
+    ) {
         val unread = message(channel.id, "first unread", "first", "alice", 28).copy(serverTime = 10, timelineOrder = 10)
         val link = message(channel.id, "https://example.test/link", null, "alice", 29).copy(serverTime = 20, timelineOrder = 20)
         db.messageDao().insertAll(listOf(unread, link))
@@ -4776,18 +4792,40 @@ class ChatViewModelTest {
                     .first { !it.loading }
                     .occurrences
                     .single()
-            assertFalse(vm.entryPreparationReady.value)
-            assertNull(vm.initialTarget.value)
+            val published =
+                if (entryPublished) {
+                    releaseEntryCount.complete(Unit)
+                    vm.initialTarget
+                        .filterNotNull()
+                        .first()
+                        .also { assertEquals(unread.id, it.expectedEventId) }
+                } else {
+                    assertFalse(vm.entryPreparationReady.value)
+                    assertNull(vm.initialTarget.value)
+                    null
+                }
             assertEquals(EntryPositionState.Pending, vm.entryState.value)
 
             vm.jumpToConversationLink(occurrence)
-            assertEquals(
-                link.id,
-                vm.jumpTarget
-                    .filterNotNull()
-                    .first()
-                    .expectedEventId,
-            )
+            val explicitTarget = vm.jumpTarget.filterNotNull().first()
+            assertEquals(link.id, explicitTarget.expectedEventId)
+            assertNull(vm.initialTarget.value)
+            if (published != null) {
+                vm.onInitialPositionHandled()
+                vm.onInitialPositionUnresolved()
+                vm.reresolveInitialOnce(published).join()
+                assertNull(vm.initialTarget.value)
+                assertEquals(EntryPositionState.Pending, vm.entryState.value)
+            }
+            if (completesJump) {
+                vm.onJumpHandled(checkNotNull(explicitTarget.requestToken))
+                assertEquals(EntryPositionState.Settled, vm.entryState.value)
+                vm.reresolveInitialOnce(checkNotNull(published)).join()
+                assertNull(vm.initialTarget.value)
+                assertNull(vm.jumpTarget.value)
+                assertTrue(vm.uiEvents.value.isEmpty())
+                return
+            }
             if (pause) {
                 vm.onPause()
                 vm.onResume()

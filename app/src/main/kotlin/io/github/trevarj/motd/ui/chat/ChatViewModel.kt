@@ -661,6 +661,7 @@ class ChatViewModel
                                 coroutineScope {
                                     val intent = _entryPositionIntent.value
                                     val resumingVisit = _entryState.value is EntryPositionState.Settled || _entryFallbackLatched.value
+                                    val restoreVisitTarget = resumingVisit && !retainedLinkOwnsPosition
                                     val ownViewport = if (resumingVisit) storedVisitViewport() else scrollPositionStore.get(roomId)
                                     val handoff =
                                         previousLease?.takeIf {
@@ -683,29 +684,31 @@ class ChatViewModel
                                             }
                                             val target =
                                                 when {
-                                                    resumingVisit -> restoredVisitPosition(spec)
+                                                    restoreVisitTarget -> restoredVisitPosition(spec)
+                                                    resumingVisit -> null
                                                     routeHasDeepJump -> null
                                                     else -> entryAnchors(spec).target
                                                 }
                                             val key = if (resumingVisit) target?.index?.let(::entryAnchorPagingKey) else entryPagingKey(spec)
-                                            if (target != null) {
+                                            val currentTarget = target.takeIf { intent == _entryPositionIntent.value && !retainedLinkOwnsPosition }
+                                            if (currentTarget != null) {
                                                 viewportRefreshAnchor.value =
-                                                    target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
-                                                        ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
+                                                    currentTarget.expectedEventId?.let(ViewportRefreshAnchor::Parked)
+                                                        ?: ViewportRefreshAnchor.Newest.takeIf { currentTarget.index == 0 }
                                             }
                                             cache
                                                 .acquire(
                                                     bufferId,
                                                     spec,
                                                     key,
-                                                    target?.index ?: 0,
-                                                    target?.expectedEventId,
+                                                    currentTarget?.index ?: 0,
+                                                    currentTarget?.expectedEventId,
                                                     viewportRefreshAnchor.value,
                                                     allowRetention = !routeHasDeepJump,
                                                     continueLocalRefresh = continueLocalRefresh,
                                                     continuePresentationFrom = handoff,
                                                 ).also { acquired ->
-                                                    if (resumingVisit && intent == _entryPositionIntent.value &&
+                                                    if (restoreVisitTarget && intent == _entryPositionIntent.value &&
                                                         (
                                                             !acquired.continuesPresentation ||
                                                                 (ownViewport != null && target?.fromSavedPosition == true && target.expectedEventId != ownViewport.rowId)
@@ -721,6 +724,7 @@ class ChatViewModel
                                     val targetJob =
                                         launch {
                                             initialTarget.filterNotNull().collect { target ->
+                                                if (retainedLinkOwnsPosition || _initialTarget.value != target) return@collect
                                                 val anchor =
                                                     target.expectedEventId?.let(ViewportRefreshAnchor::Parked)
                                                         ?: ViewportRefreshAnchor.Newest.takeIf { target.index == 0 }
@@ -735,7 +739,7 @@ class ChatViewModel
                                             null
                                         }
                                     val restoreJob =
-                                        if (retained != null && resumingVisit) {
+                                        if (retained != null && restoreVisitTarget) {
                                             launch {
                                                 val target = restoredVisitPosition(spec)
                                                 if (intent == _entryPositionIntent.value) _initialTarget.value = target
@@ -3666,6 +3670,9 @@ class ChatViewModel
             }
         private var jumpResolveJob: Job? = null
 
+        private val retainedLinkOwnsPosition: Boolean
+            get() = activeJumpRequest?.conversationLink != null
+
         private suspend fun jumpPosition(
             targetBufferId: Long,
             serverTime: Long,
@@ -3888,7 +3895,7 @@ class ChatViewModel
                     anchors = resolveEntryAnchors(entrySpec, discardUnresolvedSaved = true)
                 }
                 freezeUnreadEntrySnapshot(readUnreadEntrySnapshot(anchors, entrySpec))
-                if (!hasDeepJump && !_entryFallbackLatched.value &&
+                if (!hasDeepJump && !_entryFallbackLatched.value && !retainedLinkOwnsPosition &&
                     initialIntent == _entryPositionIntent.value && _entryState.value !is EntryPositionState.Settled
                 ) {
                     _initialTarget.value = anchors.target
@@ -4005,6 +4012,7 @@ class ChatViewModel
             spec: MessageVisibilitySpec,
             entered: EntryAnchors,
         ) = viewModelScope.launch {
+            if (!entryCorrectable(entered)) return@launch
             val holdsViewportRead = nullDividerBottomEntry(entered.firstUnread, entered.target)
             if (holdsViewportRead) _viewportReadHold.value = true
             try {
@@ -4043,8 +4051,7 @@ class ChatViewModel
                 _initialTarget.value = null
                 _initialTarget.value = repaired.target
                 // Releasing on publish would let a still-bottom viewport acknowledge the backlog in the
-                // frames before the corrected position lands; wait for the screen to consume the target
-                // (onInitialPositionHandled/Unresolved or jumpToNewest, all of which clear it).
+                // frames before the corrected position lands; wait for placement or an explicit override.
                 if (holdsViewportRead) _initialTarget.first { it == null }
             } finally {
                 if (holdsViewportRead) _viewportReadHold.value = false
@@ -4170,6 +4177,7 @@ class ChatViewModel
 
         /** Re-anchor an already-open viewport when coalescence replaces and retimestamps its row. */
         private suspend fun restoreRedirectedViewport(spec: MessageVisibilitySpec) {
+            if (retainedLinkOwnsPosition) return
             if (_entryState.value !is EntryPositionState.Settled && !_entryFallbackLatched.value) return
             val session = visibleSession.value
             val intent = _entryPositionIntent.value
@@ -4283,6 +4291,7 @@ class ChatViewModel
 
         /** The screen completed its one-shot normal-entry positioning. */
         fun onInitialPositionHandled() {
+            if (retainedLinkOwnsPosition) return
             _initialTarget.value = null
             transitionEntry(EntryPositionState.Settled)
         }
@@ -4295,8 +4304,7 @@ class ChatViewModel
          * and settle entry so read state is no longer gated on a position the user just overrode.
          */
         fun jumpToNewest() {
-            timelineInteracted = true
-            _entryPositionIntent.update { it + 1 }
+            onTimelineInteraction()
             jumpResolveJob?.cancel()
             jumpResolveJob = null
             activeJumpRequest = null
@@ -4385,6 +4393,7 @@ class ChatViewModel
 
         /** A target could not be loaded safely; retain the read gate rather than marking it read. */
         fun onInitialPositionUnresolved() {
+            if (retainedLinkOwnsPosition) return
             _initialTarget.value = null
             transitionEntry(EntryPositionState.Unresolved(messageUnavailable = false))
         }
@@ -4443,6 +4452,10 @@ class ChatViewModel
                 )
             jumpResolveJob?.cancel()
             activeJumpRequest = request
+            // Clearing the published target cancels the screen's placement; the intent bump above
+            // also invalidates automatic work still resolving. Failure can resolve a fresh target.
+            _initialTarget.value = null
+            _viewportReadHold.value = false
             _jumpTarget.value = null
             jumpResolveJob =
                 viewModelScope.launch(start = CoroutineStart.LAZY) {
@@ -4550,7 +4563,10 @@ class ChatViewModel
                 if (!needsEntryTarget()) return@launch
                 val spec = filterSpecs.first()
                 val target = resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
-                if (needsEntryTarget()) _initialTarget.value = target.copy(requiredVisibilitySpec = spec)
+                if (needsEntryTarget()) {
+                    initialReresolveUsed = false
+                    _initialTarget.value = target.copy(requiredVisibilitySpec = spec)
+                }
             }
         }
 
@@ -4628,8 +4644,12 @@ class ChatViewModel
         /** Repair normal entry against current visibility without opting into explicit-jump reveal. */
         fun reresolveInitialOnce(target: ChatPositionTarget) =
             viewModelScope.launch {
+                fun canRepair(): Boolean =
+                    !retainedLinkOwnsPosition &&
+                        (_initialTarget.value != null || (!_entryFallbackLatched.value && _entryState.value !is EntryPositionState.Settled))
+
+                if (!canRepair()) return@launch
                 val intent = _entryPositionIntent.value
-                if (_entryFallbackLatched.value && _initialTarget.value == null) return@launch
                 if (initialReresolveUsed) {
                     onInitialPositionUnresolved()
                     return@launch
@@ -4638,7 +4658,7 @@ class ChatViewModel
                 val spec = filterSpecs.first()
                 val repaired =
                     if (_entryFallbackLatched.value) restoredVisitPosition(spec) else resolveEntryAnchors(spec, discardUnresolvedSaved = false).target
-                if (intent != _entryPositionIntent.value || (_entryFallbackLatched.value && _initialTarget.value == null)) return@launch
+                if (intent != _entryPositionIntent.value || !canRepair()) return@launch
                 _initialTarget.value = null
                 _initialTarget.value =
                     repaired.copy(
