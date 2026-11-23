@@ -12,6 +12,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
@@ -39,6 +40,7 @@ import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
+import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -146,46 +148,67 @@ class ServerDrawerUiTest {
     }
 
     @Test
-    fun ircNetworkIcons_showIdenticalNeutralCirclesWithOnlineAndOfflineDotsAcrossThemes() {
+    fun ircNetworkIcons_showTriangleStatusAcrossThemesAndDirections() {
+        data class Case(
+            val row: DrawerRow,
+            val label: String,
+            val filledCenters: Int,
+        )
+
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val failureReason = "SASL authentication failed"
+        val cases =
+            listOf(
+                Case(
+                    drawerRow(1, IrcClientState.Ready("alice", emptySet(), emptyMap())),
+                    context.getString(R.string.drawer_state_connected),
+                    3,
+                ),
+                Case(drawerRow(2, IrcClientState.Connecting), context.getString(R.string.drawer_state_connecting), 2),
+                Case(drawerRow(3, IrcClientState.Disconnected), context.getString(R.string.drawer_state_disconnected), 1),
+                Case(drawerRow(4, IrcClientState.Registering), context.getString(R.string.drawer_state_registering), 2),
+                Case(
+                    drawerRow(5, IrcClientState.Failed(failureReason, fatal = true)),
+                    context.getString(R.string.network_settings_status_failed, failureReason),
+                    1,
+                ),
+            )
+        val rows = cases.map { it.row }
         var scanned = false
         var contactInviteNetworkId: Long? = null
-        lateinit var selectTheme: (ColorThemePreset) -> Unit
-        var connectedColor = 0
-        var disconnectedColor = 0
-        var badgeBackgroundColor = 0
+        var theme by mutableStateOf(ColorThemePreset.LIGHT)
+        var direction by mutableStateOf(LayoutDirection.Ltr)
+        lateinit var accentColors: IntArray
+        var neutralColor = 0
         var iconSurfaceColor = 0
         compose.setContent {
-            var theme by remember { mutableStateOf(ColorThemePreset.LIGHT) }
-            selectTheme = { theme = it }
             MotdTheme(themePreset = theme, dynamicColor = false) {
-                connectedColor = LocalMotdSemanticColors.current.success.toArgb()
-                disconnectedColor = MaterialTheme.colorScheme.onSurfaceVariant.toArgb()
-                badgeBackgroundColor = MaterialTheme.colorScheme.background.toArgb()
-                iconSurfaceColor = MaterialTheme.colorScheme.surfaceContainerHighest.toArgb()
-                ServerDrawerContent(
-                    drawerRows =
-                        listOf(
-                            drawerRow(1, IrcClientState.Ready("alice", emptySet(), emptyMap())),
-                            drawerRow(2, IrcClientState.Connecting),
-                            drawerRow(3, IrcClientState.Disconnected),
-                        ),
-                    selectedNetworkId = 1,
-                    allMentions = 0,
-                    scopedUnreadCount = 0,
-                    allOffline = false,
-                    onSelectNetwork = {},
-                    onConnect = {},
-                    onDisconnect = {},
-                    onServerMessages = {},
-                    onOpenNetworkSettings = {},
-                    onAddNetwork = {},
-                    onToggleOffline = {},
-                    onOpenSettings = {},
-                    globalFeedEnabled = true,
-                    onMarkAllRead = {},
-                    onCreateContactInvite = { contactInviteNetworkId = it },
-                    onScanInvite = { scanned = true },
-                )
+                val scheme = MaterialTheme.colorScheme
+                val semantic = LocalMotdSemanticColors.current
+                accentColors = intArrayOf(scheme.error.toArgb(), semantic.warning.toArgb(), semantic.success.toArgb())
+                neutralColor = scheme.onSurfaceVariant.toArgb()
+                iconSurfaceColor = scheme.surfaceContainerHighest.toArgb()
+                CompositionLocalProvider(LocalLayoutDirection provides direction) {
+                    ServerDrawerContent(
+                        drawerRows = rows,
+                        selectedNetworkId = 1,
+                        allMentions = 0,
+                        scopedUnreadCount = 0,
+                        allOffline = false,
+                        onSelectNetwork = {},
+                        onConnect = {},
+                        onDisconnect = {},
+                        onServerMessages = {},
+                        onOpenNetworkSettings = {},
+                        onAddNetwork = {},
+                        onToggleOffline = {},
+                        onOpenSettings = {},
+                        globalFeedEnabled = true,
+                        onMarkAllRead = {},
+                        onCreateContactInvite = { contactInviteNetworkId = it },
+                        onScanInvite = { scanned = true },
+                    )
+                }
             }
         }
 
@@ -194,62 +217,41 @@ class ServerDrawerUiTest {
         compose.onNodeWithTag("drawer_scan_invite").assertIsDisplayed().performClick()
         assertTrue(scanned)
 
-        val context = ApplicationProvider.getApplicationContext<Context>()
-        val expectedStates =
-            mapOf(
-                1L to context.getString(R.string.drawer_state_connected),
-                2L to context.getString(R.string.drawer_state_disconnected),
-                3L to context.getString(R.string.drawer_state_disconnected),
-            )
-        for (theme in listOf(ColorThemePreset.LIGHT, ColorThemePreset.DARK)) {
-            compose.runOnUiThread { selectTheme(theme) }
-            var offlineIcon: Bitmap? = null
-            for ((networkId, state) in expectedStates) {
-                val icon =
-                    compose
-                        .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
-                        .performScrollTo()
-                        .assertIsDisplayed()
-                        .assertWidthIsEqualTo(40.dp)
-                        .assertHeightIsEqualTo(40.dp)
-                        .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, state))
-                val iconPixels = icon.captureToImage().asAndroidBitmap()
-                assertEquals(iconSurfaceColor, sample(iconPixels, 0.5f, 0.075f))
-                assertEquals(iconSurfaceColor, sample(iconPixels, 0.075f, 0.5f))
-                assertEquals(iconSurfaceColor, sample(iconPixels, 0.5f, 0.9f))
-                assertTrue(
-                    "The network glyph must use the theme's neutral foreground",
-                    (0 until iconPixels.width).any { x ->
-                        (0 until iconPixels.height / 2).any { y -> iconPixels.getPixel(x, y) == disconnectedColor }
-                    },
-                )
-                if (networkId != 1L) {
-                    offlineIcon?.let {
-                        assertTrue("Different network names and IDs must show the same default icon", it.sameAs(iconPixels))
-                    }
-                    offlineIcon = iconPixels
+        for (themePreset in listOf(ColorThemePreset.LIGHT, ColorThemePreset.DARK)) {
+            for (layoutDirection in LayoutDirection.entries) {
+                compose.runOnIdle {
+                    theme = themePreset
+                    direction = layoutDirection
                 }
-                val badge =
-                    compose
-                        .onNodeWithTag("drawer_network_status_$networkId", useUnmergedTree = true)
-                        .assertIsDisplayed()
-                        .assertWidthIsEqualTo(14.dp)
-                        .assertHeightIsEqualTo(14.dp)
-                val iconBounds = icon.fetchSemanticsNode().boundsInRoot
-                val badgeBounds = badge.fetchSemanticsNode().boundsInRoot
-                assertEquals(iconBounds.right, badgeBounds.right, 0.5f)
-                assertEquals(iconBounds.bottom, badgeBounds.bottom, 0.5f)
-                val pixels = badge.captureToImage().asAndroidBitmap()
-                val expectedColor = if (networkId == 1L) connectedColor else disconnectedColor
-                assertEquals(expectedColor, sample(pixels, 0.5f, 0.25f))
-                assertEquals(expectedColor, sample(pixels, 0.5f, 0.75f))
-                assertEquals(expectedColor, sample(pixels, 0.25f, 0.5f))
-                assertEquals(expectedColor, sample(pixels, 0.75f, 0.5f))
-                assertEquals(
-                    if (networkId == 1L) connectedColor else badgeBackgroundColor,
-                    sample(pixels, 0.5f, 0.5f),
-                )
-                assertEquals(badgeBackgroundColor, sample(pixels, 0.5f, 0.1f))
+                for ((row, label, filledCenters) in cases) {
+                    val networkId = row.networkId
+                    val icon =
+                        compose
+                            .onNodeWithTag("drawer_network_icon_$networkId", useUnmergedTree = true)
+                            .performScrollTo()
+                            .assertIsDisplayed()
+                            .assertWidthIsEqualTo(40.dp)
+                            .assertHeightIsEqualTo(40.dp)
+                            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, label))
+                    val pixels = icon.captureToImage().asAndroidBitmap()
+                    assertEquals(iconSurfaceColor, sample(pixels, 0.5f, 0.075f))
+                    val centers =
+                        listOf(
+                            sample(pixels, 0.3f, 25.75f / 40),
+                            sample(pixels, 0.5f, 14.25f / 40),
+                            sample(pixels, 0.7f, 25.75f / 40),
+                        )
+                    val expected =
+                        List(3) { index ->
+                            when {
+                                index < filledCenters - 1 -> neutralColor
+                                index == filledCenters - 1 -> accentColors[filledCenters - 1]
+                                else -> iconSurfaceColor
+                            }
+                        }
+                    assertEquals("$themePreset $layoutDirection $label: left, top, right", expected, centers)
+                    compose.onNodeWithTag("drawer_network_status_$networkId", useUnmergedTree = true).assertDoesNotExist()
+                }
             }
         }
         compose.onNodeWithTag("drawer_open_feed").assertIsDisplayed()
@@ -316,17 +318,17 @@ class ServerDrawerUiTest {
                             )
                     val pixels = icon.captureToImage().asAndroidBitmap()
                     assertEquals(iconSurfaceColor, sample(pixels, 0.5f, 0.075f))
-                    val dot =
-                        compose
-                            .onNodeWithTag("drawer_network_status_$id", useUnmergedTree = true)
-                            .assertIsDisplayed()
-                            .assertWidthIsEqualTo(14.dp)
-                            .assertHeightIsEqualTo(14.dp)
-                    val iconBounds = icon.fetchSemanticsNode().boundsInRoot
-                    val dotBounds = dot.fetchSemanticsNode().boundsInRoot
-                    assertEquals(iconBounds.right, dotBounds.right, 0.5f)
-                    assertEquals(iconBounds.bottom, dotBounds.bottom, 0.5f)
-                    assertEquals(connectedColor, sample(dot.captureToImage().asAndroidBitmap(), 0.5f, 0.25f))
+                    val dot = compose.onNodeWithTag("drawer_network_status_$id", useUnmergedTree = true)
+                    if (id <= 2L) {
+                        dot.assertIsDisplayed().assertWidthIsEqualTo(14.dp).assertHeightIsEqualTo(14.dp)
+                        val iconBounds = icon.fetchSemanticsNode().boundsInRoot
+                        val dotBounds = dot.fetchSemanticsNode().boundsInRoot
+                        assertEquals(iconBounds.right, dotBounds.right, 0.5f)
+                        assertEquals(iconBounds.bottom, dotBounds.bottom, 0.5f)
+                        assertEquals(connectedColor, sample(dot.captureToImage().asAndroidBitmap(), 0.5f, 0.25f))
+                    } else {
+                        dot.assertDoesNotExist()
+                    }
                     pixels
                 }
             // Rasterization can shift by a subpixel between rows; verify each bouncer mark

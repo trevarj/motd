@@ -507,6 +507,7 @@ private fun DrawerNetworkItem(
         }
     val moveUpLabel = stringResource(R.string.drawer_move_up)
     val moveDownLabel = stringResource(R.string.drawer_move_down)
+    val showBadge = LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE
     // The drag handle is decorative inside this merged row, so the move actions live on the row
     // itself: TalkBack reaches them from the network it is already focused on, and a user who
     // cannot hold and drag never needs the handle at all.
@@ -559,17 +560,17 @@ private fun DrawerNetworkItem(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                if (LocalAvatarStyle.current == AvatarStyle.IRC_SPRITE) {
-                    val connected = row.state is IrcClientState.Ready
+                if (showBadge) {
+                    val bouncer = row.role == NetworkRole.BOUNCER_ROOT || row.isZnc
                     val avatarShape = LocalAvatarShape.current.shape(isChannel = true)
                     val statusDescription =
-                        stringResource(
-                            if (connected) {
-                                R.string.drawer_state_connected
-                            } else {
-                                R.string.drawer_state_disconnected
-                            },
-                        )
+                        when (val state = row.state) {
+                            IrcClientState.Disconnected -> stringResource(R.string.drawer_state_disconnected)
+                            IrcClientState.Connecting -> stringResource(R.string.drawer_state_connecting)
+                            IrcClientState.Registering -> stringResource(R.string.drawer_state_registering)
+                            is IrcClientState.Ready -> stringResource(R.string.drawer_state_connected)
+                            is IrcClientState.Failed -> stringResource(R.string.network_settings_status_failed, state.reason)
+                        }
                     val iconUrl = expandAvatarUrl(row.iconUrl.orEmpty(), 64)
                     val context = LocalContext.current
                     val automaticRemoteMedia = LocalAutomaticRemoteMedia.current
@@ -583,7 +584,7 @@ private fun DrawerNetworkItem(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (!iconLoaded) {
-                            if (row.role == NetworkRole.BOUNCER_ROOT || row.isZnc) {
+                            if (bouncer) {
                                 Icon(
                                     imageVector = Icons.Outlined.Dns,
                                     contentDescription = stringResource(R.string.drawer_bouncer_icon),
@@ -596,7 +597,7 @@ private fun DrawerNetworkItem(
                                             .padding(8.dp),
                                 )
                             } else {
-                                IrcNetworkBadge(size = 40.dp)
+                                IrcNetworkBadge(size = 40.dp, state = row.state)
                             }
                         }
                         iconUrl?.let { url ->
@@ -617,27 +618,29 @@ private fun DrawerNetworkItem(
                                 modifier = Modifier.size(40.dp).clip(avatarShape),
                             )
                         }
-                        Box(
-                            modifier =
-                                Modifier
-                                    .align(Alignment.BottomEnd)
-                                    .size(14.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.background)
-                                    .testTag("drawer_network_status_${row.networkId}"),
-                            contentAlignment = Alignment.Center,
-                        ) {
+                        if (bouncer || iconLoaded) {
                             Box(
-                                Modifier
-                                    .size(10.dp)
-                                    .then(
-                                        if (connected) {
-                                            Modifier.clip(CircleShape).background(LocalMotdSemanticColors.current.success)
-                                        } else {
-                                            Modifier.border(2.dp, MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
-                                        },
-                                    ).clearAndSetSemantics {},
-                            )
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .size(14.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.background)
+                                        .testTag("drawer_network_status_${row.networkId}"),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Box(
+                                    Modifier
+                                        .size(10.dp)
+                                        .then(
+                                            if (row.state is IrcClientState.Ready) {
+                                                Modifier.clip(CircleShape).background(LocalMotdSemanticColors.current.success)
+                                            } else {
+                                                Modifier.border(2.dp, MaterialTheme.colorScheme.onSurfaceVariant, CircleShape)
+                                            },
+                                        ).clearAndSetSemantics {},
+                                )
+                            }
                         }
                     }
                 }
@@ -658,6 +661,7 @@ private fun DrawerNetworkItem(
                     )
                     Text(
                         text = subtitleFor(row.state, row.nick),
+                        modifier = if (showBadge && row.state !is IrcClientState.Ready) Modifier.clearAndSetSemantics {} else Modifier,
                         style = MaterialTheme.typography.bodySmall,
                         color =
                             if (row.state is IrcClientState.Failed) {

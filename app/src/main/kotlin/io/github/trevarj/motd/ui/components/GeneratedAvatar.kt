@@ -13,7 +13,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -22,9 +21,14 @@ import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.avatar.IrcSpriteV2Renderer
 import io.github.trevarj.motd.avatar.IrcSpriteV2Theme
 import io.github.trevarj.motd.data.prefs.AvatarShape
+import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.theme.LocalAvatarShape
+import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.LocalNickColors
+import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.cornerPercent
+import io.github.trevarj.motd.ui.theme.ensureContrast
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.shape
 
 internal fun nickTokens(nick: String): List<String> {
@@ -111,31 +115,49 @@ internal fun IrcSpriteV2Avatar(
     }
 }
 
-/** One neutral topology mark for every network; the drawer owns its connection-status dot. */
 @Composable
 internal fun IrcNetworkBadge(
     size: Dp,
+    state: IrcClientState,
     modifier: Modifier = Modifier,
 ) {
-    val surface = MaterialTheme.colorScheme.surfaceContainerHighest
-    val foreground = MaterialTheme.colorScheme.onSurfaceVariant
+    val scheme = MaterialTheme.colorScheme
+    val surface = scheme.surfaceContainerHighest
+    val foreground = scheme.readableForeground(scheme.onSurfaceVariant, surface, minimumContrast = 3.0)
+    val semanticColors = LocalMotdSemanticColors.current
+    val filledCount =
+        when (state) {
+            IrcClientState.Disconnected, is IrcClientState.Failed -> 1
+            IrcClientState.Connecting, IrcClientState.Registering -> 2
+            is IrcClientState.Ready -> 3
+        }
+    val accent =
+        when (filledCount) {
+            1 -> scheme.error
+            2 -> semanticColors.warning
+            else -> semanticColors.success
+        }
+    val statusColor = if (contrastRatio(accent, surface) < 3.0) ensureContrast(accent, listOf(surface), minimum = 3.0) else accent
     val shape = LocalAvatarShape.current.shape(isChannel = true)
     Canvas(modifier = modifier.size(size).clip(shape).background(surface)) {
         val side = this.size.minDimension
-        // Raise the topology slightly to balance the two lower nodes and bottom edge.
-        val top = Offset(side * 0.5f, side * 0.30f)
-        val left = Offset(side * 0.3f, side * 0.60f)
-        val right = Offset(side * 0.7f, side * 0.60f)
-        val stroke = Stroke(width = side * 0.05f, cap = StrokeCap.Round)
-        val radius = side * 0.07f
-        drawLine(foreground, top, left, stroke.width, StrokeCap.Round)
-        drawLine(foreground, top, right, stroke.width, StrokeCap.Round)
-        drawLine(foreground, left, right, stroke.width, StrokeCap.Round)
-        drawCircle(surface, radius, top)
-        drawCircle(surface, radius, left)
-        drawCircle(surface, radius, right)
-        drawCircle(foreground, radius, top, style = stroke)
-        drawCircle(foreground, radius, left, style = stroke)
-        drawCircle(foreground, radius, right, style = stroke)
+        val top = Offset(side * 0.5f, side * 0.35625f)
+        val left = Offset(side * 0.3f, side * 0.64375f)
+        val right = Offset(side * 0.7f, side * 0.64375f)
+        val strokeWidth = side * 0.05f
+        val radius = side * 0.1f
+        drawLine(foreground, top, left, strokeWidth, StrokeCap.Round)
+        drawLine(foreground, top, right, strokeWidth, StrokeCap.Round)
+        drawLine(foreground, left, right, strokeWidth, StrokeCap.Round)
+        repeat(3) { index ->
+            val center =
+                when (index) {
+                    0 -> left
+                    1 -> top
+                    else -> right
+                }
+            drawCircle(if (index == filledCount - 1) statusColor else foreground, radius, center)
+            if (index >= filledCount) drawCircle(surface, radius - strokeWidth, center)
+        }
     }
 }

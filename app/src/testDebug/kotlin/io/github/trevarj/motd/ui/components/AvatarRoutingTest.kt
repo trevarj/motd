@@ -164,7 +164,7 @@ class AvatarRoutingTest {
                         CompositionLocalProvider(LocalAvatarStyle provides AvatarStyle.MONOGRAM) {
                             Avatar("#ordinary", isChannel = true, size = 64.dp, modifier = Modifier.testTag("channel_monogram"))
                         }
-                        IrcNetworkBadge(64.dp, Modifier.testTag("network"))
+                        IrcNetworkBadge(64.dp, IrcClientState.Disconnected, Modifier.testTag("network"))
                     }
                 }
             }
@@ -400,39 +400,59 @@ class AvatarRoutingTest {
         Fixture().use { fixture ->
             val shape = mutableStateOf(AvatarShape.DEFAULT)
             val branch = mutableStateOf(0)
+            val iconUrl = fixture.url("shape-icon")
             var backdrop = Color.Unspecified
             compose.setContent {
                 MotdTheme(dynamicColor = false, themePreset = ColorThemePreset.LIGHT, avatarShape = shape.value) {
                     backdrop = MaterialTheme.colorScheme.secondaryContainer
                     CompositionLocalProvider(LocalAutomaticRemoteMedia provides true) {
                         Drawer(
-                            iconUrl = if (branch.value == 2) fixture.url("shape-icon") else null,
+                            iconUrl = if (branch.value == 2) iconUrl else null,
                             networkId = 8,
                             role = if (branch.value == 1) NetworkRole.BOUNCER_ROOT else NetworkRole.DIRECT,
                         )
                     }
                 }
             }
+            val row = compose.onNodeWithTag("drawer_network_row_8", useUnmergedTree = true).assertHasClickAction()
+            val rowBounds = row.fetchSemanticsNode().boundsInRoot
+            val icon = compose.onNodeWithTag("drawer_network_icon_8", useUnmergedTree = true)
+            val status = compose.onNodeWithTag("drawer_network_status_8", useUnmergedTree = true)
+            val directFallback = icon.captureToImage().asAndroidBitmap()
             for (artBranch in 0..2) {
-                if (artBranch == 2) fixture.server.enqueue(fixture.imageResponse())
                 compose.runOnIdle {
                     branch.value = artBranch
                     shape.value = AvatarShape.DEFAULT
                 }
-                if (artBranch == 2) compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(fixture.url("shape-icon")) } }
-                val icon = compose.onNodeWithTag("drawer_network_icon_8", useUnmergedTree = true)
-                val default = icon.captureToImage().asAndroidBitmap()
+                if (artBranch == 2) {
+                    // Hold the response so the requested icon is still showing its fallback.
+                    compose.waitUntil(10_000) { compose.runOnIdle { fixture.started.contains(iconUrl) } }
+                    status.assertDoesNotExist()
+                    assertTrue("Pending artwork must show the direct fallback", directFallback.sameAs(icon.captureToImage().asAndroidBitmap()))
+                    fixture.server.enqueue(fixture.imageResponse())
+                    compose.waitUntil(10_000) { compose.runOnIdle { fixture.loaded.contains(iconUrl) } }
+                }
+                val default = if (artBranch == 0) directFallback else icon.captureToImage().asAndroidBitmap()
+                if (artBranch == 2) {
+                    val x = default.width / 2
+                    val y = default.height / 5
+                    assertTrue("Loaded artwork must replace the fallback surface", default.getPixel(x, y) != directFallback.getPixel(x, y))
+                }
                 val bounds = icon.fetchSemanticsNode().boundsInRoot
-                val status = compose.onNodeWithTag("drawer_network_status_8", useUnmergedTree = true)
-                val statusDefault = status.captureToImage().toPixelMap()
+                val statusDefault = if (artBranch == 0) null else status.captureToImage().toPixelMap()
                 for (choice in listOf(AvatarShape.DEFAULT, AvatarShape.SQUARE, AvatarShape.SOFT, AvatarShape.ROUNDED, AvatarShape.CIRCLE, AvatarShape.DEFAULT)) {
                     compose.runOnIdle { shape.value = choice }
                     assertAvatarMask("drawer_network_icon_8", choice, isChannel = true, backdrop = backdrop)
                     assertEquals("drawer art bounds", bounds, icon.fetchSemanticsNode().boundsInRoot)
-                    val pixels = status.captureToImage().toPixelMap()
-                    for (y in pixels.height / 4 until pixels.height * 3 / 4) {
-                        for (x in pixels.width / 4 until pixels.width * 3 / 4) {
-                            assertEquals("Status artwork must not reshape", statusDefault[x, y], pixels[x, y])
+                    assertEquals("drawer row bounds", rowBounds, row.fetchSemanticsNode().boundsInRoot)
+                    if (statusDefault == null) {
+                        status.assertDoesNotExist()
+                    } else {
+                        val pixels = status.captureToImage().toPixelMap()
+                        for (y in pixels.height / 4 until pixels.height * 3 / 4) {
+                            for (x in pixels.width / 4 until pixels.width * 3 / 4) {
+                                assertEquals("Status artwork must not reshape", statusDefault[x, y], pixels[x, y])
+                            }
                         }
                     }
                 }
@@ -675,10 +695,10 @@ class AvatarRoutingTest {
     fun defaultNetworkGlyphIsCenteredWithinItsRoundedSquareBackground() {
         compose.setContent {
             MaterialTheme(
-                colorScheme = lightColorScheme(surfaceContainerHighest = Color.White, onSurfaceVariant = Color.Black),
+                colorScheme = lightColorScheme(surfaceContainerHighest = Color.White, onSurfaceVariant = Color.Black, error = Color.Black),
             ) {
                 Box(Modifier.background(Color.White)) {
-                    IrcNetworkBadge(size = 100.dp, modifier = Modifier.testTag("network_badge"))
+                    IrcNetworkBadge(size = 100.dp, state = IrcClientState.Disconnected, modifier = Modifier.testTag("network_badge"))
                 }
             }
         }
@@ -687,28 +707,20 @@ class AvatarRoutingTest {
         var minY = pixels.height
         var maxX = -1
         var maxY = -1
-        var inkX = 0.0
-        var inkY = 0.0
-        var inkWeight = 0.0
         for (y in 0 until pixels.height) {
             for (x in 0 until pixels.width) {
-                val weight = (1f - pixels[x, y].red).toDouble()
-                if (weight > 0.5) {
+                if (pixels[x, y].red < 0.5f) {
                     minX = minOf(minX, x)
                     minY = minOf(minY, y)
                     maxX = maxOf(maxX, x)
                     maxY = maxOf(maxY, y)
                 }
-                inkX += x * weight
-                inkY += y * weight
-                inkWeight += weight
             }
         }
         assertTrue("The rendered topology glyph must be visible", maxX >= minX && maxY >= minY)
         assertEquals("Horizontal glyph center", pixels.width / 2f, (minX + maxX + 1) / 2f, 1f)
         assertTrue("Glyph must fit inside the rounded-square background", minY > pixels.height * 0.15 && maxY < pixels.height * 0.85)
-        assertEquals("Horizontal ink center", pixels.width / 2.0, inkX / inkWeight + 0.5, pixels.width * 0.01)
-        assertEquals("Vertical ink center", pixels.height / 2.0, inkY / inkWeight + 0.5, pixels.height * 0.01)
+        assertEquals("Vertical glyph center", pixels.height / 2f, (minY + maxY + 1) / 2f, 1f)
     }
 
     @Test

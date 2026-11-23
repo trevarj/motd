@@ -119,6 +119,10 @@ shape of the launcher artwork; Android controls its tint and system app badge.
 
 The drawer's Networks header shows total mentions, not total unread messages.
 Per-network unread badges and the scoped Mark all as read action remain available.
+The fallback three-node server badge fills one node when disconnected or failed,
+two while connecting or registering, and all three when connected. It fills left
+to right in every language, with only the last filled node using the theme's
+status color. Server-provided artwork and bouncer badges keep their corner dot.
 Mentions refreshes load newer and older rows around the reader together in one bounded
 window, rather than dropping newer rows and then loading them back page by page.
 
