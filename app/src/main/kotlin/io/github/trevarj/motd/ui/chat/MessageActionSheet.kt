@@ -57,6 +57,7 @@ import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.trevarj.motd.R
@@ -286,23 +287,50 @@ fun MessageActionSheet(
                                 reaction.emoji,
                                 displayNames,
                             )
+                        val actionLabel = stringResource(if (reaction.mine) R.string.manage_remove else R.string.manage_add)
+                        val enabled = !isServerBuffer && reactionEnabled(reaction.emoji)
+                        val toggleModifier =
+                            if (isServerBuffer) {
+                                Modifier
+                            } else {
+                                Modifier.clickable(enabled = enabled, onClickLabel = actionLabel, role = Role.Button) {
+                                    if (enabled) onReact(reaction.emoji)
+                                }
+                            }
                         Row(
                             modifier =
                                 Modifier
                                     .fillMaxWidth()
                                     .testTag("message_reaction_reactors_${reaction.emoji}")
+                                    .then(toggleModifier)
                                     .semantics(mergeDescendants = true) {
                                         contentDescription = description
-                                    }.padding(horizontal = 24.dp, vertical = 12.dp),
+                                    }.heightIn(min = 48.dp)
+                                    .padding(horizontal = 24.dp, vertical = 12.dp),
                             horizontalArrangement = Arrangement.spacedBy(16.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(text = reaction.emoji, fontSize = 28.sp)
+                            Text(
+                                text = reaction.emoji,
+                                modifier = Modifier.widthIn(max = 120.dp),
+                                fontSize = 28.sp,
+                                maxLines = 2,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                             Text(
                                 text = displayNames,
+                                modifier = Modifier.weight(1f),
                                 style = MaterialTheme.typography.bodyLarge,
                                 color = MaterialTheme.colorScheme.onSurface,
                             )
+                            if (!isServerBuffer) {
+                                Text(
+                                    text = actionLabel,
+                                    style = MaterialTheme.typography.labelLarge,
+                                    color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.alpha(if (enabled) 1f else 0.38f),
+                                )
+                            }
                         }
                     }
                 }

@@ -2360,7 +2360,7 @@ class ComposerSendClearUiTest {
     }
 
     @Test
-    fun reactionOverflowShowsHiddenTypesAndOpensTheFullReactionsTab() {
+    fun reactionOverflowShowsReactorNamesAndTogglesExactNonPickerValues() {
         val message = translationMessage().copy(text = "React to this", msgid = "overflow-message")
         val initialChips =
             listOf(
@@ -2368,18 +2368,22 @@ class ComposerSendClearUiTest {
                 ReactionChip("❤️", 1, mine = false, reactorDisplayNames = listOf("Dan")),
                 ReactionChip("😂", 1, mine = false, reactorDisplayNames = listOf("Eve")),
             )
+        val ownedValue = ":Party:"
+        val unownedValue = ":party:"
         val hiddenChips =
             listOf(
-                ReactionChip("😮", 2, mine = false, reactorDisplayNames = listOf("Frank", "Gloria")),
-                ReactionChip("😢", 1, mine = false, reactorDisplayNames = listOf("Helen")),
+                ReactionChip(ownedValue, 2, mine = true, reactorDisplayNames = listOf("Frank", "me")),
+                ReactionChip(unownedValue, 1, mine = false, reactorDisplayNames = listOf("Helen")),
             )
         var chips by mutableStateOf(initialChips)
+        var connection by mutableStateOf<IrcClientState>(IrcClientState.Disconnected)
+        val picked = mutableListOf<Pair<MessageEntity, String>>()
         setContent(
             draft = { ComposerDraftState("", hydrated = true) },
             pages = flowOf(PagingData.from(listOf(message))),
-            connectionState = IrcClientState.Disconnected,
+            liveConnection = { connection },
             reactionChips = { msgid -> chips.takeIf { msgid == message.msgid }.orEmpty() },
-            onReact = { _, _ -> error("Opening reaction details must not send a reaction") },
+            onReact = { source, value -> picked += source to value },
             onSubmit = { error("Opening reaction details must not submit the composer") },
         )
 
@@ -2405,12 +2409,31 @@ class ComposerSendClearUiTest {
         chips.forEach { chip ->
             compose.onNodeWithTag("message_reaction_reactors_${chip.emoji}").assertIsDisplayed()
         }
-        compose.onNodeWithContentDescription("😮 reacted: Frank, Gloria").assertIsDisplayed()
+        val owned = compose.onNodeWithContentDescription("$ownedValue reacted: Frank, me").assertIsDisplayed()
+        val unowned = compose.onNodeWithContentDescription("$unownedValue reacted: Helen").assertIsDisplayed()
+        owned.assertIsNotEnabled()
+        unowned.assertIsNotEnabled()
 
-        compose
-            .onNode(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss), useUnmergedTree = true)
-            .performSemanticsAction(SemanticsActions.Dismiss) { it() }
+        compose.runOnIdle {
+            assertTrue(picked.isEmpty())
+            connection = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/unreact"))
+        }
+        owned.assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle { assertTrue(picked.isEmpty()) }
+        unowned.assertIsEnabled().performClick()
         compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.runOnIdle {
+            assertEquals(listOf(message to unownedValue), picked)
+            connection = IrcClientState.Ready("me", setOf("message-tags"), mapOf("CLIENTTAGDENY" to "draft/react"))
+        }
+
+        overflow.performClick()
+        unowned.assertIsNotEnabled().performTouchInput { click() }
+        compose.runOnIdle { assertEquals(listOf(message to unownedValue), picked) }
+        owned.assertIsEnabled().performClick()
+        compose.onNodeWithTag("message_action_sheet").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(listOf(message to unownedValue, message to ownedValue), picked) }
+
         val actionLabel = RuntimeEnvironment.getApplication().getString(R.string.chat_bubble_actions)
         val bubbleAction =
             SemanticsMatcher("message actions long press") { node ->
