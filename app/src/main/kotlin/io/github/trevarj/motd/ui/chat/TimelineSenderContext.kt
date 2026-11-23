@@ -116,6 +116,7 @@ internal fun viewportDateTime(
     val eventId = row.key as? Long ?: return null
     if (eventId <= 0L) return null
     val message = visibleMessageAt(row.index) ?: return null
+    // Grouped system rows keep every expanded line on the slot owner's local day.
     return message.serverTime.takeIf { message.id == eventId }
 }
 

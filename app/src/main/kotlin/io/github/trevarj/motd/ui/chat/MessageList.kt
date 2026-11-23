@@ -267,11 +267,14 @@ internal fun sameSystemRun(
 ): Boolean {
     val firstCommand = commandResponseGroup(first)
     val secondCommand = commandResponseGroup(second)
-    return if (firstCommand != null || secondCommand != null) {
-        firstCommand != null && firstCommand == secondCommand
-    } else {
-        isSystemKind(first.kind) && isSystemKind(second.kind)
-    }
+    val compatible =
+        if (firstCommand != null || secondCommand != null) {
+            firstCommand != null && firstCommand == secondCommand
+        } else {
+            isSystemKind(first.kind) && isSystemKind(second.kind)
+        }
+    // Keep the slot's date, expanded lines and separator on the same local day.
+    return compatible && (first.serverTime == second.serverTime || dayStart(first.serverTime) == dayStart(second.serverTime))
 }
 
 internal fun messageContentType(
@@ -1683,9 +1686,8 @@ private fun InvitationCard(
 /**
  * Render one bounded chunk of a collapsed system-event run. Very long bursts are split into
  * adjacent pills, so scrolling never scans or allocates the entire run. Lines remain lazy until
- * expansion. The
- * read-marker/day separators are computed against the oldest item of the run and the neighbor just
- * older than the whole run, matching the reversed-list boundary rules used for bubbles.
+ * expansion. Chunks never cross local midnight. Read-marker/day separators are computed against the
+ * oldest item of the chunk and its older neighbor, matching the reversed-list rules for bubbles.
  */
 @Composable
 private fun SystemEventRun(

@@ -116,8 +116,10 @@ import io.github.trevarj.motd.ui.chat.ReplyTarget
 import io.github.trevarj.motd.ui.chat.TimelineSeamState
 import io.github.trevarj.motd.ui.chat.isSystemRunChunkBoundary
 import io.github.trevarj.motd.ui.chat.messageUrls
+import io.github.trevarj.motd.ui.chat.viewportDateTime
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
+import io.github.trevarj.motd.ui.components.dayLabel
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.nav.PalettePreviewRoute
 import io.github.trevarj.motd.ui.settings.PalettePreviewScreen
@@ -145,6 +147,8 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.File
+import java.time.LocalDate
+import java.time.ZoneId
 import kotlin.math.abs
 
 @RunWith(RobolectricTestRunner::class)
@@ -1410,6 +1414,62 @@ class MessageTimelineUiTest {
         compose.waitForIdle()
         compose.onNodeWithTag("chat_system_event_1001", useUnmergedTree = true).performSemanticsAction(SemanticsActions.OnLongClick)
         compose.runOnIdle { assertEquals(1001L, translatedEventId) }
+    }
+
+    @Test
+    fun groupedSystemEventsKeepFloatingDateAndSeparatorsAcrossLocalMidnight() {
+        val midnight =
+            LocalDate
+                .of(2024, 2, 6)
+                .atStartOfDay(ZoneId.systemDefault())
+                .toInstant()
+                .toEpochMilli()
+        val ids =
+            (1L..100L)
+                .asSequence()
+                .filterNot(::isSystemRunChunkBoundary)
+                .take(4)
+                .toList()
+        val rows =
+            listOf(
+                message(ids[3], midnight + 120_000, MessageKind.JOIN, "00:02 join"),
+                message(ids[2], midnight + 60_000, MessageKind.JOIN, "00:01 join"),
+                message(ids[1], midnight - 60_000, MessageKind.PART, "23:59 part"),
+                message(ids[0], midnight - 120_000, MessageKind.PART, "23:58 part"),
+            )
+        val listState = LazyListState()
+        render(flowOf(PagingData.from(rows)), listState = listState)
+        compose.onAllNodesWithTag("chat_system_pill", useUnmergedTree = true).assertCountEquals(2)
+        for (summary in listOf("2 left", "2 joined")) {
+            compose.onNodeWithText(summary, useUnmergedTree = true).performTouchInput { click() }
+        }
+
+        val newerDay = dayLabel(rows[0].serverTime)
+        val olderDay = dayLabel(rows[2].serverTime)
+        val newerDayBounds = compose.onNodeWithText(newerDay).fetchSemanticsNode().boundsInRoot
+        val olderDayBounds = compose.onNodeWithText(olderDay).fetchSemanticsNode().boundsInRoot
+        val (first, second, third, fourth) = ids.map { bounds("chat_system_event_$it") }
+        assertTrue(olderDayBounds.bottom <= first.top)
+        assertTrue(first.bottom <= second.top)
+        assertTrue(second.bottom <= newerDayBounds.top)
+        assertTrue(newerDayBounds.bottom <= third.top)
+        assertTrue(third.bottom <= fourth.top)
+
+        compose.runOnIdle {
+            val layout = listState.layoutInfo
+            for (head in listOf(rows[2], rows[0])) {
+                val slot = layout.visibleItemsInfo.single { it.key == head.id }
+                // Put the usable top inside this expanded chunk, as during a drag past midnight.
+                val time =
+                    viewportDateTime(
+                        layout.visibleItemsInfo,
+                        bottom = layout.viewportStartOffset,
+                        top = slot.offset + slot.size / 2,
+                        visibleMessageAt = rows::getOrNull,
+                    )
+                assertEquals(head.serverTime, requireNotNull(time))
+            }
+        }
     }
 
     @Test
