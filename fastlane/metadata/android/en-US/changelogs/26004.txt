@@ -1,0 +1,6 @@
+- Chats sort by visible activity. Unread Chats appears only when needed.
+- Join channels with an automatic # on supported networks. Manage channel bans and undo exact-nick ignores.
+- Browse links and matching chats, review uploads and DCC sends, and open info from event pills.
+- Seasonal title animations can be turned off. The server drawer shows connection state.
+- Test Android alerts and hide chat previews from Recents.
+- Warnings about departed nicks are readable over chat wallpapers.
