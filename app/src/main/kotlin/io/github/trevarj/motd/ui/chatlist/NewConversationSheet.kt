@@ -212,7 +212,16 @@ internal fun NewConversationSheetContent(
     val activeDraft = if (joining) drafts.channel else drafts.nickname
     val rules = selectedNetwork?.id?.let(channelRules::get)
     val advertisedPrefixes = rules?.advertisedChanTypes
-    val joinTarget = if (joining && rules != null) remember(activeDraft, rules) { exactChannelTarget(activeDraft, rules) } else null
+    val hashOnly = joining && advertisedPrefixes == "#"
+    val prependHash = hashOnly && !activeDraft.trimStart().startsWith('#')
+    val joinTarget =
+        if (joining && rules != null) {
+            remember(activeDraft, rules, prependHash) {
+                exactChannelTarget(if (prependHash) "#${activeDraft.trimStart()}" else activeDraft, rules)
+            }
+        } else {
+            null
+        }
     val joinPending = joinState.joining || joinState.openBufferId != null
     val needsKey = joinState.error?.needsKey == true
     val revealKey = needsKey || joinState.revealKey
@@ -382,17 +391,23 @@ internal fun NewConversationSheetContent(
                     Icon(if (joining) Icons.Outlined.Forum else Icons.Outlined.Person, contentDescription = null)
                 },
                 label = { Text(stringResource(if (joining) R.string.new_sheet_channel_hint else R.string.new_sheet_nick_hint)) },
-                supportingText = {
-                    Text(
-                        when {
-                            !joining -> stringResource(R.string.new_sheet_nick_guidance)
-                            advertisedPrefixes == null -> stringResource(R.string.new_sheet_channel_guidance)
-                            advertisedPrefixes.isEmpty() -> stringResource(R.string.new_sheet_channel_no_prefixes)
-                            else -> stringResource(R.string.new_sheet_channel_prefixes, advertisedPrefixes.asIterable().joinToString(", "))
-                        },
-                        modifier = Modifier.testTag("new_conversation_input_guidance"),
-                    )
-                },
+                prefix = if (prependHash) ({ Text("#") }) else null,
+                supportingText =
+                    if (hashOnly) {
+                        null
+                    } else {
+                        {
+                            Text(
+                                when {
+                                    !joining -> stringResource(R.string.new_sheet_nick_guidance)
+                                    advertisedPrefixes == null -> stringResource(R.string.new_sheet_channel_guidance)
+                                    advertisedPrefixes.isEmpty() -> stringResource(R.string.new_sheet_channel_no_prefixes)
+                                    else -> stringResource(R.string.new_sheet_channel_prefixes, advertisedPrefixes.asIterable().joinToString(", "))
+                                },
+                                modifier = Modifier.testTag("new_conversation_input_guidance"),
+                            )
+                        }
+                    },
                 keyboardOptions =
                     KeyboardOptions(
                         capitalization = KeyboardCapitalization.None,

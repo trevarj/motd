@@ -478,6 +478,33 @@ class NewConversationSheetUiTest {
     }
 
     @Test
+    fun hashOnlyNetworkAddsThePrefixUnlessTheChannelAlreadyHasOne() {
+        val joined = mutableListOf<String>()
+        setContent(
+            networks = listOf(network()),
+            channelRules = mapOf(1L to IrcIdentityRules(advertisedChanTypes = "#")),
+            onJoinChannel = { _, channel, _ -> joined += channel },
+        )
+
+        val input = compose.onNodeWithTag("new_conversation_input").performClick()
+        val prefix = compose.onNode(hasText("#") and hasAnyAncestor(hasTestTag("new_conversation_input")), useUnmergedTree = true)
+        val submit = compose.onNodeWithTag("new_conversation_submit")
+        prefix.assertIsDisplayed()
+        input.assertInputText("")
+        submit.assertIsNotEnabled()
+        compose.onNodeWithTag("new_conversation_input_guidance", useUnmergedTree = true).assertDoesNotExist()
+
+        input.performTextInput("motd")
+        prefix.assertIsDisplayed()
+        submit.assertIsEnabled().performClick()
+        input.performTextReplacement("#pasted")
+        submit.assertIsEnabled().performClick()
+        input.performTextReplacement("##literal")
+        submit.assertIsEnabled().performClick()
+        compose.runOnIdle { assertEquals(listOf("#motd", "#pasted", "##literal"), joined) }
+    }
+
+    @Test
     fun channelFieldUsesOnlySelectedNetworkPrefixesAndSubmitsLiteralNames() {
         val joined = mutableListOf<Pair<Long, String>>()
         setContent(

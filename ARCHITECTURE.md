@@ -69,7 +69,8 @@ flowchart TD
   Browse sits with the network selector; returning restores the selected network, form and
   non-secret drafts, never the channel key.
   The muted optional-key panel reveals a masked input immediately without moving the footer.
-  Channel names include their literal prefix, validated against the selected network's CHANTYPES.
+  Networks advertising only `#` supply it automatically unless the name already starts with it.
+  Other networks require a literal prefix. All names are validated against the selected network's CHANTYPES.
   The sheet stays open until the live client's own JOIN and Room's canonical row agree.
   A bad key opens the masked retry field; retries never persist their keys.
 - Fixed theme roles are cached on demand per preset, text-color mode and readability
