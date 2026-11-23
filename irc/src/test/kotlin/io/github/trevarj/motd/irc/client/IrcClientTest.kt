@@ -349,6 +349,42 @@ class IrcClientTest {
         }
 
     @Test
+    fun `raw combined ban mutations do not interrupt or block ban lists`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            ft.feed(":srv 005 motd PREFIX=(oyv)@%+ CHANMODES=be,k,l,imnpstz :are supported")
+            ft.feed(":srv 376 motd :End of MOTD")
+            ft.feed(":motd!u@h JOIN #Room")
+            runCurrent()
+
+            val doubleBan = "MODE #Room +bb first!*@* second!*@*"
+            client.send(IrcMessage.parse(doubleBan))
+            assertEquals(doubleBan, ft.sent.last())
+
+            val bans = async { client.listChannelBans("#Room") }
+            runCurrent()
+            assertEquals("MODE #Room +b", ft.sent.last())
+            val mixedMutation = "MODE #Room +ye-lk+lzb alice except!*@* key 10 third!*@*"
+            client.send(IrcMessage.parse(mixedMutation))
+            assertEquals(mixedMutation, ft.sent.last())
+            runCurrent()
+            assertFalse(bans.isCompleted)
+            ft.feed(":srv 367 motd #Room first!*@*")
+            ft.feed(":srv 368 motd #Room :End of list")
+            runCurrent()
+            assertEquals(ChannelBanListResult.Complete(listOf(ChannelBanEntry("first!*@*"))), bans.await())
+
+            val competing = async { client.listChannelBans("#Room") }
+            runCurrent()
+            val mixedRead = "MODE #Room +yb alice"
+            client.send(IrcMessage.parse(mixedRead))
+            assertEquals(mixedRead, ft.sent.last())
+            assertEquals(ChannelBanListResult.Incomplete, competing.await())
+            assertEquals(ChannelBanListResult.Unavailable, client.listChannelBans("#Room"))
+        }
+
+    @Test
     fun `channel ban removal writes one exact mask and rejects unsupported framing and oversized UTF-8`() =
         runTest {
             val ft = FakeTransport()

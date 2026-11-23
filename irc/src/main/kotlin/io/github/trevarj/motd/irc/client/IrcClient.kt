@@ -1122,7 +1122,7 @@ class IrcClient(
         }
         outboundLock.withLock {
             if ("label" !in msg.tags || !hasCap("labeled-response")) {
-                channelBanSession.get()?.takeIf { it.transport === t }?.rawMode(msg, isupport.identityRules.caseMapping)
+                channelBanSession.get()?.takeIf { it.transport === t }?.rawMode(msg, isupport)
             }
             t.send(line)
         }

@@ -2,6 +2,7 @@ package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import kotlinx.coroutines.CompletableDeferred
 
@@ -145,6 +146,49 @@ internal class ChannelBanRows {
     }
 }
 
+private val defaultChannelModeGroups = listOf("b", "k", "l", "imnpst")
+
+private fun IrcMessage.mayReadBanList(
+    modes: String,
+    lastBan: Int,
+    isupport: Isupport,
+): Boolean {
+    if (params.size == 2 || !modes.isBanModeParameter()) return true
+    val (listModes, paramModes, setParamModes, flagModes) =
+        isupport["CHANMODES"]?.split(',')?.takeIf { it.size >= 4 } ?: defaultChannelModeGroups
+    val prefixes = isupport.prefixModes
+    var adding = true
+    var argIndex = 2
+    for (index in 0..lastBan) {
+        val mode = modes[index]
+        when (mode) {
+            '+' -> {
+                adding = true
+            }
+
+            '-' -> {
+                adding = false
+            }
+
+            else -> {
+                val consumesArg =
+                    when {
+                        mode == 'b' || prefixes.any { it.first == mode } || mode in listModes || mode in paramModes -> true
+                        mode in setParamModes -> adding
+                        mode in flagModes -> false
+                        else -> true // An unknown mode may take the argument before a ban mode.
+                    }
+                if (!consumesArg) continue
+                if (argIndex >= params.size) return true
+                // A malformed middle parameter can change how many arguments the server sees.
+                if (argIndex < params.lastIndex && !params[argIndex].isBanModeParameter()) return true
+                argIndex++
+            }
+        }
+    }
+    return false
+}
+
 /** Connection-owned tracker for MODE +b; never fences upstream replies with a bouncer PONG. */
 internal class ChannelBanRequests(
     val transport: IrcTransport,
@@ -201,13 +245,16 @@ internal class ChannelBanRequests(
     @Synchronized
     fun rawMode(
         message: IrcMessage,
-        mapping: IrcCaseMapping,
+        isupport: Isupport,
     ) {
         val modes = message.params.getOrNull(1) ?: return
-        if (closed || 'b' !in modes) return
-        val targets = message.params[0].split(',')
+        val lastBan = modes.lastIndexOf('b')
+        if (closed || lastBan < 0) return
         val singleBanMode = modes == "b" || modes == "+b" || modes == "-b"
-        if (singleBanMode && message.params.size > 2) return // a ban mutation, not a read
+        if (singleBanMode && message.params.size > 2) return
+        if (!singleBanMode && !message.mayReadBanList(modes, lastBan, isupport)) return
+        val targets = message.params[0].split(',')
+        val mapping = isupport.identityRules.caseMapping
         updateMapping(mapping)
         for (target in targets) {
             if (!target.isBanModeParameter()) continue
