@@ -18,7 +18,10 @@ import io.github.trevarj.motd.data.db.InviteState
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.MuteBacklogSuppression
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.FolderDisplayMode
@@ -38,6 +41,7 @@ import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.dickord.isDickordPortalConversation
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.service.ChannelCloseCoordinator
@@ -241,6 +245,7 @@ class ChatListViewModel
         bouncerKindPrefs: BouncerKindPrefs = NoopBouncerKindPrefs,
         val chatPageCache: ChatPageCache? = null,
         @ApplicationContext private val context: Context,
+        networkIdentityDao: NetworkIdentityDao? = null,
     ) : ViewModel() {
         init {
             // The coordinator is process-scoped and observes persisted pending closes, so creating a
@@ -253,13 +258,19 @@ class ChatListViewModel
         val newConversationJoin: StateFlow<NewConversationJoinState> = _newConversationJoin.asStateFlow()
         private var newConversationJoinAttempt: NewConversationJoinAttempt? = null
 
+        private val persistedJoinIdentities =
+            (networkIdentityDao?.observeAll() ?: flowOf(emptyList()))
+                .map { identities -> identities.associateBy { it.networkId } }
+                .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
         val newConversationChannelRules: StateFlow<Map<Long, IrcIdentityRules>> =
-            combine(networkRepository.observeNetworks(), connectionManager.connectionStates) { networks, connections ->
+            combine(networkRepository.observeNetworks(), connectionManager.connectionStates, persistedJoinIdentities) { networks, connections, identities ->
+                if (identities == null) return@combine emptyMap()
                 buildMap {
                     for (network in networks) {
                         if (network.role == NetworkRole.BOUNCER_ROOT) continue
                         val state = connectionManager.clientFor(network.id)?.state?.value ?: connections[network.id]
-                        put(network.id, (state as? IrcClientState.Ready)?.identityRules() ?: IrcIdentityRules())
+                        put(network.id, (state as? IrcClientState.Ready).joinIdentityRules(identities[network.id]))
                     }
                 }
             }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
@@ -812,11 +823,12 @@ class ChatListViewModel
             cancelNewConversationJoin()
             val client = connectionManager.clientFor(networkId)
             val ready = client?.state?.value as? IrcClientState.Ready
-            if (client == null || ready == null) {
+            val identities = persistedJoinIdentities.value
+            if (client == null || ready == null || identities == null) {
                 _newConversationJoin.value = newConversationJoinFailure(R.string.chatlist_join_connection_lost)
                 return
             }
-            val target = exactChannelTarget(channel, ready.identityRules())
+            val target = exactChannelTarget(channel, ready.joinIdentityRules(identities[networkId]))
             if (target == null) {
                 _newConversationJoin.value = newConversationJoinFailure(R.string.chatlist_join_invalid_channel)
                 return
@@ -860,8 +872,14 @@ class ChatListViewModel
                             bufferRepository.observeJoinedChannels(attempt.networkId).collect { attempt.rows.value = it }
                         }
                     val membership =
-                        combine(attempt.rows, attempt.client.joinedChannels, attempt.client.state, connectionManager.connectionStates) { _, _, _, _ ->
-                            attempt.joinedBufferId()
+                        combine(
+                            attempt.rows,
+                            attempt.client.joinedChannels,
+                            attempt.client.state,
+                            connectionManager.connectionStates,
+                            persistedJoinIdentities,
+                        ) { _, _, _, _, _ ->
+                            attempt.refreshJoinedBufferId()
                         }
                     try {
                         val result =
@@ -959,34 +977,68 @@ class ChatListViewModel
         ) {
             val rows = MutableStateFlow(emptyList<JoinedChannelRow>())
             var work: Job? = null
+            private var confirmedKey: String? = null
+            private var confirmedRoomId: Long? = null
 
             fun isCurrentReadyClient(): Boolean = connectionManager.clientFor(networkId) === client && client.state.value is IrcClientState.Ready
 
             fun matches(other: String): Boolean {
-                val rules = (client.state.value as? IrcClientState.Ready)?.identityRules() ?: return false
-                return rules.normalize(other) == rules.normalize(channel)
+                val ready = client.state.value as? IrcClientState.Ready ?: return false
+                val persisted = persistedJoinIdentities.value?.get(networkId)
+                val mapping = ready.joinMembershipMapping(persisted, ready.joinIdentityRules(persisted))
+                return mapping.normalize(other) == mapping.normalize(channel)
             }
 
-            fun hasMembership(): Boolean {
-                val rules = (client.state.value as? IrcClientState.Ready)?.identityRules() ?: return false
-                return hasMembership(rules, rules.normalize(channel))
+            fun hasMembership(): Boolean = membershipKey() != null
+
+            private fun membershipKey(room: JoinedChannelRow? = null): String? {
+                if (connectionManager.clientFor(networkId) !== client) return null
+                val ready = client.state.value as? IrcClientState.Ready ?: return null
+                val persisted = persistedJoinIdentities.value?.get(networkId)
+                val rules = ready.joinIdentityRules(persisted)
+                if (!rules.isChannel(channel)) return null
+                val mapping = ready.joinMembershipMapping(persisted, rules)
+                val target = mapping.normalize(channel)
+                if (room != null && (room.networkId != networkId || mapping.normalize(room.displayName) != target)) return null
+                if (client.joinedChannels.value.none { mapping.normalize(it) == target }) return null
+                return rules.normalize(channel)
             }
 
-            private fun hasMembership(
-                rules: IrcIdentityRules,
-                target: String,
-            ): Boolean = client.joinedChannels.value.any { rules.normalize(it) == target }
+            suspend fun refreshJoinedBufferId(): Long? {
+                val key = membershipKey()
+                // Use Room's stored key, not a re-folded display name that can match an older room.
+                confirmedRoomId = if (key != null && rows.value.isNotEmpty()) bufferRepository.joinedBufferId(networkId, key) else null
+                confirmedKey = key
+                return joinedBufferId()
+            }
 
             fun joinedBufferId(): Long? {
-                if (connectionManager.clientFor(networkId) !== client) return null
-                val rules = (client.state.value as? IrcClientState.Ready)?.identityRules() ?: return null
-                val target = rules.normalize(channel)
-                if (!hasMembership(rules, target)) return null
-                return rows.value.firstOrNull { it.networkId == networkId && rules.normalize(it.displayName) == target }?.bufferId
+                val room = rows.value.firstOrNull { it.bufferId == confirmedRoomId } ?: return null
+                val key = membershipKey(room) ?: return null
+                return room.bufferId.takeIf { key == confirmedKey }
             }
         }
 
-        private fun IrcClientState.Ready.identityRules(): IrcIdentityRules = IrcIdentityRules.from(isupport["CASEMAPPING"], isupport["CHANTYPES"])
+        private fun IrcClientState.Ready?.joinIdentityRules(persisted: NetworkIdentityEntity?): IrcIdentityRules =
+            if (this == null) {
+                persisted?.identityRules ?: IrcIdentityRules()
+            } else {
+                IrcIdentityRules.from(
+                    isupport["CASEMAPPING"] ?: persisted?.caseMapping.takeUnless { "CASEMAPPING" in removedIsupport },
+                    isupport["CHANTYPES"] ?: persisted?.chanTypes.takeUnless { "CHANTYPES" in removedIsupport },
+                )
+            }
+
+        private fun IrcClientState.Ready.joinMembershipMapping(
+            persisted: NetworkIdentityEntity?,
+            rules: IrcIdentityRules,
+        ): IrcCaseMapping =
+            // Until the casemap is known, use the default storage key but don't infer punctuation aliases.
+            if (isupport["CASEMAPPING"] == null && "CASEMAPPING" !in removedIsupport && persisted?.caseMapping == null) {
+                IrcCaseMapping.Ascii
+            } else {
+                rules.caseMapping
+            }
 
         fun acceptInvitation(messageId: Long) =
             viewModelScope.launch {

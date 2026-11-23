@@ -8,6 +8,8 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIdentityDao
+import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.GlobalFeedPrefs
 import io.github.trevarj.motd.data.prefs.OnboardingPrefs
@@ -20,6 +22,7 @@ import io.github.trevarj.motd.gesture.FakeSettings
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.client.IrcClientConfig
 import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.transport.IrcTransport
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.service.AlwaysOnScreen
@@ -39,6 +42,8 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -98,6 +103,91 @@ class ChatListNewConversationJoinTest {
             assertTrue(fixture.model.consumeNewConversationJoin(11))
             assertFalse(fixture.model.consumeNewConversationJoin(11))
             assertTrue(fixture.transports.values.none { transport -> transport.sent.any { it.startsWith("LIST") } })
+        }
+
+    @Test
+    fun delayedISupportUsesPersistedRulesAndWaitsForTheExactJoinedRoom() =
+        runTest {
+            val fixture = Fixture(this, persistedIdentity = NetworkIdentityEntity(1, "ascii", "#+"), delayIsupport = true)
+            val transport = fixture.transports.getValue(1L)
+            val rows = fixture.memberships.getValue(1L)
+            val alias = JoinedChannelRow(10, 1, "#team{")
+            val target = JoinedChannelRow(11, 1, "#team[")
+            fixture.roomKeys[target.bufferId] = "#team["
+            rows.value = listOf(alias)
+            transport.feed(":me!u@h JOIN #team{")
+            runCurrent()
+            assertEquals(
+                "#+",
+                fixture.model.newConversationChannelRules
+                    .value
+                    .getValue(1L)
+                    .chanTypes,
+            )
+            fixture.model.joinChannel(1, "&team", null)
+            fixture.assertFailure(R.string.chatlist_join_invalid_channel)
+
+            fixture.model.joinChannel(1, "#team[", null)
+            runCurrent()
+            assertEquals(listOf(JoinWrite(1, "#team[", null, false)), fixture.connections.writes)
+            assertEquals(NewConversationJoinState(joining = true), fixture.state)
+
+            transport.feed(":srv 005 me CASEMAPPING=ascii CHANTYPES=#+ :supported", ":me!u@h JOIN #team[")
+            runCurrent()
+            assertEquals(NewConversationJoinState(joining = true), fixture.state)
+            rows.value = listOf(alias, target)
+            runCurrent()
+            assertEquals(11L, fixture.state.openBufferId)
+            assertFalse(fixture.model.consumeNewConversationJoin(10))
+            assertTrue(fixture.model.consumeNewConversationJoin(11))
+        }
+
+    @Test
+    fun removedIdentityKeysRestoreDefaultsAndSelectByStoredRoomKey() =
+        runTest {
+            val fixture = Fixture(this, persistedIdentity = NetworkIdentityEntity(1, "ascii", "#+"), delayIsupport = true)
+            val transport = fixture.transports.getValue(1L)
+            val oldAsciiRoom = JoinedChannelRow(10, 1, "#team[")
+            val defaultRoom = JoinedChannelRow(11, 1, "#team{")
+            fixture.roomKeys[oldAsciiRoom.bufferId] = "#team["
+            fixture.memberships.getValue(1L).value = listOf(oldAsciiRoom, defaultRoom)
+            transport.feed(":srv 005 me -CASEMAPPING -CHANTYPES :supported", ":me!u@h JOIN #team{")
+            runCurrent()
+            fixture.connections.publishStates()
+            runCurrent()
+            assertEquals(
+                "#&",
+                fixture.model.newConversationChannelRules
+                    .value
+                    .getValue(1L)
+                    .chanTypes,
+            )
+            fixture.model.joinChannel(1, "+team", null)
+            fixture.assertFailure(R.string.chatlist_join_invalid_channel)
+
+            fixture.model.joinChannel(1, "#team[", null)
+            runCurrent()
+            assertTrue(fixture.connections.writes.isEmpty())
+            assertEquals(11L, fixture.state.openBufferId)
+            assertTrue(fixture.model.consumeNewConversationJoin(11))
+        }
+
+    @Test
+    fun missingCasemapDoesNotConfirmAnUnadvertisedPunctuationAlias() =
+        runTest {
+            val fixture = Fixture(this, delayIsupport = true)
+            val transport = fixture.transports.getValue(1L)
+            fixture.memberships.getValue(1L).value = listOf(JoinedChannelRow(10, 1, "#team{"))
+            transport.feed(":me!u@h JOIN #team{")
+            runCurrent()
+            fixture.model.joinChannel(1, "#team[", null)
+            runCurrent()
+            assertEquals(listOf(JoinWrite(1, "#team[", null, false)), fixture.connections.writes)
+            assertEquals(NewConversationJoinState(joining = true), fixture.state)
+            transport.feed(":me!u@h PART #team{ :gone", ":me!u@h JOIN #team[")
+            runCurrent()
+            assertEquals(NewConversationJoinState(joining = true), fixture.state)
+            assertFalse(fixture.model.consumeNewConversationJoin(10))
         }
 
     @Test
@@ -235,14 +325,21 @@ class ChatListNewConversationJoinTest {
 
     private inner class Fixture(
         scope: TestScope,
+        persistedIdentity: NetworkIdentityEntity? = null,
+        delayIsupport: Boolean = false,
     ) {
         val transports = mapOf(1L to TestTransport(), 2L to TestTransport())
         val memberships = transports.mapValues { MutableStateFlow(emptyList<JoinedChannelRow>()) }
+        val roomKeys = mutableMapOf<Long, String>()
         val connections =
             TestConnections(
                 transports
                     .mapValues { (id, transport) ->
-                        scope.readyClient(transport, if (id == 1L) "+" else "#")
+                        if (id == 1L && delayIsupport) {
+                            scope.readyClient(transport, chanTypes = null, caseMapping = null)
+                        } else {
+                            scope.readyClient(transport, if (id == 1L) "+" else "#")
+                        }
                     }.toMutableMap(),
             )
         val model: ChatListViewModel
@@ -268,6 +365,18 @@ class ChatListNewConversationJoinTest {
                     bufferRepository =
                         object : BufferRepository by FakeBuffers() {
                             override fun observeJoinedChannels(networkId: Long) = memberships.getValue(networkId)
+
+                            override suspend fun joinedBufferId(
+                                networkId: Long,
+                                normalizedChannel: String,
+                            ): Long? =
+                                memberships
+                                    .getValue(networkId)
+                                    .value
+                                    .firstOrNull {
+                                        it.networkId == networkId &&
+                                            (roomKeys[it.bufferId] ?: IrcCaseMapping.Rfc1459.normalize(it.displayName)) == normalizedChannel
+                                    }?.bufferId
                         },
                     networkRepository = FakeNetworks(networks),
                     connectionManager = connections,
@@ -317,6 +426,7 @@ class ChatListNewConversationJoinTest {
                     savedStateHandle = SavedStateHandle(),
                     appVisibility = AlwaysOnScreen,
                     context = context,
+                    networkIdentityDao = TestIdentities(persistedIdentity),
                 )
             models.put("chat-list", model)
             scope.runCurrent()
@@ -327,6 +437,33 @@ class ChatListNewConversationJoinTest {
             needsKey: Boolean = false,
         ) {
             assertEquals(NewConversationJoinState(error = ChannelJoinFailure(context.getString(error), needsKey)), state)
+        }
+    }
+
+    private class TestIdentities(
+        identity: NetworkIdentityEntity?,
+    ) : NetworkIdentityDao {
+        private val identities = MutableStateFlow(listOfNotNull(identity))
+
+        override fun observeAll() = identities
+
+        override fun observe(networkId: Long) = identities.map { byNetworkNow(networkId) }
+
+        override suspend fun byNetwork(networkId: Long) = byNetworkNow(networkId)
+
+        override fun byNetworkNow(networkId: Long) = identities.value.firstOrNull { it.networkId == networkId }
+
+        override suspend fun upsert(identity: NetworkIdentityEntity) {
+            identities.update { rows -> rows.filterNot { it.networkId == identity.networkId } + identity }
+        }
+
+        override suspend fun updateSelfNick(
+            networkId: Long,
+            selfNick: String,
+        ): Int {
+            val identity = byNetworkNow(networkId) ?: return 0
+            upsert(identity.copy(selfNick = selfNick))
+            return 1
         }
     }
 
@@ -363,8 +500,8 @@ class ChatListNewConversationJoinTest {
 
     private fun TestScope.readyClient(
         transport: TestTransport,
-        chanTypes: String,
-        caseMapping: String = "rfc1459",
+        chanTypes: String?,
+        caseMapping: String? = "rfc1459",
     ): IrcClient {
         val client =
             IrcClient(
@@ -375,11 +512,10 @@ class ChatListNewConversationJoinTest {
         runCurrent()
         transport.feed(":srv CAP * LS :message-tags")
         runCurrent()
-        transport.feed(
-            ":srv CAP me ACK :message-tags",
-            ":srv 005 me CHANTYPES=$chanTypes CASEMAPPING=$caseMapping :supported",
-            ":srv 001 me :Welcome",
-        )
+        transport.feed(":srv CAP me ACK :message-tags")
+        val support = listOfNotNull(chanTypes?.let { "CHANTYPES=$it" }, caseMapping?.let { "CASEMAPPING=$it" })
+        if (support.isNotEmpty()) transport.feed(":srv 005 me ${support.joinToString(" ")} :supported")
+        transport.feed(":srv 001 me :Welcome")
         runCurrent()
         check(client.state.value is IrcClientState.Ready)
         return client
