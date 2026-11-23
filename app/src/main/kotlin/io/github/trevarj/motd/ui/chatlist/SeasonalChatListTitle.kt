@@ -32,9 +32,9 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInRoot
-import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalLocale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -43,7 +43,6 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
-import androidx.core.os.ConfigurationCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import io.github.trevarj.motd.R
@@ -54,7 +53,6 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.text.NumberFormat
-import java.util.Locale
 
 internal class SeasonalWordmarkPlayback(
     private val season: SeasonalWordmarkKind,
@@ -149,7 +147,7 @@ internal fun SeasonalChatListTitle(
     val rtl = LocalLayoutDirection.current == LayoutDirection.Rtl
     val density = LocalDensity.current
     var titleLayout by remember { mutableStateOf<TextLayoutResult?>(null) }
-    val locale = ConfigurationCompat.getLocales(LocalConfiguration.current)[0] ?: Locale.getDefault()
+    val locale = LocalLocale.current.platformLocale
     val year =
         remember(season.year, locale) {
             season.year?.let { NumberFormat.getIntegerInstance(locale).apply { isGroupingUsed = false }.format(it) }

@@ -333,6 +333,7 @@ class AttachmentUploaderMetadataTest {
     }
 
     @Test
+    @Config(sdk = [27, 28])
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     fun jpegOrientationAndGifFitInBoundedThumbnails() {
         val jpeg = temporary.newFile("rotated.jpg")

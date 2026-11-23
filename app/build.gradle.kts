@@ -539,6 +539,7 @@ dependencies {
     implementation(libs.lifecycle.service)
     implementation(libs.lifecycle.process)
     implementation(libs.core.ktx)
+    implementation(libs.exifinterface)
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)
     implementation(libs.hilt.lifecycle.viewmodel.compose)

@@ -23,10 +23,12 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertHasNoClickAction
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isDisplayed
 import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -204,7 +206,10 @@ class ComposerUploadedImageUiTest {
             compose.runOnIdle {
                 pickerOwner.activityResultRegistry.dispatchResult(launchedRequestCode, Activity.RESULT_OK, Intent().setData(Uri.fromFile(file)))
             }
-            compose.onNodeWithTag("attachment_upload").assertIsDisplayed().performClick()
+            // The fixed footer starts offscreen while the confirmation sheet opens after image preparation.
+            val confirm = compose.onNodeWithTag("attachment_upload")
+            compose.waitUntil(5_000) { confirm.isDisplayed() }
+            confirm.assertIsEnabled().performClick()
             whileTransferring()
             compose.waitUntil(5_000) {
                 compose.onAllNodes(hasTestTag("chat_composer_upload_url") and hasText(record.url)).fetchSemanticsNodes().isNotEmpty()
@@ -264,11 +269,10 @@ class ComposerUploadedImageUiTest {
             field.assertTextEquals("Look: ")
             val uploading = compose.onNodeWithText(context.getString(R.string.upload_uploading))
             upload(first) {
-                compose.waitUntil(5_000) { firstTransferStarted.isCompleted }
-                uploading.assertIsDisplayed()
+                compose.waitUntil(5_000) { firstTransferStarted.isCompleted && uploading.isDisplayed() }
                 card.assertDoesNotExist()
                 restoration.emulateSavedInstanceStateRestore()
-                uploading.assertIsDisplayed()
+                compose.waitUntil(5_000) { uploading.isDisplayed() }
                 compose.runOnIdle {
                     homeOwner.saveDraft("Edited during recreation")
                     releaseFirstTransfer.complete(Unit)

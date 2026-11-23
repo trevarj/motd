@@ -13,7 +13,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.platform.LocalContext
 import androidx.core.app.LocaleManagerCompat
-import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import io.github.trevarj.motd.BuildConfig
 import java.time.LocalDate
@@ -92,7 +91,8 @@ internal fun rememberSeasonalWordmark(): SeasonalWordmark? {
                 addAction(Intent.ACTION_CONFIGURATION_CHANGED)
                 addAction(Intent.ACTION_LOCALE_CHANGED)
             }
-        ContextCompat.registerReceiver(context, receiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED)
+        // All actions in this filter are protected system broadcasts; no export flag is needed.
+        context.registerReceiver(receiver, filter)
         wordmark = currentWordmark()
         onPauseOrDispose { context.unregisterReceiver(receiver) }
     }

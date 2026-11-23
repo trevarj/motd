@@ -58,6 +58,10 @@ class IrcChannelLinkTest {
         assertEquals(link.copy(channel = "##Room"), parseIrcChannelLink("ircs://irc.example.test/##Room"))
         assertEquals(link.copy(tls = false, port = 6667), parseIrcChannelLink("irc://irc.example.test/Room"))
         assertEquals(
+            IrcChannelLink("host", 6667, false, "#Room:key"),
+            parseIrcChannelLink("irc://host/Room:key"),
+        )
+        assertEquals(
             IrcChannelLink("2001:db8::1", 7000, true, "#A+B%23"),
             parseIrcChannelLink("ircs://[2001:DB8::1]:7000/A+B%2523"),
         )
@@ -85,7 +89,9 @@ class IrcChannelLinkTest {
                 "irc://host/Room%E2%80%AE",
                 "irc://host/Room%FF",
                 "irc://host/Room%ZZ",
-                "irc://host/Room:key",
+                "irc://host/:key",
+                "irc://host/Room:",
+                "irc://host/Room:key:other",
                 "irc://host/Room,key",
                 "irc://nick:pass@host/Room",
                 "irc://nick%40host/Room",

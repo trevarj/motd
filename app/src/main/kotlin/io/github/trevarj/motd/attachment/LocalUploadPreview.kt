@@ -6,12 +6,14 @@ import android.graphics.Color
 import android.graphics.ImageDecoder
 import android.graphics.Matrix
 import android.graphics.pdf.PdfRenderer
-import android.media.ExifInterface
 import android.media.MediaMetadataRetriever
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Base64
 import androidx.annotation.RequiresApi
+import androidx.core.graphics.createBitmap
+import androidx.core.graphics.scale
+import androidx.exifinterface.media.ExifInterface
 import kotlinx.coroutines.CancellationException
 import java.io.ByteArrayOutputStream
 import java.io.DataInputStream
@@ -196,7 +198,7 @@ private fun pdfThumbnail(file: File): String? {
             if (renderer.pageCount == 0) return null
             renderer.openPage(0).use { page ->
                 val (width, height) = fitDimensions(page.width, page.height, UPLOAD_PREVIEW_THUMBNAIL_EDGE)
-                Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888).useBitmap {
+                createBitmap(width, height).useBitmap {
                     eraseColor(Color.WHITE)
                     page.render(this, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
                     encodeThumbnail()
@@ -223,7 +225,7 @@ private fun Bitmap.encodeThumbnail(): String? {
     var edge = UPLOAD_PREVIEW_THUMBNAIL_EDGE
     while (edge >= UPLOAD_PREVIEW_THUMBNAIL_EDGE / 2) {
         val (width, height) = fitDimensions(this.width, this.height, edge)
-        val scaled = if (width == this.width && height == this.height) this else Bitmap.createScaledBitmap(this, width, height, true)
+        val scaled = if (width == this.width && height == this.height) this else scale(width, height)
         try {
             if (!scaled.compress(Bitmap.CompressFormat.WEBP, 75, bytes)) return null
             if (bytes.size() <= MAX_UPLOAD_PREVIEW_BASE64_LENGTH / 4 * 3) return Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP)

@@ -91,6 +91,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalResources
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -358,6 +359,7 @@ fun AttachmentSheets(
     }
 
     val preparing = flow as? AttachmentFlow.Prepare
+    val latestResources by rememberUpdatedState(LocalResources.current)
     LaunchedEffect(preparing) {
         preparing ?: return@LaunchedEffect
         try {
@@ -381,7 +383,7 @@ fun AttachmentSheets(
             val limitLabel = formatBytes(oversized.limitBytes)
             val exact = sizeLabel == limitLabel
             viewModel.fail(
-                context.getString(
+                latestResources.getString(
                     R.string.upload_over_size_limit,
                     if (exact) "$size B" else sizeLabel,
                     if (exact) "${oversized.limitBytes} B" else limitLabel,
