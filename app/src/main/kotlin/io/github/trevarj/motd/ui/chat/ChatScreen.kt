@@ -334,6 +334,7 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
@@ -623,6 +624,7 @@ fun ChatScreen(
     val localReadAnchor by viewModel.localReadAnchor.collectAsStateWithLifecycle()
     val rawNewestAnchor by viewModel.rawNewestAnchor.collectAsStateWithLifecycle()
     val composerDraft by viewModel.composerDraft.collectAsStateWithLifecycle()
+    val composerUpload by viewModel.composerUpload.collectAsStateWithLifecycle()
     val outgoingFlight by viewModel.outgoingFlight.collectAsStateWithLifecycle()
     LaunchedEffect(composerDraft.revision, state.buffer?.id, aiTextState) {
         val source = aiTextState.source() as? AiTextSource.Composer
@@ -823,6 +825,8 @@ fun ChatScreen(
         attachmentSheetRequests = viewModel.attachmentSheetRequests,
         attachmentViewModel = hiltViewModel(),
         composerDraft = composerDraft,
+        composerUpload = composerUpload,
+        onBeginComposerUpload = viewModel::beginComposerUpload,
         scheduledComposer = scheduledComposer,
         aiTextState = aiTextState,
         aiTextEnabled = AiFeature.TEXT_TOOLS in aiLabsState.enabledFeatures,
@@ -1243,7 +1247,7 @@ internal fun DccSendReviewDialog(
     )
 }
 
-private fun String.containsDraftUploadUrl(url: String): Boolean {
+internal fun String.containsDraftUploadUrl(url: String): Boolean {
     val start = indexOf(url)
     if (start < 0) return false
     val end = start + url.length
@@ -1408,6 +1412,8 @@ internal fun ChatContent(
     attachmentSheetRequests: Flow<Unit> = emptyFlow(),
     attachmentViewModel: AttachmentViewModel? = null,
     composerDraft: ComposerDraftState = ComposerDraftState(),
+    composerUpload: ComposerUploadCompletion? = null,
+    onBeginComposerUpload: ((Long, String?) -> ComposerUploadAttempt)? = null,
     aiTextState: AiTextUiState = AiTextUiState.Closed,
     aiTextEnabled: Boolean = false,
     onAiComposer: () -> Unit = {},
@@ -1776,11 +1782,6 @@ internal fun ChatContent(
             mutableStateOf(TextFieldValue(""))
         }
         val latestAttachmentRoom by rememberUpdatedState(traceBufferId)
-        val uploadedImage =
-            key(traceBufferId) {
-                // Save only the receipt; the preview always comes from live upload history.
-                rememberSaveable { mutableStateOf<Pair<String, Long>?>(null) }
-            }
         var pendingEbooksRequestRevision by remember(traceBufferId) { mutableStateOf<Long?>(null) }
         var ebooksHelpOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
         var ebooksResults by remember(eligibleEbooksRoomId) { mutableStateOf<List<EbooksResult>?>(null) }
@@ -1905,6 +1906,17 @@ internal fun ChatContent(
         var uploadCurrentDraftDirectly by rememberSaveable { mutableStateOf(false) }
         // A shared or pasted file opens the same upload confirmation without changing the draft.
         var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
+        val activeComposerUpload = composerUpload?.takeIf { it.roomId == traceBufferId }
+        var pendingComposerUploadId by key(traceBufferId) { rememberSaveable { mutableStateOf<Long?>(null) } }
+        LaunchedEffect(activeComposerUpload?.id, pendingComposerUploadId) {
+            // Completion may close a sheet whose original UI callback was lost on rotation.
+            if (activeComposerUpload != null && pendingComposerUploadId == activeComposerUpload.id) {
+                pendingComposerUploadId = null
+                attachmentSheetOpen = false
+                uploadCurrentDraftDirectly = false
+                sharedFile = null
+            }
+        }
         LaunchedEffect(traceBufferId) {
             if (traceBufferId == null) return@LaunchedEffect
             consumeSharedFile()?.let { file ->
@@ -4521,8 +4533,7 @@ internal fun ChatContent(
                                             )
                                         }
                                     }
-                                    uploadedImage.value?.let { receipt ->
-                                        val (url, uploadedAt) = receipt
+                                    activeComposerUpload?.imageReceipt?.let { (url, uploadedAt) ->
                                         val containsUpload =
                                             remember(composerText.text, url) {
                                                 composerText.text.containsDraftUploadUrl(url)
@@ -4532,14 +4543,6 @@ internal fun ChatContent(
                                             recent
                                                 .firstOrNull { it.url == url && it.uploadedAt == uploadedAt }
                                                 ?.let { UploadedImageDraftCard(it) }
-                                        } else if (!containsUpload) {
-                                            LaunchedEffect(receipt, composerDraft.hydrated, composerDraft.text) {
-                                                // A send only blanks the field optimistically. Keep the receipt
-                                                // if the draft can still be restored after a rejected send.
-                                                if (composerDraft.hydrated && !composerDraft.text.containsDraftUploadUrl(url)) {
-                                                    uploadedImage.value = null
-                                                }
-                                            }
                                         }
                                     }
                                     Composer(
@@ -5405,14 +5408,24 @@ internal fun ChatContent(
                 },
                 onDirectFile = onSendDccFile,
                 viewModel = attachmentViewModel ?: hiltViewModel(),
-                onUploaded = { record ->
-                    if (
-                        traceBufferId != null && traceBufferId == latestAttachmentRoom &&
-                        record.mimeType?.startsWith("image/", ignoreCase = true) == true
-                    ) {
-                        uploadedImage.value = record.url to record.uploadedAt
-                    }
-                },
+                prepareUploadCompletion =
+                    if (traceBufferId != null && onBeginComposerUpload != null) {
+                        { replacedDraft ->
+                            val attempt = onBeginComposerUpload(traceBufferId, replacedDraft)
+                            pendingComposerUploadId = attempt.id
+                            val complete: (UploadRecord) -> Unit = { record ->
+                                val editor = if (scope.isActive && traceBufferId == latestAttachmentRoom) composerText else null
+                                val updated = attempt.complete(record, editor)
+                                if (editor != null && pendingComposerUploadId == attempt.id) {
+                                    if (updated != null) composerText = updated
+                                    pendingComposerUploadId = null
+                                }
+                            }
+                            complete
+                        }
+                    } else {
+                        null
+                    },
             )
         }
         if (longDraftPrompt) {

@@ -217,6 +217,7 @@ fun AttachmentSheets(
     onDirectFile: (Uri) -> Unit = {},
     viewModel: AttachmentViewModel = hiltViewModel(),
     onUploaded: ((UploadRecord) -> Unit)? = null,
+    prepareUploadCompletion: ((replacedDraft: String?) -> (UploadRecord) -> Unit)? = null,
 ) {
     val context = LocalContext.current
     val cameraStartError = stringResource(R.string.upload_camera_failed)
@@ -353,13 +354,20 @@ fun AttachmentSheets(
             return
         }
         flow = AttachmentFlow.Idle
+        val completeUpload = prepareUploadCompletion?.invoke((request.source as? AttachmentSource.Text)?.text.takeIf { request.replaceDraft })
         viewModel.upload(
             request.source,
             config.copy(sizeLimitBytes = limit),
             uploadContext.copy(allowOriginalMetadata = allowOriginalMetadata),
             replaceDraft = request.replaceDraft,
         ) { record ->
-            if (request.replaceDraft) onReplaceDraft(record.url) else onInsertUrl(record.url)
+            if (completeUpload != null) {
+                completeUpload(record)
+            } else if (request.replaceDraft) {
+                onReplaceDraft(record.url)
+            } else {
+                onInsertUrl(record.url)
+            }
             onUploaded?.invoke(record)
             if (request.source.deleteCameraCapture()) capturePath = null
             onDismiss()

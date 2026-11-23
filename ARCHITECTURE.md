@@ -679,8 +679,8 @@ flowchart TD
   keeps the local full-image review separate from transport. Backup-excluded Recent uploads
   saves the hosting receipt before generating optional, bounded local previews: image/video/PDF
   thumbnails, text excerpts, and media duration. History retention owns those previews.
-  The most recently uploaded image can appear beside its ordinary, editable draft URL;
-  the preview itself never enters the IRC message.
+  A hosted image finishing during rotation restores its card beside the exact URL in the
+  same chat draft. The preview itself never enters the IRC message.
 - Network-owned images, avatars, icons, video, and image Save use `NetworkMediaHttp`
   with `routeForNetwork`, native OkHttp/Coil caching scoped by network, and Media3's
   OkHttp adapter for streaming/range requests. The route lease lasts through

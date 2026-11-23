@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.net.Uri
+import androidx.compose.ui.text.TextRange
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -11,6 +13,7 @@ import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.isValidAiText
 import io.github.trevarj.motd.attachment.MetadataNotSupportedException
+import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.audio.AudioAttachment
 import io.github.trevarj.motd.audio.AudioMetadata
 import io.github.trevarj.motd.audio.AudioMetadataRepository
@@ -103,6 +106,7 @@ import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.ReactionChip
 import io.github.trevarj.motd.ui.components.ReplyPreviewData
 import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentation
+import io.github.trevarj.motd.ui.components.insertAtCursor
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.settings.FoolPreferencesEditor
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -196,6 +200,17 @@ data class ComposerDraftState(
     val text: String = "",
     val hydrated: Boolean = false,
     val revision: Long = 0,
+)
+
+internal data class ComposerUploadCompletion(
+    val roomId: Long,
+    val id: Long,
+    val imageReceipt: Pair<String, Long>?,
+)
+
+internal class ComposerUploadAttempt(
+    val id: Long,
+    val complete: (UploadRecord, TextFieldValue?) -> TextFieldValue?,
 )
 
 private data class DraftSnapshot(
@@ -1005,6 +1020,9 @@ class ChatViewModel
         private val draftHydrated = CompletableDeferred<Unit>()
         private val _composerDraft = MutableStateFlow(ComposerDraftState())
         val composerDraft: StateFlow<ComposerDraftState> = _composerDraft.asStateFlow()
+        private val _composerUpload = MutableStateFlow<ComposerUploadCompletion?>(null)
+        internal val composerUpload: StateFlow<ComposerUploadCompletion?> = _composerUpload.asStateFlow()
+        private var nextComposerUploadId = 0L
         private var currentDraftText = ""
         private var currentReplyToEventId: Long? = null
         private var nextDraftRevision = 0L
@@ -3238,6 +3256,49 @@ class ChatViewModel
                 .filter { it == operationalBufferId.value && attachmentRequestStore.consume(it) }
                 .map { }
 
+        internal fun beginComposerUpload(
+            roomId: Long,
+            replacedDraft: String?,
+        ): ComposerUploadAttempt {
+            val id = synchronized(draftStateLock) { ++nextComposerUploadId }
+            return ComposerUploadAttempt(id) { record, editor ->
+                synchronized(draftStateLock) {
+                    val previous = _composerUpload.value
+                    if (roomId != operationalBufferId.value || roomId != buffer.value?.id ||
+                        (previous != null && id <= previous.id)
+                    ) {
+                        return@synchronized null
+                    }
+                    val updated =
+                        when {
+                            replacedDraft != null && replacedDraft == currentDraftText -> {
+                                TextFieldValue(record.url, TextRange(record.url.length))
+                            }
+
+                            replacedDraft == null && editor != null && editor.text == currentDraftText -> {
+                                insertAtCursor(editor, record.url)
+                            }
+
+                            else -> {
+                                // Use the durable text when the original editor is gone or out of date.
+                                appendPrefill(TextFieldValue(currentDraftText), record.url)
+                            }
+                        }
+                    val imageReceipt =
+                        if (record.mimeType?.startsWith("image/", ignoreCase = true) == true) {
+                            record.url to record.uploadedAt
+                        } else {
+                            previous?.takeIf { it.roomId == roomId }?.imageReceipt
+                        }
+                    draftTextEdited = true
+                    currentDraftText = updated.text
+                    _composerUpload.value = ComposerUploadCompletion(roomId, id, imageReceipt)
+                    draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
+                    updated
+                }
+            }
+        }
+
         fun beginAiDraftTransform(): AiComposerDraftSnapshot? =
             synchronized(draftStateLock) {
                 if (!_composerDraft.value.hydrated || plainIrcText(currentDraftText).isBlank() || inFlightDraftSubmissions.isNotEmpty() || draftWriter?.isActive != true) return@synchronized null
@@ -3401,6 +3462,12 @@ class ChatViewModel
         private fun advanceDraftRevisionLocked(hydrated: Boolean = _composerDraft.value.hydrated): DraftSnapshot {
             activeAiDraft = null
             val revision = ++nextDraftRevision
+            _composerUpload.value?.let { completion ->
+                val url = completion.imageReceipt?.first
+                if (url != null && (completion.roomId != operationalBufferId.value || !currentDraftText.containsDraftUploadUrl(url))) {
+                    _composerUpload.value = completion.copy(imageReceipt = null)
+                }
+            }
             _composerDraft.value = ComposerDraftState(currentDraftText, hydrated, revision)
             return DraftSnapshot(
                 roomId = operationalBufferId.value,
