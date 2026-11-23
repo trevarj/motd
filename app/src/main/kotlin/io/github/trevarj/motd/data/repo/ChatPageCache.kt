@@ -149,6 +149,7 @@ class ChatPageCache
                             existing.leaseId++
                             existing.active = true
                             existing.remoteAllowed = true
+                            existing.linkOwnsOlderPaging = false
                             existing.viewport.value = viewport
                             attached += existing
                             reused = true
@@ -225,6 +226,7 @@ class ChatPageCache
                     entries[key] = existing
                     existing.active = true
                     existing.remoteAllowed = false
+                    existing.linkOwnsOlderPaging = false
                     existing.leaseId++
                     attached += existing
                     Lease(existing, existing.leaseId, bufferId, retained = true)
@@ -345,6 +347,14 @@ class ChatPageCache
                 if (changed) entry.wakeLoads()
             }
 
+            internal fun setLinkOwnsOlderPaging(ownsPaging: Boolean) {
+                synchronized(lock) {
+                    if (!isActive || entry.linkOwnsOlderPaging == ownsPaging) return
+                    entry.linkOwnsOlderPaging = ownsPaging
+                }
+                entry.wakeLoads()
+            }
+
             /** A materialized native window may outlive a pending refresh; this is not admission. */
             fun hasPublishedWindow(items: ItemSnapshotList<MessageEntity>): Boolean = synchronized(lock) { isActive && entry.snapshot === items && entry.presentedVersion != null }
 
@@ -413,6 +423,7 @@ class ChatPageCache
             private var pendingRecheck: PagingSource<Int, MessageEntity>? = null
             private var remoteLoading = 0
             internal var remoteAllowed = true
+            internal var linkOwnsOlderPaging = false
             private var presentedIdle = false
             private var refreshFailed = false
             private var hasPresented = false
@@ -614,15 +625,16 @@ class ChatPageCache
                 loadWake.update { it + 1 }
             }
 
-            internal suspend fun beginLoad(foregroundRequired: Boolean = false) {
+            internal suspend fun beginLoad(remoteLoad: LoadType? = null) {
                 fun allowed() =
-                    active && !retired && (!foregroundRequired || remoteAllowed) &&
-                        (onScreen.value || (!foregroundRequired && canContinueLocalRefresh))
+                    active && !retired && (remoteLoad == null || remoteAllowed) &&
+                        (onScreen.value || (remoteLoad == null && canContinueLocalRefresh)) &&
+                        (remoteLoad != LoadType.APPEND || !linkOwnsOlderPaging)
                 while (true) {
                     synchronized(lock) {
                         if (allowed()) {
                             loading++
-                            if (foregroundRequired) remoteLoading++
+                            if (remoteLoad != null) remoteLoading++
                             return
                         }
                     }
@@ -630,11 +642,11 @@ class ChatPageCache
                 }
             }
 
-            internal fun endLoad(foregroundRequired: Boolean = false) {
+            internal fun endLoad(remoteLoad: LoadType? = null) {
                 val recheck =
                     synchronized(lock) {
                         loading--
-                        if (foregroundRequired) remoteLoading--
+                        if (remoteLoad != null) remoteLoading--
                         if (loading == 0) pendingRecheck.also { pendingRecheck = null } else null
                     }
                 recheck?.let(::recheckVersion)
@@ -849,11 +861,14 @@ class ChatPageCache
                         loadType: LoadType,
                         state: PagingState<Int, MessageEntity>,
                     ): MediatorResult {
-                        beginLoad(foregroundRequired = true)
+                        // A Room refresh can reach the oldest local row without a reader hint.
+                        // Defer the queued APPEND until the reader takes over; neither a fake end
+                        // nor a fake success correctly re-arms Paging's boundary.
+                        beginLoad(remoteLoad = loadType)
                         try {
                             return delegate.load(loadType, state)
                         } finally {
-                            endLoad(foregroundRequired = true)
+                            endLoad(remoteLoad = loadType)
                         }
                     }
                 }

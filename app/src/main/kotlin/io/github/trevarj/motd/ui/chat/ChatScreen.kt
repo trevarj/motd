@@ -155,6 +155,9 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.layout
@@ -1624,6 +1627,35 @@ internal fun ChatContent(
             presentationContextCompatible && (presentationLease == null || presentedVisibilitySpec == visibleSpec)
         val currentPresentationCompatible by rememberUpdatedState(presentationCompatible)
         val payloadAllowed = payloadAdmitted && presentationLease?.isActive != false && presentationCompatible
+        val positioningRetainedLink by rememberUpdatedState(jumpTarget?.retainedLinkRoomId != null)
+        // Placement can clear the target while its Room generation still owns the viewport.
+        // Its queued boundary is not reader demand until a scroll or another explicit history action.
+        var linkOwnsOlderPaging by remember(presentationLease) { mutableStateOf(false) }
+
+        fun setLinkPagingOwnership(ownedByLink: Boolean) {
+            presentationLease?.setLinkOwnsOlderPaging(ownedByLink)
+            linkOwnsOlderPaging = ownedByLink
+        }
+
+        val readerScrollInput =
+            remember(presentationLease) {
+                object : NestedScrollConnection {
+                    override fun onPreScroll(
+                        available: Offset,
+                        source: NestedScrollSource,
+                    ): Offset {
+                        // Reader input can hit the oldest edge without moving the list, or its
+                        // entire drag can occur before the scroll-state collector resumes.
+                        if (source == NestedScrollSource.UserInput && available.y != 0f &&
+                            linkOwnsOlderPaging && !positioningRetainedLink
+                        ) {
+                            setLinkPagingOwnership(false)
+                        }
+                        return Offset.Zero
+                    }
+                }
+            }
+        val readerOwnsOlderPaging = !positioningRetainedLink && !linkOwnsOlderPaging
         // Scroll-driven paging: the footer reflects the Paging APPEND state at the older end directly.
         val olderHistoryLoad = items.loadState.append
         val historyUiState =
@@ -1631,7 +1663,13 @@ internal fun ChatContent(
                 bufferType = state.buffer?.type,
                 connectionState = state.connState,
                 availability = historyAvailability,
-                append = olderHistoryLoad,
+                append =
+                    if (!readerOwnsOlderPaging && olderHistoryLoad is LoadState.Loading) {
+                        // The cached generation may have queued APPEND without any wire request.
+                        LoadState.NotLoading(endOfPaginationReached = false)
+                    } else {
+                        olderHistoryLoad
+                    },
                 historyComplete = state.buffer?.historyComplete == true,
             )
         val unreadEntryLabel =
@@ -2553,8 +2591,8 @@ internal fun ChatContent(
                                 ) {
                                     listState.requestScrollToItem(index, target.offset)
                                 }
-                                // This is the only item access: it sends Paging a load hint for the exact target.
-                                items[index]
+                                // Retained links wait for their native Room refresh instead of hinting Paging.
+                                if (!retainedLinkJump) items[index]
                                 true
                             } catch (_: IndexOutOfBoundsException) {
                                 // A new Paging generation replaced the snapshot between the bound and access.
@@ -2749,6 +2787,7 @@ internal fun ChatContent(
         // Deep jumps request one resolved placeholder, then validate both of its exact identities.
         LaunchedEffect(jumpTarget, items, presentationLease, presentationRevision, visibleSpec) {
             val j = jumpTarget ?: return@LaunchedEffect
+            setLinkPagingOwnership(j.retainedLinkRoomId != null)
             if (j.retainedLinkRoomId != null && presentationLease != null) {
                 if (!retainedLinkPrepared && currentPresentedVisibilitySpec == j.requiredVisibilitySpec) {
                     val eventId = checkNotNull(j.expectedEventId)
@@ -3177,7 +3216,7 @@ internal fun ChatContent(
         // is already running. Seam POSITIONS do move as a load recedes them, and recomputing on that
         // edge is the point — a seam a page pushed past the prefetch reach must stop being reported.
         @OptIn(FlowPreview::class)
-        LaunchedEffect(items, listState, timelineSeams.seams) {
+        LaunchedEffect(items, listState, timelineSeams.seams, readerOwnsOlderPaging) {
             // Report the viewport's demand, and journal every report — including the two that say
             // "nothing". This effect is the ONLY producer of the rule's demand signal and it is
             // edge-triggered, so from the ViewModel's side an empty answer and never answering at all
@@ -3207,6 +3246,10 @@ internal fun ChatContent(
                         "settled" to initialPositionSettled,
                     )
                 }
+            }
+            if (!readerOwnsOlderPaging) {
+                reportDemand("retained_link", firstIndex = -1, lastIndex = -1, anchor = null, gapIds = emptySet())
+                return@LaunchedEffect
             }
             // Rooms without a single stored gap are the overwhelming majority, and they have nothing to
             // demand. Return before observing `layoutInfo` at all rather than deriving a reach that can
@@ -3496,7 +3539,7 @@ internal fun ChatContent(
 
         // Record only actual scroll-state/programmatic edges. An index/offset change caused by a Paging
         // prepend does not emit here, so it cannot be mistaken for the user leaving the bottom.
-        LaunchedEffect(listState, initialPositionSettled) {
+        LaunchedEffect(listState, initialPositionSettled, presentationLease) {
             if (!initialPositionSettled) return@LaunchedEffect
             snapshotFlow { listState.isScrollInProgress to (programmaticScrolls > 0) }
                 .distinctUntilChanged()
@@ -3506,6 +3549,7 @@ internal fun ChatContent(
                     // scrolls (entry placement, the newest FAB, a send) are excluded here; the actions
                     // that issue them retire the correction themselves.
                     if (scrolling && !programmatic) {
+                        if (linkOwnsOlderPaging && !positioningRetainedLink) setLinkPagingOwnership(false)
                         onTimelineInteraction()
                         onViewportRefreshAnchor(null)
                     }
@@ -4812,8 +4856,12 @@ internal fun ChatContent(
                                                     Modifier
                                                         .onGloballyPositioned {
                                                             if (presentationLease?.ownsSlot() == true) measuredSnapshot?.value = layoutSnapshot
-                                                        }.then(entryLayoutModifier),
-                                                pagingHintsEnabled = initialPositionSettled && payloadAllowed && entryPreparationReady,
+                                                        }.then(entryLayoutModifier)
+                                                        .nestedScroll(readerScrollInput),
+                                                pagingHintsEnabled =
+                                                    initialPositionSettled && payloadAllowed && entryPreparationReady && !positioningRetainedLink,
+                                                readerOwnsOlderPaging = readerOwnsOlderPaging,
+                                                onHistoryRetry = { setLinkPagingOwnership(false) },
                                                 temporaryFoolVisibilityMotion = temporaryFoolMotion,
                                                 hiddenFoolVisibility = hiddenFoolVisibility,
                                                 preserveOutgoingHiddenBodies = preserveOutgoingHiddenBodies,

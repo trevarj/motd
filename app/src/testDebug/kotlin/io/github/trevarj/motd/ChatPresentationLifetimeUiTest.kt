@@ -35,6 +35,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.test.swipeDown
 import androidx.datastore.preferences.core.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -81,7 +82,15 @@ import io.github.trevarj.motd.data.repo.MessageRepository
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
 import io.github.trevarj.motd.data.repo.ViewportRefreshAnchor
 import io.github.trevarj.motd.data.repo.entryAnchorPagingKey
+import io.github.trevarj.motd.data.sync.ChatHistoryRemoteMediator
+import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.irc.client.ChatHistoryRequest
+import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.HistoryAvailability
+import io.github.trevarj.motd.irc.client.HistoryReferenceType
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.service.AppVisibility
 import io.github.trevarj.motd.ui.chat.CHAT_ENTRY_VEIL_TAG
@@ -126,6 +135,7 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.util.concurrent.ConcurrentLinkedQueue
 import kotlin.coroutines.CoroutineContext
 
 @OptIn(ExperimentalPagingApi::class)
@@ -651,6 +661,60 @@ class ChatPresentationLifetimeUiTest {
         }
 
     @Test
+    fun retainedLinkAtLocalBoundaryDefersOlderHistoryUntilReaderScrolls() =
+        withFixture(recordOlderHistory = true) { fixture ->
+            val room = fixture.rooms.first().id
+            fixture.open(room)
+            val visit = fixture.awaitReady()
+            val items = visit.presentation.items
+            val target = fixture.target(room, index = 889)
+            val msgid = checkNotNull(target.expectedMsgid)
+            assertEquals(null, items.peek(target.index))
+
+            compose.runOnIdle {
+                fixture.linkJump =
+                    target.copy(
+                        fromSavedPosition = false,
+                        requestToken = 1L,
+                        highlightEventId = target.expectedEventId,
+                        retainedLinkRoomId = room,
+                        retainedLinkBody = "${body(msgid)}\nhttps://example.test/source",
+                        requiredVisibilitySpec = MessageVisibilitySpec(),
+                    )
+            }
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                fixture.handledJumpCount == 1 &&
+                    (items.loadState.mediator?.append is LoadState.Loading || fixture.historyCommands.isNotEmpty())
+            }
+            compose.onNodeWithTag("chat_message_$msgid", useUnmergedTree = true).assertIsDisplayed()
+            assertTrue("the native local boundary must not write a history request", fixture.historyCommands.isEmpty())
+
+            compose.onNodeWithTag("chat_timeline").performTouchInput {
+                // Start on the scrollable rows; the timeline also occupies the overlaid header.
+                swipeDown(startY = height * 0.30f, endY = height * 0.65f)
+            }
+            try {
+                compose.waitUntil(10_000) {
+                    compose.waitForIdle()
+                    fixture.historyCommands.isNotEmpty()
+                }
+            } catch (failure: Throwable) {
+                throw AssertionError(
+                    "The reader swipe did not request older history: " +
+                        "linkOwnsPaging=${visit.lease.entry.linkOwnsOlderPaging}, " +
+                        "index=${visit.presentation.listState.firstVisibleItemIndex}, loads=${items.loadState}",
+                    failure,
+                )
+            }
+            compose.waitUntil("the real mediator completed the older request", 10_000) {
+                compose.waitForIdle()
+                (items.loadState.mediator?.append as? LoadState.NotLoading)?.endOfPaginationReached == true
+            }
+            assertEquals(listOf(ChatHistoryRequest.Subcommand.BEFORE), fixture.historyCommands.toList())
+        }
+
+    @Test
     fun retainedRowsRemainInaccessibleUntilFreshVisitTargetIsReady() =
         withFixture { fixture ->
             val room = fixture.rooms.first().id
@@ -913,9 +977,10 @@ class ChatPresentationLifetimeUiTest {
     private fun withFixture(
         temporaryFools: Boolean = false,
         temporaryFoolMode: FoolsMode = FoolsMode.HIDE,
+        recordOlderHistory: Boolean = false,
         block: (Fixture) -> Unit,
     ) {
-        val fixture = Fixture(temporaryFools, temporaryFoolMode)
+        val fixture = Fixture(temporaryFools, temporaryFoolMode, recordOlderHistory)
         var bodyFailure: Throwable? = null
         try {
             fixture.install()
@@ -1038,6 +1103,7 @@ class ChatPresentationLifetimeUiTest {
     private inner class Fixture(
         private val temporaryFools: Boolean,
         private val temporaryFoolMode: FoolsMode,
+        private val recordOlderHistory: Boolean,
     ) {
         val db = inMemoryDb(directCommit = true)
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -1048,6 +1114,8 @@ class ChatPresentationLifetimeUiTest {
         private var openingVisit = 0
         private lateinit var nav: NavHostController
         var holdTarget by mutableStateOf(false)
+        var linkJump by mutableStateOf<ChatPositionTarget?>(null)
+        val historyCommands = ConcurrentLinkedQueue<ChatHistoryRequest.Subcommand>()
         var timelineSeams by mutableStateOf(TimelineSeamState())
         private val cache: ChatPageCache
         private val scrollPositions = ChatScrollPositionStore()
@@ -1089,7 +1157,8 @@ class ChatPresentationLifetimeUiTest {
                             (if (temporaryFools) 881..900 else 1..900).map { index ->
                                 message(
                                     roomId,
-                                    body("retained-$ordinal-$index"),
+                                    body("retained-$ordinal-$index") +
+                                        if (recordOlderHistory && ordinal == 0 && index == 11) "\nhttps://example.test/source" else "",
                                     serverTime = index.toLong(),
                                     msgid = "retained-$ordinal-$index",
                                     dedupKey = "retained-$ordinal-$index",
@@ -1111,13 +1180,38 @@ class ChatPresentationLifetimeUiTest {
                     }
                 }
             }
+            val historySource =
+                if (recordOlderHistory) {
+                    object : ChatHistoryRemoteMediator.HistorySource {
+                        override suspend fun availability() = HistoryAvailability.Ready(setOf(HistoryReferenceType.MSGID), 50)
+
+                        override suspend fun chathistory(req: ChatHistoryRequest): ChatHistoryResponse {
+                            historyCommands.add(req.subcommand)
+                            return ChatHistoryResponse.Messages(emptyList(), oldest = null, newest = null, endOfHistory = true)
+                        }
+                    }
+                } else {
+                    null
+                }
+            val processor = historySource?.let { EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop) }
             val repository =
                 MessageRepositoryImpl(
                     db.bufferDao(),
                     db.networkIdentityDao(),
                     db,
                     db.reactionDao(),
-                    ChatHistoryMediatorFactory { _, _, _ ->
+                    ChatHistoryMediatorFactory { roomId, spec, rules ->
+                        if (historySource != null && processor != null) {
+                            return@ChatHistoryMediatorFactory ChatHistoryRemoteMediator(
+                                roomId,
+                                db.bufferDao(),
+                                db.messageDao(),
+                                processor,
+                                historySource,
+                                visibility = spec,
+                                identityRules = rules,
+                            )
+                        }
                         object : RemoteMediator<Int, MessageEntity>() {
                             override suspend fun initialize() = InitializeAction.SKIP_INITIAL_REFRESH
 
@@ -1326,6 +1420,11 @@ class ChatPresentationLifetimeUiTest {
                 showImages = false,
                 showLinkPreviews = false,
                 chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
+                jumpTarget = linkJump,
+                onJumpHandled = {
+                    handledJumpCount++
+                    linkJump = null
+                },
                 initialTarget = pending,
                 entryState = entryState,
                 timelineSeams = timelineSeams,

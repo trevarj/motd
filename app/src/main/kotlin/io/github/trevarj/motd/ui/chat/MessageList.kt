@@ -463,6 +463,7 @@ fun MessageList(
     highlightEventId: Long? = null,
     // Entry's exact target owns paging demand until it is positioned.
     pagingHintsEnabled: Boolean = true,
+    readerOwnsOlderPaging: Boolean = true,
     temporaryFoolVisibilityMotion: Boolean = false,
     hiddenFoolVisibility: Transition<Boolean>? = null,
     preserveOutgoingHiddenBodies: Boolean = false,
@@ -988,7 +989,8 @@ fun MessageList(
             // At the composed tail, re-arm that exhausted generation once both loaders are idle.
             // Our cached REFRESH does not fetch from the network; it releases the next APPEND.
             val loads = items.loadState
-            LaunchedEffect(items, loads.source, loads.mediator) {
+            LaunchedEffect(items, loads.source, loads.mediator, readerOwnsOlderPaging) {
+                if (!readerOwnsOlderPaging) return@LaunchedEffect
                 val current = items.loadState
                 val remoteAppend = current.mediator?.append
                 if (
