@@ -534,6 +534,8 @@ class ChatListViewModel
         // Scope selection survives config changes; null = unified list (default).
         private val selection = MutableStateFlow(savedStateHandle.get<Long?>(KEY_SELECTED))
 
+        internal val unreadFilter = savedStateHandle.getMutableStateFlow(KEY_UNREAD_FILTER, false)
+
         private val nickSuggestionRequest = MutableStateFlow<NickSuggestionRequest?>(null)
         val nickSuggestions: StateFlow<NickSuggestions> =
             nickSuggestionRequest
@@ -1271,6 +1273,7 @@ class ChatListViewModel
 
         private companion object {
             const val KEY_SELECTED = "selected_network"
+            const val KEY_UNREAD_FILTER = "unread_filter"
             const val NEW_CONVERSATION_JOIN_TIMEOUT_MS = 20_000L
         }
     }

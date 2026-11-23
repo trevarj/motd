@@ -229,6 +229,7 @@ import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -336,6 +337,7 @@ fun ChatListScreen(
 
     ChatListContent(
         state = state,
+        unreadFilter = viewModel.unreadFilter,
         communityInvitation = {
             if (communityAllowed && community.invitation) {
                 CommunityInvitation(
@@ -515,11 +517,12 @@ fun ChatListContent(
     onCancelNewConversationJoin: () -> Unit = {},
     onConsumeNewConversationJoin: (Long) -> Boolean = { false },
     onOpenScheduledMessages: (() -> Unit)? = null,
+    unreadFilter: MutableStateFlow<Boolean> = remember { MutableStateFlow(false) },
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
     var invitationMode by rememberSaveable { mutableStateOf(false) }
-    var unreadOnly by rememberSaveable { mutableStateOf(false) }
+    val unreadOnly by unreadFilter.collectAsStateWithLifecycle()
     val filterUnread = unreadOnly && !archiveMode && !invitationMode
     var showSheet by rememberSaveable { mutableStateOf(false) }
     val newConversationStateHolder = rememberSaveableStateHolder()
@@ -577,8 +580,8 @@ fun ChatListContent(
     var scrollToTopSignal by rememberSaveable { mutableIntStateOf(0) }
 
     fun setUnreadFilter(enabled: Boolean) {
-        if (unreadOnly == enabled) return
-        unreadOnly = enabled
+        if (unreadFilter.value == enabled) return
+        unreadFilter.value = enabled
         scrollToTopSignal++
     }
 
@@ -1248,7 +1251,7 @@ fun ChatListContent(
                                         if (folderId != effectiveFolderId) {
                                             selectedIds = emptyList()
                                             selectedFolderId = folderId
-                                            unreadOnly = false
+                                            unreadFilter.value = false
                                             scrollToTopSignal++
                                         }
                                     },
