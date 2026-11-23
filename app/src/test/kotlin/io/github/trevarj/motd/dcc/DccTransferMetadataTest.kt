@@ -25,6 +25,7 @@ import io.github.trevarj.motd.service.LocalSocksProvider
 import io.github.trevarj.motd.service.buildChildConfig
 import io.github.trevarj.motd.service.networkFingerprint
 import io.github.trevarj.motd.testing.NoopConnectionManager
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -36,6 +37,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeout
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
@@ -47,11 +49,16 @@ import org.junit.rules.TemporaryFolder
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.Implementation
+import org.robolectric.annotation.Implements
 import java.awt.image.BufferedImage
 import java.io.ByteArrayOutputStream
 import java.io.DataOutputStream
 import java.io.File
 import java.io.IOException
+import java.net.InetAddress
+import java.net.InetSocketAddress
+import java.net.Socket
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.zip.CRC32
@@ -155,6 +162,61 @@ class DccTransferMetadataTest {
                     }
                 }
                 assertTrue(fixture.stagedFiles().isEmpty())
+            }
+        }
+
+    @Test
+    @Config(shadows = [AdvertisedAddressShadow::class])
+    fun confirmedReviewSendsExactlyTheStagedFileOnceAndCleansUp() =
+        runBlocking {
+            withController { fixture ->
+                fixture.prefs.setConfig(PasteBackendConfig(stripMetadata = true))
+                val original = metadataPng()
+                fixture.controller.prepareSend(fixture.bufferId, original.toUri()).use { review ->
+                    val reviewedBytes = fixture.stagedFiles().single().readBytes()
+                    assertTrue(review.filename.matches(Regex("upload-[0-9a-f-]+\\.png")))
+                    assertEquals(reviewedBytes.size.toLong(), review.sizeBytes)
+                    fixture.assertNoOffer()
+                    assertTrue(original.delete())
+
+                    fixture.controller.sendPrepared(review)
+                    fixture.controller.sendPrepared(review)
+                    val offer = withTimeout(5_000) { fixture.transport.firstDccOffer.await() }
+                    val prefix = "PRIVMSG Peer :\u0001DCC SEND ${review.filename} 3221225994 "
+                    val match =
+                        checkNotNull(Regex("${Regex.escape(prefix)}([0-9]+) ${review.sizeBytes} ([0-9a-f]{16})\u0001").matchEntire(offer)) {
+                            "Unexpected DCC offer: $offer"
+                        }
+                    val (port, token) = match.destructured
+                    val received =
+                        withContext(Dispatchers.IO) {
+                            // The documentation-only advertised address is never dialed.
+                            Socket().use { receiver ->
+                                receiver.connect(InetSocketAddress("127.0.0.1", port.toInt()), 5_000)
+                                receiver.soTimeout = 5_000
+                                receiver.getInputStream().readBytes()
+                            }
+                        }
+                    assertArrayEquals(reviewedBytes, received)
+
+                    val transfer =
+                        withTimeout(5_000) {
+                            fixture.controller
+                                .observeAll()
+                                .first { rows -> rows.any { it.state == DccTransferState.COMPLETED || it.state == DccTransferState.FAILED } }
+                        }.single()
+                    assertEquals(transfer.error, DccTransferState.COMPLETED, transfer.state)
+                    assertEquals(review.filename, transfer.displayFilename)
+                    assertEquals(review.sizeBytes, transfer.bytesTransferred)
+                    assertEquals(port.toInt(), transfer.port)
+                    assertEquals(token, transfer.token)
+                    withTimeout(5_000) {
+                        while (fixture.stagedFiles().isNotEmpty()) {
+                            delay(1)
+                        }
+                    }
+                    assertEquals(listOf(offer), fixture.transport.sent.filter { "\u0001DCC " in it })
+                }
             }
         }
 
@@ -386,12 +448,14 @@ class DccTransferMetadataTest {
     private class RecordingTransport : IrcTransport {
         private val inbound = Channel<String>(Channel.UNLIMITED)
         val sent = ConcurrentLinkedQueue<String>()
+        val firstDccOffer = CompletableDeferred<String>()
         override val incoming = inbound.consumeAsFlow()
 
         override suspend fun connect() = Unit
 
         override suspend fun send(line: String) {
             sent += line
+            if ("\u0001DCC " in line) firstDccOffer.complete(line)
         }
 
         override suspend fun close() {
@@ -405,5 +469,11 @@ class DccTransferMetadataTest {
             inbound.send(":srv 005 me CHANTYPES=# CASEMAPPING=rfc1459 :supported")
             inbound.send(":srv 001 me :Welcome")
         }
+    }
+
+    @Implements(DccTransferControllerImpl::class, isInAndroidSdk = false)
+    class AdvertisedAddressShadow {
+        @Implementation
+        protected fun chooseAdvertisedAddress(): InetAddress = InetAddress.getByName("192.0.2.10")
     }
 }
