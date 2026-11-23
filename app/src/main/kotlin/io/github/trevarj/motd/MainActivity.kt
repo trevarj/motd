@@ -85,12 +85,17 @@ import io.github.trevarj.motd.ui.theme.SystemBarThemeHost
 import io.github.trevarj.motd.ui.theme.TimestampConfig
 import io.github.trevarj.motd.ui.theme.rememberEmojiRenderer
 import io.github.trevarj.motd.ui.theme.resolvedMode
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import java.io.IOException
 import javax.inject.Inject
 
 @AndroidEntryPoint
@@ -180,7 +185,7 @@ class MainActivity :
             setRecentsScreenshotEnabled(false)
             lifecycleScope.launch {
                 settingsRepository.hideRecentsPreviews
-                    .catch { emit(true) }
+                    .retryRecentsPreferenceReads()
                     .collect { hide -> setRecentsScreenshotEnabled(!hide) }
             }
         }
@@ -475,6 +480,15 @@ class MainActivity :
         }
     }
 }
+
+internal fun Flow<Boolean>.retryRecentsPreferenceReads(): Flow<Boolean> =
+    retryWhen { cause, _ ->
+        if (cause !is IOException) return@retryWhen false
+        emit(true)
+        delay(1_000)
+        true
+    }.catch { emit(true) }
+        .distinctUntilChanged()
 
 private fun Intent.isLauncherEntry(): Boolean = action == Intent.ACTION_MAIN && hasCategory(Intent.CATEGORY_LAUNCHER)
 
