@@ -83,8 +83,10 @@ internal fun exactChannelTarget(
     input: String,
     identityRules: IrcIdentityRules,
 ): String? =
-    input.trim().takeIf {
-        it.length > 1 && identityRules.isChannel(it) && it.isIrcParameter() && ':' !in it
+    input.trim().takeIf { target ->
+        val scope = target.indexOf(':')
+        target.length > 1 && identityRules.isChannel(target) && target.isIrcParameter() &&
+            (scope < 0 || (scope in 2..<target.lastIndex && scope == target.lastIndexOf(':')))
     }
 
 internal fun isValidChannelJoinKey(

@@ -55,6 +55,15 @@ class ChannelListModelsTest {
     }
 
     @Test
+    fun `exact join accepts a single nonempty server scope`() {
+        val rules = IrcIdentityRules.from("ascii", "#&")
+        assertEquals("#ops:*.example.net", exactChannelTarget("#ops:*.example.net", rules))
+        for (input in listOf("#:*.example.net", "#ops:", "#ops:one:two", "#ops:one,two", "#ops:one two")) {
+            assertNull(exactChannelTarget(input, rules))
+        }
+    }
+
+    @Test
     fun `phrase search stays local and network name search keeps punctuation literal`() {
         assertEquals("#Room?", networkSearchTerm("  #Room?  "))
         assertNull(networkSearchTerm("room topic"))
