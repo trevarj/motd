@@ -3359,6 +3359,19 @@ class ConnectionManagerImpl
             return accepted
         }
 
+        override suspend fun joinChannelForRejection(
+            networkId: Long,
+            expectedClient: IrcClient,
+            channel: String,
+            key: String?,
+            requestId: String,
+        ): Boolean {
+            val effectiveKey =
+                key?.takeIf { it.isNotBlank() }
+                    ?: inviteEnrollmentStore.channelKey(networkId, expectedClient.isupport.normalize(channel))
+            return clientFor(networkId) === expectedClient && expectedClient.sendJoinForRejection(channel, effectiveKey, requestId)
+        }
+
         override suspend fun redactMessage(
             bufferId: Long,
             msgid: String,

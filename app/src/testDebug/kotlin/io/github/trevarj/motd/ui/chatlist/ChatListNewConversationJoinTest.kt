@@ -226,16 +226,17 @@ class ChatListNewConversationJoinTest {
             val badKey = ChannelJoinOutcome.Rejected(1, "+LOCKED{ROOM}", "Bad key: wrong-secret", "475", ChannelJoinRejectionKind.BAD_KEY)
             fixture.model.joinChannel(1, "+Locked[Room]", null)
             runCurrent()
-            fixture.connections.channelJoinOutcomes.emit(badKey.copy(networkId = 2))
-            fixture.connections.channelJoinOutcomes.emit(badKey.copy(channel = "+unsolicited"))
+            val pending = badKey.copy(requestId = fixture.connections.lastRequestId)
+            fixture.connections.channelJoinOutcomes.emit(pending.copy(networkId = 2))
+            fixture.connections.channelJoinOutcomes.emit(pending.copy(channel = "+unsolicited"))
             runCurrent()
             assertEquals(NewConversationJoinState(joining = true), fixture.state)
-            fixture.connections.channelJoinOutcomes.emit(badKey)
+            fixture.connections.channelJoinOutcomes.emit(pending)
             runCurrent()
             fixture.assertFailure(R.string.channel_list_join_bad_key, needsKey = true)
 
-            fixture.connections.onWrite = {
-                fixture.connections.channelJoinOutcomes.emit(badKey.copy(code = "474", kind = ChannelJoinRejectionKind.OTHER))
+            fixture.connections.onWrite = { requestId ->
+                fixture.connections.channelJoinOutcomes.emit(badKey.copy(code = "474", kind = ChannelJoinRejectionKind.OTHER, requestId = requestId))
                 awaitCancellation()
             }
             fixture.model.joinChannel(1, "+Locked[Room]", "wrong-secret")
@@ -247,6 +248,36 @@ class ChatListNewConversationJoinTest {
             fixture.model.joinChannel(1, "+Locked[Room]", "other-key")
             runCurrent()
             fixture.assertFailure(R.string.channel_list_join_not_sent, needsKey = true)
+        }
+
+    @Test
+    fun cancelledSameChannelRejectionDoesNotWinAgainstTheCurrentRetry() =
+        runTest {
+            val fixture = Fixture(this)
+            fixture.model.joinChannel(1, "+room", "old-key")
+            runCurrent()
+            val stale =
+                ChannelJoinOutcome.Rejected(
+                    1,
+                    "+room",
+                    "Old bad key",
+                    "475",
+                    ChannelJoinRejectionKind.BAD_KEY,
+                    fixture.connections.lastRequestId,
+                )
+            fixture.model.cancelNewConversationJoin()
+            fixture.model.joinChannel(1, "+ROOM", "new-key")
+            runCurrent()
+            val currentId = fixture.connections.lastRequestId
+            assertTrue(currentId != stale.requestId)
+            fixture.connections.channelJoinOutcomes.emit(stale.copy(requestId = null))
+            fixture.connections.channelJoinOutcomes.emit(stale)
+            runCurrent()
+            assertEquals(NewConversationJoinState(joining = true), fixture.state)
+
+            fixture.connections.channelJoinOutcomes.emit(stale.copy(requestId = currentId))
+            runCurrent()
+            fixture.assertFailure(R.string.channel_list_join_bad_key, needsKey = true)
         }
 
     @Test
@@ -479,7 +510,8 @@ class ChatListNewConversationJoinTest {
     ) : NoopConnectionManager() {
         override val channelJoinOutcomes = MutableSharedFlow<ChannelJoinOutcome>()
         val writes = mutableListOf<JoinWrite>()
-        var onWrite: suspend () -> Boolean = { true }
+        var lastRequestId: String? = null
+        var onWrite: suspend (String) -> Boolean = { true }
 
         fun publishStates() {
             states.value = clients.mapValues { it.value.state.value }
@@ -487,14 +519,17 @@ class ChatListNewConversationJoinTest {
 
         override fun clientFor(networkId: Long) = clients[networkId]
 
-        override suspend fun joinChannel(
+        override suspend fun joinChannelForRejection(
             networkId: Long,
+            expectedClient: IrcClient,
             channel: String,
             key: String?,
-            rememberKey: Boolean,
+            requestId: String,
         ): Boolean {
-            writes += JoinWrite(networkId, channel, key, rememberKey)
-            return onWrite()
+            if (clients[networkId] !== expectedClient) return false
+            lastRequestId = requestId
+            writes += JoinWrite(networkId, channel, key, rememberKey = false)
+            return onWrite(requestId)
         }
     }
 

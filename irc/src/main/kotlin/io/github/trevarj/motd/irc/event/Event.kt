@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.irc.event
 
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import java.time.Instant
 import java.time.format.DateTimeParseException
@@ -405,6 +406,7 @@ sealed interface IrcEvent {
         val code: String,
         val context: List<String>,
         val description: String,
+        val unlabeledJoinRequestId: String? = null,
     ) : IrcEvent
 
     data class MultilineRejected(
@@ -420,6 +422,7 @@ sealed interface IrcEvent {
         val params: List<String>,
         val text: String,
         val ctx: MessageContext? = null,
+        val unlabeledJoinRequestId: String? = null,
     ) : IrcEvent
 
     /** Escape hatch: anything not mapped above (raw numerics for motd text, WHOIS, etc.). */
@@ -427,6 +430,16 @@ sealed interface IrcEvent {
         val message: IrcMessage,
     ) : IrcEvent
 }
+
+private val JOIN_FAILURE_NUMERICS = setOf("403", "405", "471", "473", "474", "475", "476", "477")
+
+/** The target of a JOIN rejection, using the server's current channel prefix rules. */
+fun IrcEvent.joinRejectionChannel(rules: IrcIdentityRules): String? =
+    when (this) {
+        is IrcEvent.ServerError -> params.takeIf { code in JOIN_FAILURE_NUMERICS }
+        is IrcEvent.StandardReply -> context.takeIf { severity == IrcEvent.StandardReplySeverity.FAIL && commandName.equals("JOIN", ignoreCase = true) }
+        else -> null
+    }?.firstOrNull(rules::isChannel)
 
 fun IrcEvent.messageContextOrNull(): MessageContext? =
     when (this) {

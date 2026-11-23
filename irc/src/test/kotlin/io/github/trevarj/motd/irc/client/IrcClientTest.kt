@@ -3,6 +3,7 @@ package io.github.trevarj.motd.irc.client
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.ServerTimeSource
+import io.github.trevarj.motd.irc.event.messageContextOrNull
 import io.github.trevarj.motd.irc.ext.SearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultKind
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
@@ -73,6 +74,95 @@ class IrcClientTest {
     private fun responseLabel(line: String): String =
         checkNotNull(Regex("label=(motd-\\d+)").find(line)) { "missing response label in $line" }
             .groupValues[1]
+
+    @Test
+    fun `labeled join rejections preserve distinct request ids including a response batch`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft)
+            val replies = mutableListOf<IrcEvent>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) { client.broadcastEvents.toList(replies) }
+
+            assertTrue(client.sendJoinForRejection("#locked", "old-key", "join-old"))
+            assertTrue(client.sendJoinForRejection("#locked", "new-key", "join-new"))
+            assertEquals(listOf("@label=join-old JOIN #locked old-key", "@label=join-new JOIN #locked new-key"), ft.sent.takeLast(2))
+            ft.feed("@label=join-old :srv 475 motd #locked :Old bad key")
+            ft.feed("@label=join-new :srv BATCH +retry labeled-response")
+            ft.feed("@batch=retry :srv FAIL JOIN BAD_KEY #locked :Current bad key")
+            ft.feed(":srv BATCH -retry")
+            runCurrent()
+            assertEquals(listOf("join-old", "join-new"), replies.mapNotNull { it.messageContextOrNull()?.label })
+
+            assertTrue(client.sendJoinForRejection("#locked", "correct", "join-ok"))
+            ft.feed("@label=join-ok :srv BATCH +joined labeled-response")
+            ft.feed("@batch=joined :motd!u@h JOIN #locked")
+            ft.feed(":srv BATCH -joined")
+            runCurrent()
+            assertEquals(setOf("#locked"), client.joinedChannels.value)
+            assertTrue(replies.filterIsInstance<IrcEvent.Joined>().single().isSelf)
+        }
+
+    @Test
+    fun `unlabeled join retries drain prior tracked and raw multi-join failures without transferring ownership`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val errors = mutableListOf<IrcEvent.ServerError>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.ServerError>().toList(errors)
+            }
+
+            client.send(IrcMessage(command = "JOIN", params = listOf("#elsewhere,#locked", "first,old")))
+            val cancelled = async { client.sendJoinForRejection("#Locked", "old-key", "join-old") }
+            runCurrent()
+            assertEquals("JOIN #elsewhere,#locked first,old", ft.sent.last())
+            ft.feed(":srv 475 motd #locked :Raw JOIN rejected")
+            assertTrue(cancelled.await())
+            assertNull(errors.single().unlabeledJoinRequestId)
+            client.releaseJoinRejection("#Locked", "join-old")
+
+            val retry = async { client.sendJoinForRejection("#locked", "new-key", "join-new") }
+            ft.feed(":srv 403 motd #locked :Unrelated no such channel")
+            ft.feed(":srv 475 other #locked :Unrelated recipient")
+            runCurrent()
+            assertFalse(retry.isCompleted)
+            assertEquals("JOIN #Locked old-key", ft.sent.last())
+
+            ft.feed(":srv 475 motd #LOCKED :Old bad key")
+            assertTrue(retry.await())
+            assertEquals("JOIN #locked new-key", ft.sent.last())
+            ft.feed(":srv 475 motd #locked :Current bad key")
+            runCurrent()
+            assertEquals(listOf(null, null, null, null, "join-new"), errors.map { it.unlabeledJoinRequestId })
+        }
+
+    @Test
+    fun `unlabeled drain timeout still sends but cannot give ambiguous errors to the retry`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val errors = mutableListOf<IrcEvent.ServerError>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.ServerError>().toList(errors)
+            }
+
+            assertTrue(client.sendJoinForRejection("#locked", "old-key", "join-old"))
+            val retry = async { client.sendJoinForRejection("#locked", "new-key", "join-new") }
+            advanceTimeBy(5_001L)
+            assertTrue(retry.await())
+            assertEquals("JOIN #locked new-key", ft.sent.last())
+            ft.feed(":srv 475 motd #locked :Too late to know which JOIN")
+            assertTrue(client.sendJoinForRejection("#other", "new-key", "join-other"))
+            ft.feed(":srv 475 motd #other :Other channel is unambiguous")
+            runCurrent()
+            assertEquals(listOf(null, "join-other"), errors.map { it.unlabeledJoinRequestId })
+
+            assertTrue(client.sendJoinForRejection("#overlap", "new-key", "join-overlap"))
+            client.send(IrcMessage(command = "JOIN", params = listOf("#overlap", "raw-key")))
+            ft.feed(":srv 475 motd #overlap :May belong to the raw JOIN")
+            runCurrent()
+            assertNull(errors.last().unlabeledJoinRequestId)
+        }
 
     @Test
     fun `channel bans collect exact masks for the current recipient and canonical joined channel`() =

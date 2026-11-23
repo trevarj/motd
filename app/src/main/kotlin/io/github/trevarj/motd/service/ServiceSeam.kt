@@ -6,6 +6,7 @@ import io.github.trevarj.motd.irc.client.HistoryAvailability
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.joinRejectionChannel
 import io.github.trevarj.motd.irc.ext.SearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -76,41 +77,32 @@ sealed interface ChannelJoinOutcome {
         val reason: String,
         val code: String,
         val kind: ChannelJoinRejectionKind,
+        /** Exact wire label or a conservatively attributed untagged JOIN request. */
+        val requestId: String? = null,
     ) : ChannelJoinOutcome
 }
 
-private val JOIN_FAILURE_NUMERICS = setOf("403", "405", "471", "473", "474", "475", "476", "477")
-
-/** Extracts only JOIN-specific numeric and IRCv3 FAIL replies; unrelated server errors stay inert. */
+/** Extracts target-keyed JOIN failures while keeping other server failures inert. */
 internal fun channelJoinOutcome(
     networkId: Long,
     event: IrcEvent,
     identityRules: IrcIdentityRules,
 ): ChannelJoinOutcome.Rejected? {
-    val (params, reason, code) =
+    val channel = event.joinRejectionChannel(identityRules) ?: return null
+    val (reason, code, requestId) =
         when (event) {
             is IrcEvent.ServerError -> {
-                if (event.code in JOIN_FAILURE_NUMERICS) {
-                    Triple(event.params, event.text.ifBlank { event.code }, event.code)
-                } else {
-                    return null
-                }
+                Triple(event.text.ifBlank { event.code }, event.code, event.ctx?.label ?: event.unlabeledJoinRequestId)
             }
 
             is IrcEvent.StandardReply -> {
-                if (event.severity != IrcEvent.StandardReplySeverity.FAIL ||
-                    !event.commandName.equals("JOIN", ignoreCase = true)
-                ) {
-                    return null
-                }
-                Triple(event.context, event.description.ifBlank { event.code }, event.code)
+                Triple(event.description.ifBlank { event.code }, event.code, event.ctx.label ?: event.unlabeledJoinRequestId)
             }
 
             else -> {
                 return null
             }
         }
-    val channel = params.firstOrNull(identityRules::isChannel) ?: return null
     val kind =
         when {
             code == "473" -> {
@@ -129,7 +121,7 @@ internal fun channelJoinOutcome(
                 ChannelJoinRejectionKind.OTHER
             }
         }
-    return ChannelJoinOutcome.Rejected(networkId, channel, reason, code, kind)
+    return ChannelJoinOutcome.Rejected(networkId, channel, reason, code, kind, requestId)
 }
 
 internal fun rosterStateAfterNames(explicitRefreshInFlight: Boolean): RosterLoadState = if (explicitRefreshInFlight) RosterLoadState.LOADING else RosterLoadState.LOADED
@@ -297,6 +289,15 @@ interface ConnectionManager {
         key: String? = null,
         rememberKey: Boolean = true,
     ): Boolean
+
+    /** An exact single-channel JOIN, without persisting the key; [requestId] owns only rejections. */
+    suspend fun joinChannelForRejection(
+        networkId: Long,
+        expectedClient: IrcClient,
+        channel: String,
+        key: String?,
+        requestId: String,
+    ): Boolean = clientFor(networkId) === expectedClient && expectedClient.sendJoinForRejection(channel, key, requestId)
 
     /** Write one IRC INVITE for a canonical joined channel. True means the live transport accepted it. */
     suspend fun inviteToChannel(

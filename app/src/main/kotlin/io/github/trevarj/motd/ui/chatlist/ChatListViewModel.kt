@@ -90,6 +90,7 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withTimeoutOrNull
+import java.util.UUID
 import javax.inject.Inject
 
 /** Per-row chat-list sync affordance; coarser than [HistorySyncStatus] so unrelated reason-string
@@ -921,16 +922,18 @@ class ChatListViewModel
             coroutineScope {
                 if (!attempt.isCurrentReadyClient()) return@coroutineScope connectionLost
                 val needsJoin = !attempt.hasMembership()
+                val requestId = if (needsJoin) "motd-join-${UUID.randomUUID()}" else null
                 val disconnected =
                     async {
                         combine(attempt.client.state, connectionManager.connectionStates) { _, _ -> attempt.isCurrentReadyClient() }.first { !it }
                     }
                 // Subscribe before sending: an immediate 475 can arrive before the write returns.
                 val rejected =
-                    if (needsJoin) {
+                    if (requestId != null) {
                         async(start = CoroutineStart.UNDISPATCHED) {
                             connectionManager.channelJoinOutcomes.filterIsInstance<ChannelJoinOutcome.Rejected>().first {
-                                it.networkId == attempt.networkId && attempt.isCurrentReadyClient() && attempt.matches(it.channel)
+                                it.requestId == requestId && it.networkId == attempt.networkId &&
+                                    attempt.isCurrentReadyClient() && attempt.matches(it.channel)
                             }
                         }
                     } else {
@@ -938,12 +941,18 @@ class ChatListViewModel
                     }
                 val joined =
                     async(start = CoroutineStart.UNDISPATCHED) {
-                        if (!attempt.isCurrentReadyClient()) {
-                            connectionLost
-                        } else if (needsJoin && !connectionManager.joinChannel(attempt.networkId, attempt.channel, key, rememberKey = false)) {
-                            newConversationJoinFailure(R.string.channel_list_join_not_sent, needsKey = key != null)
-                        } else {
-                            NewConversationJoinState(openBufferId = membership.filterNotNull().first())
+                        try {
+                            if (!attempt.isCurrentReadyClient()) {
+                                connectionLost
+                            } else if (requestId != null &&
+                                !connectionManager.joinChannelForRejection(attempt.networkId, attempt.client, attempt.channel, key, requestId)
+                            ) {
+                                newConversationJoinFailure(R.string.channel_list_join_not_sent, needsKey = key != null)
+                            } else {
+                                NewConversationJoinState(openBufferId = membership.filterNotNull().first())
+                            }
+                        } finally {
+                            if (requestId != null) attempt.client.releaseJoinRejection(attempt.channel, requestId)
                         }
                     }
                 try {

@@ -317,6 +317,7 @@ class IrcClient(
     private val unlabeledChannelListLock = Mutex()
     private var unlabeledChannelListDrain: UnlabeledChannelListResponse? = null
     private val channelBanSession = AtomicReference<ChannelBanRequests?>(null)
+    private val joinRejections = AtomicReference<JoinRejections?>(null)
     private val accountRegistrationLock = Mutex()
     private val sensitiveEchoes = ConcurrentHashMap<String, Int>()
     private val outboundLock = Mutex()
@@ -385,6 +386,7 @@ class IrcClient(
         lagMonitor?.stop()
         lagMonitor = null
         channelBanSession.getAndSet(null)?.close()
+        joinRejections.getAndSet(null)?.close()
         runJob?.cancel()
         runJob = null
         criticalEventChannel.cancel(CancellationException("client stopped"))
@@ -439,6 +441,8 @@ class IrcClient(
     ) {
         // proxy is null here; the app's per-network AppTransportFactory captures its own proxy.
         val t = factory.create(config.host, config.port, config.tls, config.wsUrl, null)
+        val joinSession = JoinRejections(t)
+        joinRejections.set(joinSession)
         transport = t
         val banSession = ChannelBanRequests(t)
         channelBanSession.set(banSession)
@@ -456,6 +460,7 @@ class IrcClient(
                 )
             emitDisconnected(criticalEvents, disconnectedPublished, e.message)
             if (transport === t) transport = null
+            if (joinRejections.compareAndSet(joinSession, null)) joinSession.close()
             return
         }
 
@@ -532,6 +537,7 @@ class IrcClient(
             emitDisconnected(criticalEvents, disconnectedPublished, e.message)
         } finally {
             if (channelBanSession.compareAndSet(banSession, null)) banSession.close()
+            if (joinRejections.compareAndSet(joinSession, null)) joinSession.close()
             wd.stop()
             lm.stop()
             if (transport === t) lagMonitor = null
@@ -668,7 +674,7 @@ class IrcClient(
             }
 
             is BatchAssembler.Outcome.Closed -> {
-                emitBatch(outcome, criticalEvents)
+                emitBatch(outcome, t, criticalEvents)
             }
 
             is BatchAssembler.Outcome.Overflow -> {
@@ -683,7 +689,7 @@ class IrcClient(
                     }
                 if (ev != null) {
                     applySelfNickChange(ev, t)
-                    emitEvent(ev, criticalEvents)
+                    emitEvent(if ("batch" in msg.tags) ev else correlateJoinRejection(t, ev), criticalEvents)
                 }
             }
         }
@@ -767,11 +773,20 @@ class IrcClient(
         }
     }
 
+    private fun correlateJoinRejection(
+        t: IrcTransport,
+        event: IrcEvent,
+    ): IrcEvent = joinRejections.get()?.takeIf { it.transport === t }?.correlate(event, isupport, selfNick.get()) ?: event
+
     private suspend fun emitBatch(
         closed: BatchAssembler.Outcome.Closed,
+        t: IrcTransport,
         criticalEvents: Channel<IrcEvent>,
     ) {
-        for (event in mapBatchTree(closed.tree)) emitEvent(event, criticalEvents)
+        for (event in mapBatchTree(closed.tree)) {
+            // Batch mapping carries an outer response label down to its replies.
+            emitEvent(if (event.messageContextOrNull()?.label == null) event else correlateJoinRejection(t, event), criticalEvents)
+        }
     }
 
     internal fun mapBatchTree(
@@ -1116,6 +1131,19 @@ class IrcClient(
         msg: IrcMessage,
     ) {
         val line = msg.serialize()
+        if (msg.command.equals("JOIN", ignoreCase = true)) {
+            outboundLock.withLock {
+                val session = joinRejections.get()?.takeIf { it.transport === t }
+                if (session != null) {
+                    val label = msg.tags["label"].takeIf { hasCap("labeled-response") }
+                    msg.params.firstOrNull()?.split(',')?.forEach { channel ->
+                        if (channel.isNotEmpty() && channel != "0") session.sent(channel, label, requestId = null)
+                    }
+                }
+                t.send(line)
+            }
+            return
+        }
         if (!msg.command.equals("MODE", ignoreCase = true) || msg.params.getOrNull(1)?.contains('b') != true) {
             sendSerialized(t, line)
             return
@@ -1146,6 +1174,51 @@ class IrcClient(
         val t = transport ?: return false
         sendSerialized(t, msg)
         return true
+    }
+
+    /**
+     * Write a single-channel JOIN with [requestId] as its response label when available.
+     * Without labels, wait briefly for a prior same-target JOIN to drain. An unresolved
+     * predecessor makes rejections ambiguous, but never prevents sending the retry.
+     */
+    suspend fun sendJoinForRejection(
+        channel: String,
+        key: String?,
+        requestId: String,
+    ): Boolean {
+        val session = joinRejections.get() ?: return false
+        while (true) {
+            val prior =
+                outboundLock.withLock {
+                    if (joinRejections.get() !== session || transport !== session.transport || state.value !is IrcClientState.Ready) {
+                        return false
+                    }
+                    val label = requestId.takeIf { hasCap("labeled-response") }
+                    val pending = if (label == null) session.prior(channel) else null
+                    if (pending != null) {
+                        pending
+                    } else {
+                        val line =
+                            IrcMessage(
+                                tags = if (label == null) emptyMap() else mapOf("label" to label),
+                                command = "JOIN",
+                                params = listOfNotNull(channel, key),
+                            ).serialize()
+                        session.sent(channel, label, requestId.takeIf { label == null })
+                        session.transport.send(line)
+                        return true
+                    }
+                }
+            if (withTimeoutOrNull(JOIN_DRAIN_WAIT_MS) { prior.await() } == null) session.expire(channel, prior)
+        }
+    }
+
+    /** Drop local ownership without forgetting an unresolved wire JOIN. */
+    fun releaseJoinRejection(
+        channel: String,
+        requestId: String,
+    ) {
+        joinRejections.get()?.release(channel, requestId)
     }
 
     /** PRIVMSG whose own echo contains a credential. Suppression is in-memory and narrowly exact. */
@@ -2406,6 +2479,7 @@ class IrcClient(
         const val LIST_TIMEOUT_MS = 15_000L
         const val BAN_LIST_TIMEOUT_MS = 15_000L
         const val LIST_DRAIN_WAIT_MS = 15_000L
+        const val JOIN_DRAIN_WAIT_MS = 5_000L
         const val ACCOUNT_REGISTRATION_TIMEOUT_MS = 30_000L
         const val SENSITIVE_ECHO_TTL_MS = 30_000L
         const val WEBPUSH_TIMEOUT_MS = 30_000L

@@ -26,6 +26,17 @@ class ChannelJoinOutcomeTest {
     }
 
     @Test
+    fun `attempt identity survives labeled and legacy rejection mapping`() {
+        val error = IrcEvent.ServerError("475", listOf("me", "#locked"), "Bad key")
+        val labeled = error.copy(ctx = MessageContext(null, 0, null, null, "join-label", ServerTimeSource.LOCAL))
+        val untagged = error.copy(unlabeledJoinRequestId = "join-legacy")
+
+        assertEquals("join-label", channelJoinOutcome(7, labeled, IrcIdentityRules())?.requestId)
+        assertEquals("join-legacy", channelJoinOutcome(7, untagged, IrcIdentityRules())?.requestId)
+        assertEquals(null, channelJoinOutcome(7, error, IrcIdentityRules())?.requestId)
+    }
+
+    @Test
     fun `477 classifies account required`() {
         val outcome =
             channelJoinOutcome(
