@@ -351,6 +351,8 @@ flowchart TD
   entering, visible or exiting. Its scrollable height follows the live anchor
   and safe top inset without moving the timeline. It leaves no window behind
   when idle or when there is not enough room for a full touch target.
+  Emoji suggestions remain selectable when a query edit returns the same rows;
+  a row from an outdated editor snapshot cannot replace the current draft.
   The input host overlays the full timeline; matching scroll padding keeps the
   newest row clear, and fully covered rows do not advance read state. Floating and
   Nickname keep tools/send/record inside their floating inputs; Large keeps its

@@ -1068,7 +1068,7 @@ fun Composer(
         val canPick = {
             autocompleteVisibility.targetState && autocompleteEnabled && emojiPickerSession == null && latestValue == value && sourceEditor == editorValue &&
                 editorValue.selection == textFieldState.selection && editorValue.text.contentEquals(textFieldState.text) &&
-                latestEmojiSuggestions === suggestions && (suggestions.isNotEmpty() || latestAutocomplete === autocomplete)
+                latestEmojiSuggestions == suggestions && (suggestions.isNotEmpty() || latestAutocomplete === autocomplete)
         }
         retainedAutocomplete = panel?.let { ComposerAutocompleteContent(it, canPick) }
     }

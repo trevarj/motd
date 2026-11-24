@@ -959,9 +959,10 @@ class ComposerUiTest {
     }
 
     @Test
-    fun emojiAutocompleteRejectsAnOldClickAfterTheEditorChangesAndDuringExit() {
-        val query = ":grinning_face"
-        val draft = mutableStateOf(TextFieldValue(query, TextRange(query.length)))
+    fun emojiAutocompleteAcceptsUnchangedResultsAndRejectsStalePicks() {
+        val query = ":smil"
+        val prefix = query.dropLast(1)
+        val draft = mutableStateOf(TextFieldValue(prefix, TextRange(prefix.length)))
         compose.setContent {
             MotdTheme {
                 Composer(
@@ -974,13 +975,16 @@ class ComposerUiTest {
             }
         }
         val field = compose.onNodeWithTag("chat_composer_field")
-        val label = query.removePrefix(":")
+        val label = "smiling_face"
         val suggestion = compose.onNodeWithText(label)
         compose.waitUntil(5_000) { compose.onAllNodesWithText(label).fetchSemanticsNodes().isNotEmpty() }
         field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
-        suggestion.assertHasClickAction().performClick()
+        suggestion.assertHasClickAction()
+        field.performTextInput("l")
+        field.assertTextEquals(query)
+        suggestion.assertIsDisplayed().performTouchInput { click() }
         compose.runOnIdle {
-            assertEquals(TextFieldValue("😀", TextRange("😀".length)), draft.value)
+            assertEquals(TextFieldValue("☺️", TextRange("☺️".length)), draft.value)
             draft.value = TextFieldValue(query, TextRange(query.length))
         }
         compose.waitForIdle()
