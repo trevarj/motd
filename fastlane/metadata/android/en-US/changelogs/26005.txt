@@ -1,0 +1,2 @@
+- Fix taps on keyboard suggestions and nearby keys that could be blocked by an invisible autocomplete popup.
+- Fix emoji suggestions that stopped responding when typing left the same results visible.
