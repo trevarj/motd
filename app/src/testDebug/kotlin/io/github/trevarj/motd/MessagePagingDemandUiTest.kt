@@ -48,7 +48,11 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.prefs.AppearanceConfig
+import io.github.trevarj.motd.data.prefs.ChatWallpaperPreset
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.WallpaperSelection
+import io.github.trevarj.motd.data.prefs.resolveWallpaper
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.MESSAGE_PAGING_CONFIG
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
@@ -813,6 +817,7 @@ class MessagePagingDemandUiTest {
                 db.historyGapDao(),
             )
         val pages = repository.messages(bufferId, MessageVisibilitySpec(presenceMode = PresenceMode.ALL), null, viewport).cachedIn(scope)
+        val wallpaper = resolveWallpaper(AppearanceConfig(wallpaper = WallpaperSelection(ChatWallpaperPreset.NONE)))
         lateinit var items: LazyPagingItems<MessageEntity>
         lateinit var listState: LazyListState
         var phase = "entry"
@@ -837,7 +842,7 @@ class MessagePagingDemandUiTest {
         ) {
             try {
                 compose.waitUntil(10_000) {
-                    if (watchedAnchor != null) compose.mainClock.advanceTimeByFrame()
+                    if (!compose.mainClock.autoAdvance) compose.mainClock.advanceTimeByFrame()
                     // Drain Room/Main handoffs as well as Compose; a paused frame clock alone
                     // does not publish replacement generations on Robolectric's Android looper.
                     compose.waitForIdle()
@@ -928,6 +933,7 @@ class MessagePagingDemandUiTest {
                             loadPreview = { _, _ -> null },
                             showImages = false,
                             showLinkPreviews = false,
+                            chatWallpaper = wallpaper,
                             viewportReadEnabled = false,
                             entryState = EntryPositionState.Settled,
                             onViewportRefreshAnchor = { viewport.value = it },
@@ -959,8 +965,6 @@ class MessagePagingDemandUiTest {
                 assertTrue("Fixture never grew beyond the initial window; ${failedState()}", items.itemSnapshotList.items.size > MESSAGE_PAGING_CONFIG.initialLoadSize)
             }
             compose.mainClock.autoAdvance = false
-            compose.mainClock.advanceTimeBy(1_000)
-            compose.waitForIdle()
             val timeline = compose.onNodeWithTag("chat_timeline")
             val timelineBounds = timeline.fetchSemanticsNode().boundsInRoot
             val hostTop =
@@ -977,8 +981,25 @@ class MessagePagingDemandUiTest {
                     ?: throw AssertionError("Fixture must paint ordinary history beyond the collapsed presence run; ${failedState()}")
             val paintedIds = listOf(6_490L, olderEdge)
             val beforeBounds = paintedIds.associateWith(::bounds)
-            val beforeImage = timeline.captureToImage().asAndroidBitmap()
-            val beforePaint = paintedIds.associateWith { id -> paintedRow(beforeImage, timelineBounds, beforeBounds.getValue(id)) }
+
+            fun capturePaint(): Map<Long, Bitmap> {
+                val image = timeline.captureToImage().asAndroidBitmap()
+                return paintedIds.associateWith { id -> paintedRow(image, timelineBounds, beforeBounds.getValue(id)) }
+            }
+
+            var beforePaint = capturePaint()
+            var stableFrames = 0
+            await("Stationary baseline did not settle before history writes") {
+                val next = capturePaint()
+                val stable =
+                    !listState.isScrollInProgress &&
+                        items.loadState.source.refresh is LoadState.NotLoading &&
+                        items.loadState.source.append is LoadState.NotLoading &&
+                        paintedIds.all { id -> beforePaint.getValue(id).sameAs(next.getValue(id)) }
+                beforePaint = next
+                stableFrames = if (stable) stableFrames + 1 else 0
+                stableFrames >= 2
+            }
             compose.runOnIdle {
                 expectedOffsets =
                     (paintedIds + parkedId).associateWith { id ->
@@ -999,11 +1020,11 @@ class MessagePagingDemandUiTest {
                 // Semantics queries drain Room/Main between rows, even with the frame clock paused.
                 // Compare one native frame at the ORIGINAL bounds; the draw guard checks every
                 // row's identity, offset and size in that same paint, not an intermediate layout.
-                val image = timeline.captureToImage().asAndroidBitmap()
+                val paint = capturePaint()
                 for (id in paintedIds) {
                     assertTrue(
-                        "Unchanged row $id lost opaque pixels; ${failedState()}",
-                        beforePaint.getValue(id).sameAs(paintedRow(image, timelineBounds, beforeBounds.getValue(id))),
+                        "Unchanged row $id changed pixels; ${failedState()}",
+                        beforePaint.getValue(id).sameAs(paint.getValue(id)),
                     )
                 }
             }
