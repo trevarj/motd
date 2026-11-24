@@ -347,9 +347,10 @@ flowchart TD
   Ordinary IME dismissal ends the editor's focus session without clearing the draft.
   An explicit picker or color handoff can restore the keyboard; dismissing the
   restored keyboard cancels any remaining picker retry.
-  Autocomplete stays in a nonfocusable native popup above the input host.
-  Its scrollable height follows the live anchor and safe top inset without
-  moving the timeline; it hides when a full touch target cannot fit.
+  Autocomplete mounts a nonfocusable native popup above the input only while
+  entering, visible or exiting. Its scrollable height follows the live anchor
+  and safe top inset without moving the timeline. It leaves no window behind
+  when idle or when there is not enough room for a full touch target.
   The input host overlays the full timeline; matching scroll padding keeps the
   newest row clear, and fully covered rows do not advance read state. Floating and
   Nickname keep tools/send/record inside their floating inputs; Large keeps its

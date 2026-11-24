@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import android.net.Uri
+import android.view.ViewTreeObserver
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
@@ -150,6 +151,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
@@ -225,6 +227,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
+import android.graphics.Rect as AndroidRect
 import androidx.compose.foundation.lazy.items as lazyItems
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -1069,9 +1072,11 @@ fun Composer(
         }
         retainedAutocomplete = panel?.let { ComposerAutocompleteContent(it, canPick) }
     }
-    if (autocompleteVisibility.isIdle && !autocompleteVisibility.currentState) retainedAutocomplete = null
+    val autocompleteOpen = !autocompleteVisibility.isIdle || autocompleteVisibility.currentState
+    if (!autocompleteOpen) retainedAutocomplete = null
     AutocompleteOverlayLayout(
         modifier = modifier.fillMaxWidth(),
+        showOverlay = autocompleteOpen,
         overlay = {
             // Candidate-count changes must not change an in-flight slide's travel distance.
             autocompleteTransition.AnimatedVisibility(
@@ -2012,12 +2017,15 @@ private fun VoiceRecordButton(
 @Composable
 private fun AutocompleteOverlayLayout(
     modifier: Modifier = Modifier,
+    showOverlay: Boolean,
     overlay: @Composable () -> Unit,
     anchor: @Composable () -> Unit,
 ) {
     var anchorWidthPx by remember { mutableIntStateOf(0) }
     var anchorTopPx by remember { mutableIntStateOf(0) }
     val safeDrawingInsets = WindowInsets.safeDrawing
+    val density = LocalDensity.current
+    val minHeight = with(density) { 48.dp.roundToPx() + 2 * AutocompleteVerticalPadding.roundToPx() }
     Box(
         modifier =
             modifier.onLayoutRectChanged(throttleMillis = 0, debounceMillis = 0) {
@@ -2026,7 +2034,12 @@ private fun AutocompleteOverlayLayout(
             },
     ) {
         anchor()
-        if (anchorWidthPx > 0) {
+        if (
+            showOverlay &&
+            anchorWidthPx > 0 &&
+            anchorTopPx - safeDrawingInsets.getTop(density) >= minHeight &&
+            popupDisplayCanFit(minHeight)
+        ) {
             Popup(
                 popupPositionProvider = AutocompletePopupPositionProvider,
                 properties =
@@ -2038,7 +2051,6 @@ private fun AutocompleteOverlayLayout(
             ) {
                 SubcomposeLayout { constraints ->
                     val maxHeight = minOf(constraints.maxHeight, anchorTopPx - safeDrawingInsets.getTop(this))
-                    val minHeight = 48.dp.roundToPx() + 2 * AutocompleteVerticalPadding.roundToPx()
                     if (maxHeight < minHeight) {
                         layout(constraints.minWidth, constraints.minHeight) {}
                     } else {
@@ -2051,6 +2063,33 @@ private fun AutocompleteOverlayLayout(
             }
         }
     }
+}
+
+@Composable
+private fun popupDisplayCanFit(minHeight: Int): Boolean {
+    val view = LocalView.current
+    val frame = remember(view) { AndroidRect() }
+
+    fun fits(): Boolean {
+        view.getWindowVisibleDisplayFrame(frame)
+        return frame.height() >= minHeight
+    }
+
+    var canFit by remember(view, minHeight) { mutableStateOf(fits()) }
+    DisposableEffect(view, minHeight) {
+        val observer = view.viewTreeObserver
+        val listener =
+            ViewTreeObserver.OnPreDrawListener {
+                canFit = fits()
+                true
+            }
+        observer.addOnPreDrawListener(listener)
+        onDispose {
+            val currentObserver = if (observer.isAlive) observer else view.viewTreeObserver
+            if (currentObserver.isAlive) currentObserver.removeOnPreDrawListener(listener)
+        }
+    }
+    return canFit
 }
 
 /**

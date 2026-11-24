@@ -5,7 +5,10 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.view.Window
+import android.view.WindowManager
+import android.view.inspector.WindowInspector
 import androidx.activity.OnBackPressedDispatcher
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
@@ -121,10 +124,12 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import org.robolectric.shadows.ShadowContentResolver
 import org.robolectric.shadows.ShadowDialog
+import org.robolectric.shadows.ShadowDisplay
 import kotlin.math.abs
 import kotlin.math.hypot
 import kotlin.math.roundToInt
@@ -651,7 +656,7 @@ class ComposerUiTest {
         val anchorY = mutableStateOf(126.dp)
         val draft = mutableStateOf(TextFieldValue("ali", TextRange(3)))
         val candidates = List(20) { "alice$it" }
-        val showAutocomplete = mutableStateOf(true)
+        val showAutocomplete = mutableStateOf(false)
         var picked: String? = null
         compose.setContent {
             MotdTheme {
@@ -695,11 +700,41 @@ class ComposerUiTest {
             }
         }
 
+        fun assertPopupWindowPresent(expected: Boolean) {
+            compose.runOnIdle {
+                assertEquals(
+                    expected,
+                    WindowInspector.getGlobalWindowViews().any {
+                        (it.layoutParams as? WindowManager.LayoutParams)?.type == WindowManager.LayoutParams.TYPE_APPLICATION_SUB_PANEL
+                    },
+                )
+            }
+        }
+
         dispatchSafeTop(safeTop)
+        assertPopupWindowPresent(false)
         val panel = compose.onNodeWithTag("autocomplete_panel")
         val firstRow = compose.onNodeWithTag("autocomplete_item_0")
         val lastRow = compose.onNodeWithTag("autocomplete_item_${candidates.lastIndex}")
         val initialAnchor = anchor.fetchSemanticsNode().boundsInRoot
+
+        fun firstRowTop(): Float {
+            val coordinates = firstRow.fetchSemanticsNode().layoutInfo.coordinates
+            return coordinates.localToRoot(Offset.Zero).y
+        }
+
+        compose.mainClock.autoAdvance = false
+        try {
+            compose.runOnUiThread { showAutocomplete.value = true }
+            compose.mainClock.advanceTimeUntil(128) {
+                compose.onAllNodesWithTag("autocomplete_item_0").fetchSemanticsNodes().size == 1
+            }
+            val enteringTop = firstRowTop()
+            compose.mainClock.advanceTimeBy(500)
+            assertTrue("Cold open slides upward into place", enteringTop > firstRowTop())
+        } finally {
+            compose.mainClock.autoAdvance = true
+        }
 
         fun assertPopupFitsAboveAnchor() {
             val anchorCoordinates = anchor.fetchSemanticsNode().layoutInfo.coordinates
@@ -721,11 +756,34 @@ class ComposerUiTest {
         }
 
         assertPopupFitsAboveAnchor()
+        assertPopupWindowPresent(true)
         firstRow.assertIsDisplayed()
         lastRow.assertIsNotDisplayed()
+        val display = shadowOf(ShadowDisplay.getDefaultDisplay())
+        val displayHeight = compose.runOnIdle { Rect().also(hostView::getWindowVisibleDisplayFrame).height() }
+
+        fun resizeVisibleFrame(height: Int) {
+            compose.runOnIdle {
+                display.setHeight(height)
+                assertEquals(height, Rect().also(hostView::getWindowVisibleDisplayFrame).height())
+                hostView.viewTreeObserver.dispatchOnPreDraw()
+            }
+        }
+
+        try {
+            resizeVisibleFrame(with(compose.density) { 40.dp.roundToPx() })
+            assertEquals(initialAnchor, anchor.fetchSemanticsNode().boundsInRoot)
+            assertPopupWindowPresent(false)
+        } finally {
+            resizeVisibleFrame(displayHeight)
+        }
+        assertPopupFitsAboveAnchor()
+        assertPopupWindowPresent(true)
+
         dispatchSafeTop(with(compose.density) { 90.dp.roundToPx() })
         assertEquals(initialAnchor, anchor.fetchSemanticsNode().boundsInRoot)
         panel.assertDoesNotExist()
+        assertPopupWindowPresent(false)
         dispatchSafeTop(safeTop)
         assertPopupFitsAboveAnchor()
 
@@ -733,6 +791,7 @@ class ComposerUiTest {
         assertEquals(initialAnchor.width, anchor.fetchSemanticsNode().boundsInRoot.width)
         panel.assertDoesNotExist()
         firstRow.assertDoesNotExist()
+        assertPopupWindowPresent(false)
         field.assertIsFocused().assertTextEquals("ali")
 
         compose.runOnIdle { anchorY.value = 126.dp }
@@ -766,6 +825,12 @@ class ComposerUiTest {
         } finally {
             compose.mainClock.autoAdvance = true
         }
+        compose.runOnIdle { showAutocomplete.value = true }
+        assertPopupFitsAboveAnchor()
+        assertPopupWindowPresent(true)
+        compose.runOnIdle { showAutocomplete.value = false }
+        panel.assertDoesNotExist()
+        assertPopupWindowPresent(false)
     }
 
     @Test
