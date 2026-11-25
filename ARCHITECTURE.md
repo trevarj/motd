@@ -472,6 +472,8 @@ flowchart TD
   expanded viewport and keeps ordinary toolbar actions; suspended placement reads the live choice.
   Compact headers keep member counts beside the ellipsizing title with separate text semantics;
   expanded headers stack the count below it. Typing and connection/failure subtitles stay stacked.
+  Both typing placements replace the static ellipsis with the same fixed-size dot animation.
+  The localized typing label remains accessible, and disabled system animations leave static dots.
   Entry's frozen unread metadata reads only the resolved canonical room, reusing the
   chat-list visibility policy and entry's paging spec rather than awaiting the whole list.
   Fresh anchor reads run sequentially on IO rather than returning through Main after

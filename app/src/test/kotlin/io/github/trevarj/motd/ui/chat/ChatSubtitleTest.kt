@@ -64,7 +64,7 @@ class ChatSubtitleTest {
         val state = channelState(memberCount = 42, typingNicks = listOf("alice"))
 
         assertEquals(
-            ChatSubtitleModel.Text("alice is typing…"),
+            ChatSubtitleModel.Typing("alice is typing…"),
             chatSubtitleModel(state, context),
         )
     }

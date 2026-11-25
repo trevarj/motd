@@ -11,9 +11,14 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.MotionDurationScale
+import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.captureToImage
 import androidx.compose.ui.test.getUnclippedBoundsInRoot
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
@@ -35,6 +40,7 @@ import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -47,11 +53,16 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h891dp")
 class TypingPlacementUiTest {
+    private val motionScale =
+        object : MotionDurationScale {
+            override var scaleFactor by mutableFloatStateOf(1f)
+        }
+
     @get:Rule(order = 1)
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule
-    val compose = createComposeRule()
+    val compose = createComposeRule(effectContext = motionScale)
 
     private var nicks by mutableStateOf(emptyList<String>())
     private var placement by mutableStateOf(Settings().typingIndicatorPlacement)
@@ -133,6 +144,52 @@ class TypingPlacementUiTest {
         compose.waitForIdle()
         compose.onNodeWithTag("chat_typing_above_composer").assertDoesNotExist()
         compose.onAllNodesWithText("alice is typing…").assertCountEquals(1)
+    }
+
+    @Test
+    fun typingDotsPulseInBothPlacementsAndStopUnderReducedMotion() {
+        nicks = listOf("a", "b", "c")
+        motionScale.scaleFactor = 0f
+        setContent()
+
+        val placements =
+            listOf(
+                TypingIndicatorPlacement.HEADER to "chat_title",
+                TypingIndicatorPlacement.ABOVE_COMPOSER to "chat_typing_above_composer",
+            )
+
+        for ((location, hostTag) in placements) {
+            compose.mainClock.autoAdvance = true
+            compose.runOnIdle { placement = location }
+            compose.onNodeWithText("a, b and others are typing…").assertIsDisplayed()
+            compose.mainClock.autoAdvance = false
+            compose.runOnIdle { motionScale.scaleFactor = 1f }
+            compose.mainClock.advanceTimeBy(64)
+            val host = compose.onNodeWithTag(hostTag, useUnmergedTree = true)
+            val dots =
+                compose
+                    .onNode(hasTestTag("chat_typing_dots") and hasAnyAncestor(hasTestTag(hostTag)), useUnmergedTree = true)
+                    .assertIsDisplayed()
+            val bounds = dots.getUnclippedBoundsInRoot()
+            val hostBounds = host.getUnclippedBoundsInRoot()
+            val initial = dots.captureToImage().asAndroidBitmap()
+            compose.mainClock.advanceTimeBy(128)
+            assertFalse("$location must paint a new typing frame", initial.sameAs(dots.captureToImage().asAndroidBitmap()))
+            assertEquals(bounds, dots.getUnclippedBoundsInRoot())
+            assertEquals(hostBounds, host.getUnclippedBoundsInRoot())
+
+            compose.runOnIdle { motionScale.scaleFactor = 0f }
+            compose.mainClock.advanceTimeBy(48)
+            val still = dots.captureToImage().asAndroidBitmap()
+            compose.mainClock.advanceTimeBy(512)
+            assertTrue("$location must keep the same dots when Android motion is off", still.sameAs(dots.captureToImage().asAndroidBitmap()))
+            assertEquals(bounds, dots.getUnclippedBoundsInRoot())
+        }
+
+        compose.mainClock.autoAdvance = true
+        compose.runOnIdle { nicks = emptyList() }
+        compose.onNodeWithTag("chat_typing_dots", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("3 members").assertIsDisplayed()
     }
 
     @Test

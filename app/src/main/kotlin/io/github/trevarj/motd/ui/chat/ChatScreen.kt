@@ -293,6 +293,7 @@ import io.github.trevarj.motd.ui.components.ReadAloudPlayer
 import io.github.trevarj.motd.ui.components.ReadAloudVoiceOptions
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.SurfaceBackdropPage
+import io.github.trevarj.motd.ui.components.TypingIndicatorRow
 import io.github.trevarj.motd.ui.components.WaveformScrubber
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
@@ -4224,6 +4225,10 @@ internal fun ChatContent(
                                                     )
                                                 }
 
+                                                is ChatSubtitleModel.Typing -> {
+                                                    TypingIndicatorRow(subtitle.value, singleLine = true)
+                                                }
+
                                                 null -> {}
                                             }
                                         }
@@ -6171,16 +6176,22 @@ internal fun TimelineHistorySyncFailure(
 }
 
 internal sealed interface ChatSubtitleModel {
+    val value: String
+
     data class Text(
-        val value: String,
+        override val value: String,
         val isMemberCount: Boolean = false,
+    ) : ChatSubtitleModel
+
+    data class Typing(
+        override val value: String,
     ) : ChatSubtitleModel
 }
 
 internal fun chatSubtitle(
     state: ChatState,
     context: android.content.Context,
-): String? = (chatSubtitleModel(state, context) as? ChatSubtitleModel.Text)?.value
+): String? = chatSubtitleModel(state, context)?.value
 
 internal fun chatSubtitleModel(
     state: ChatState,
@@ -6211,7 +6222,7 @@ internal fun chatSubtitleModel(
             buffer != null &&
             isDickordPortalConversation(buffer.type, buffer.displayName)
     if (includeTyping) {
-        chatTypingSummary(state, context, dickordEnabled)?.let { return ChatSubtitleModel.Text(it) }
+        chatTypingSummary(state, context, dickordEnabled)?.let { return ChatSubtitleModel.Typing(it) }
     }
     if (activeDickordChannel) {
         return ChatSubtitleModel.Text(context.getString(R.string.dickord_channel_subtitle))
@@ -6248,10 +6259,8 @@ internal fun AboveComposerTyping(summary: String?) {
         label = "above_composer_typing",
     ) { text ->
         if (text != null) {
-            Text(
-                text = text,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            TypingIndicatorRow(
+                summary = text,
                 modifier = Modifier.fillMaxWidth().testTag("chat_typing_above_composer").padding(horizontal = 16.dp, vertical = 6.dp),
             )
         }
