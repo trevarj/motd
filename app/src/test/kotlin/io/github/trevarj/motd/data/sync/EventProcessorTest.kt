@@ -39,16 +39,24 @@ import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.push.PushEventHandler
+import io.github.trevarj.motd.push.WebPushCrypto
+import io.github.trevarj.motd.push.launchUnifiedPushBroadcast
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.joinAll
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestCoroutineScheduler
 import kotlinx.coroutines.test.runTest
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.withTimeoutOrNull
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -61,6 +69,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import java.io.OutputStream
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 
 @RunWith(RobolectricTestRunner::class)
 class EventProcessorTest {
@@ -3905,6 +3915,52 @@ class EventProcessorTest {
             assertNotNull(query)
             assertEquals(BufferType.QUERY, query!!.type)
             assertNull(serverBuffer())
+        }
+
+    @Test
+    fun equalTimeNickServPushesKeepBroadcastOrderWithoutSocketCopies() =
+        runTest {
+            val lines = (1..7).map { "Notice $it" }
+            val firstDecrypting = CompletableDeferred<Unit>()
+            val releaseFirst = CountDownLatch(1)
+            val handler =
+                PushEventHandler(
+                    crypto = { body, _ ->
+                        if (body.decodeToString().endsWith(lines.first())) {
+                            firstDecrypting.complete(Unit)
+                            check(releaseFirst.await(15, TimeUnit.SECONDS))
+                        }
+                        body
+                    },
+                    eventSink = processor,
+                )
+            val keys = WebPushCrypto.generateKeyMaterial()
+
+            fun receive(line: String) =
+                launchUnifiedPushBroadcast("org.unifiedpush.android.connector.MESSAGE") {
+                    val payload = "@time=2026-11-25T06:32:00.000Z :NickServ!service@fixture NOTICE me :$line"
+                    runBlocking { handler.handle(networkId, payload.encodeToByteArray(), keys) }
+                }
+
+            withContext(Dispatchers.Default) {
+                val first = receive(lines.first())
+                val jobs = mutableListOf(first)
+                try {
+                    withTimeout(5_000) { firstDecrypting.await() }
+                    val later = lines.drop(1).map(::receive)
+                    jobs += later
+                    val lifecycle = CompletableDeferred<Unit>()
+                    jobs += launchUnifiedPushBroadcast("org.unifiedpush.android.connector.UNREGISTERED") { lifecycle.complete(Unit) }
+                    withTimeout(5_000) { lifecycle.await() }
+                    withTimeoutOrNull(1_000) { later.joinAll() }
+                } finally {
+                    releaseFirst.countDown()
+                    withTimeout(5_000) { jobs.joinAll() }
+                }
+            }
+
+            val room = requireNotNull(db.bufferDao().byName(networkId, "nickserv"))
+            assertEquals(lines, pagingList(room.id).asReversed().map { it.text })
         }
 
     @Test

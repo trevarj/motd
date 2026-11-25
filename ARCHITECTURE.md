@@ -42,6 +42,10 @@ flowchart TD
 - `EventProcessor` is the only component that writes IRC-derived state to Room.
   Feature-local persistence, such as preferences and upload history, remains
   behind its own repository or preference contract.
+- UnifiedPush message broadcasts enter the connector in Android delivery order,
+  before decryption, without blocking unrelated registration callbacks. Equal-time
+  push-only messages keep that order; no client can recover a different sender
+  order if the relay shuffled the only copies without adding ordering metadata.
 - Equal-time push-first messages follow socket order when a live copy proves
   an inversion. Reordering leaves unmatched push arrivals provisional and
   preserves the confirmed playback order and canonical message IDs.

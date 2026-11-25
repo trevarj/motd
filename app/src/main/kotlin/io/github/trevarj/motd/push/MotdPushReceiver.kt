@@ -9,23 +9,28 @@ import dagger.hilt.components.SingletonComponent
 import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.unifiedpush.android.connector.FailedReason
 import org.unifiedpush.android.connector.MessagingReceiver
 import org.unifiedpush.android.connector.data.PushEndpoint
 import org.unifiedpush.android.connector.data.PushMessage
 
 /**
- * UnifiedPush entry point (connector 3.3.3 `MessagingReceiver`). Distributors deliver endpoint
- * lifecycle callbacks and encrypted push bodies here, one per-network `instance` string.
+ * UnifiedPush entry point. Distributors deliver endpoint lifecycle callbacks and encrypted push
+ * bodies here, one per-network `instance` string.
  *
  * Instance scheme: `instance = networkId.toString()`. Non-numeric or unknown-network instances
  * are logged, ignored, and `unregisterApp`-ed as stale hygiene.
  *
- * Callback signatures for connector 3.3.3:
+ * Callback signatures:
  *   onNewEndpoint(context, endpoint: PushEndpoint, instance)
  *   onMessage(context, message: PushMessage, instance)
  *   onRegistrationFailed(context, reason: FailedReason, instance)
@@ -45,7 +50,7 @@ class MotdPushReceiver : MessagingReceiver() {
         intent: android.content.Intent,
     ) {
         val pending = goAsync()
-        receiverScope.launch {
+        launchUnifiedPushBroadcast(intent.action) {
             try {
                 super.onReceive(context, intent)
             } finally {
@@ -168,9 +173,26 @@ class MotdPushReceiver : MessagingReceiver() {
 
     private companion object {
         const val TAG = "MotdPushReceiver"
-        val receiverScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     }
 }
+
+private const val UNIFIED_PUSH_MESSAGE_ACTION = "org.unifiedpush.android.connector.MESSAGE"
+private val receiverScope = CoroutineScope(SupervisorJob())
+private val messageOrder = Mutex()
+
+internal fun launchUnifiedPushBroadcast(
+    action: String?,
+    receive: () -> Unit,
+): Job =
+    if (action == UNIFIED_PUSH_MESSAGE_ACTION) {
+        receiverScope.launch(start = CoroutineStart.UNDISPATCHED) {
+            messageOrder.withLock {
+                withContext(Dispatchers.IO) { receive() }
+            }
+        }
+    } else {
+        receiverScope.launch(Dispatchers.IO) { receive() }
+    }
 
 /** Outcome of classifying a UnifiedPush `instance` string. */
 internal sealed interface InstanceDecision {
