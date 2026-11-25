@@ -486,7 +486,7 @@ class ComposerSendClearUiTest {
         liveConnection: (() -> IrcClientState?)? = null,
         draft: () -> ComposerDraftState,
         pages: Flow<PagingData<MessageEntity>> = flowOf(PagingData.from(emptyList())),
-        outgoingFlight: () -> OutgoingFlight? = { null },
+        outgoingFlight: @Composable () -> OutgoingFlight? = { null },
         onFlightSettled: (Long) -> Unit = {},
         onRetry: (MessageEntity) -> Unit = {},
         onDelete: (MessageEntity) -> Unit = {},
@@ -627,7 +627,7 @@ class ComposerSendClearUiTest {
                             onDelete = onDelete,
                             loadPreview = { _, _ -> null },
                             onAudioToggle = onAudioToggle,
-                            composerDraft = ownerDraft ?: draft(),
+                            composerDraft = ownerDraft ?: draft().copy(replyTo = replyTo()),
                             aiTextEnabled = aiEnabled(),
                             aiTextState = aiState(),
                             onAiComposer = onAi,
@@ -5439,6 +5439,194 @@ class ComposerSendClearUiTest {
     }
 
     @Test
+    @Config(sdk = [35])
+    fun dismissingKeyboardHandsOffToTheTimelineDuringSend() = assertSendHandsOffWhenViewportMoves(dismissIme = true)
+
+    @Test
+    @Config(sdk = [35])
+    fun draggingTimelineHandsOffToTheTimelineDuringSend() = assertSendHandsOffWhenViewportMoves(dismissIme = false)
+
+    @Test
+    @Config(sdk = [35])
+    fun keyboardDismissalDrainsRunwayBeforeDelayedRowArrives() = assertSendHandsOffWhenViewportMoves(dismissIme = true, delayRow = true)
+
+    @Test
+    @Config(sdk = [35])
+    fun rowArrivingDuringKeyboardHandoffRevealsFromClosedGap() {
+        assertSendHandsOffWhenViewportMoves(dismissIme = true, delayRow = true, landDuringHandoff = true)
+    }
+
+    @Test
+    @Config(sdk = [35])
+    fun sendingFromHistorySkipsFlightButStillReturnsToNewest() = assertSendHandsOffWhenViewportMoves(dismissIme = false, fromHistory = true)
+
+    @Test
+    @Config(sdk = [35])
+    fun landingTimeoutDrainsRunwayWithoutMovingNeighborsInOneFrame() = assertSendHandsOffWhenViewportMoves(dismissIme = false, delayRow = true, waitForTimeout = true)
+
+    private fun assertSendHandsOffWhenViewportMoves(
+        dismissIme: Boolean,
+        delayRow: Boolean = false,
+        landDuringHandoff: Boolean = false,
+        fromHistory: Boolean = false,
+        waitForTimeout: Boolean = false,
+    ) {
+        val history =
+            headerHistory().map { row ->
+                if (row.id == 100L) row.copy(ircFormattedText = "\u0004000000,FF00FF${row.text}\u000f") else row
+            }
+        val pages = MutableStateFlow(PagingData.from(history))
+        val sent =
+            history.first().copy(
+                id = 101,
+                msgid = "outgoing-motion",
+                dedupKey = "outgoing-motion",
+                sender = "me",
+                text = "Outgoing motion",
+                ircFormattedText = null,
+                isSelf = true,
+                serverTime = 101_000,
+                timelineOrder = 101,
+            )
+        var flight by mutableStateOf<OutgoingFlight?>(null)
+        val submissions = mutableListOf<String>()
+        val settled = mutableListOf<Long>()
+        setContent(
+            draft = { ComposerDraftState(sent.text, hydrated = true, revision = 1) },
+            pages = pages,
+            collapseTitleBar = { false },
+            chatWallpaper = WallpaperRenderSpec(WallpaperSelection(ChatWallpaperPreset.NONE), null),
+            outgoingFlight = { flight },
+            onFlightSettled = {
+                settled += it
+                flight = null
+            },
+            onSubmit = { text ->
+                submissions += text
+                flight = OutgoingFlight(token = 7, text = text, launchedAtMs = sent.serverTime, eventIds = setOf(sent.id))
+                if (!delayRow) pages.value = PagingData.from(listOf(sent) + history)
+            },
+        )
+        val timeline = compose.onNodeWithTag("chat_timeline")
+        val host = compose.onNodeWithTag("chat_bottom_host")
+        val view = checkNotNull(timeline.fetchSemanticsNode().root as? ViewRootForTest).view
+
+        fun setIme(bottom: Int) {
+            compose.runOnUiThread {
+                ViewCompat.dispatchApplyWindowInsets(
+                    view,
+                    WindowInsetsCompat
+                        .Builder()
+                        .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, bottom))
+                        .setVisible(WindowInsetsCompat.Type.ime(), bottom > 0)
+                        .build(),
+                )
+            }
+            compose.waitForIdle()
+        }
+        if (dismissIme) setIme(240)
+        timeline.performScrollToIndex(if (fromHistory) 40 else 0)
+        compose.waitForIdle()
+
+        val root = compose.onNodeWithTag("chat_surface_root")
+        val density = view.resources.displayMetrics.density
+
+        fun priorDistanceFromComposer(): Float {
+            val frame = root.captureToImage().asAndroidBitmap()
+            val composerTop = (host.getUnclippedBoundsInRoot().top.value * density).toInt()
+            val scanline = IntArray(frame.width)
+            for (y in minOf(composerTop, frame.height - 1) downTo 0) {
+                frame.getPixels(scanline, 0, frame.width, 0, y, frame.width, 1)
+                if (Color.MAGENTA in scanline) return (composerTop - y) / density
+            }
+            error("The preceding message's IRC background disappeared during handoff")
+        }
+
+        val hostBeforeSend = host.getUnclippedBoundsInRoot()
+        compose.mainClock.autoAdvance = false
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.mainClock.advanceTimeBy(128)
+        compose.waitForIdle()
+        if (fromHistory) {
+            compose.runOnIdle {
+                assertEquals(listOf(sent.text), submissions)
+                assertEquals("A send from history must not start a flight toward an offscreen row", listOf(7L), settled)
+            }
+            compose.mainClock.advanceTimeBy(1_000)
+            compose.onNodeWithText(sent.text).assertIsDisplayed()
+            return
+        }
+        compose.runOnIdle {
+            assertEquals(listOf(sent.text), submissions)
+            assertTrue("A stationary viewport should still be flying", settled.isEmpty())
+        }
+
+        fun assertContinuousFrames(
+            count: Int,
+            initial: Float = priorDistanceFromComposer(),
+        ) {
+            var previous = initial
+            repeat(count) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.waitForIdle()
+                val current = priorDistanceFromComposer()
+                assertEquals("The preceding painted row must not snap relative to the composer", previous, current, 16f)
+                previous = current
+            }
+        }
+
+        if (waitForTimeout) {
+            compose.mainClock.advanceTimeBy(800)
+            compose.waitForIdle()
+            assertTrue("The lifted runway must be visible before timing out", priorDistanceFromComposer() > 30f)
+            assertContinuousFrames(17)
+        } else if (dismissIme) {
+            val before = priorDistanceFromComposer()
+            setIme(160)
+            assertContinuousFrames(3, initial = before)
+            compose.runOnIdle { assertEquals("Keyboard handoff releases the flight token", listOf(7L), settled) }
+            if (landDuringHandoff) {
+                assertContinuousFrames(4)
+                val beforeArrival = priorDistanceFromComposer()
+                compose.runOnUiThread { pages.value = PagingData.from(listOf(sent) + history) }
+                assertContinuousFrames(11, initial = beforeArrival)
+            } else {
+                val beforeClose = priorDistanceFromComposer()
+                setIme(0)
+                assertContinuousFrames(17, initial = beforeClose)
+            }
+            if (!delayRow || landDuringHandoff) compose.onNodeWithText(sent.text).assertIsDisplayed()
+        } else {
+            timeline.performTouchInput {
+                down(center)
+                moveBy(Offset(0f, 80.dp.toPx()))
+            }
+        }
+        compose.mainClock.advanceTimeBy(64)
+        compose.waitForIdle()
+        if (dismissIme) {
+            assertTrue("Keyboard dismissal must move the bottom host", host.getUnclippedBoundsInRoot().top > hostBeforeSend.top)
+        } else if (!waitForTimeout) {
+            timeline.performTouchInput { up() }
+        }
+        compose.mainClock.advanceTimeBy(144)
+        compose.waitForIdle()
+        compose.runOnIdle { assertEquals("The moving viewport takes over before the original spring can settle", listOf(7L), settled) }
+        if (delayRow && !landDuringHandoff) {
+            compose.onNodeWithText(sent.text).assertDoesNotExist()
+            val before = priorDistanceFromComposer()
+            compose.runOnUiThread { pages.value = PagingData.from(listOf(sent) + history) }
+            assertContinuousFrames(3, initial = before)
+        }
+
+        compose.mainClock.autoAdvance = true
+        timeline.performScrollToIndex(0)
+        compose.onAllNodesWithText(sent.text).assertCountEquals(1)
+        compose.onNodeWithText(sent.text).assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf(7L), settled) }
+    }
+
+    @Test
     fun richBurstWaitsForSendLandingThenAppearsInOrder() {
         val launchedAt = 1_000L
         val history =
@@ -5626,5 +5814,93 @@ class ComposerSendClearUiTest {
         compose.waitForIdle()
 
         compose.onNodeWithText("hello").assertIsDisplayed()
+    }
+
+    @Test
+    fun replyBanner_staysHiddenAfterEarlyFlightHandoffUntilAccepted() = assertReplyBannerAfterEarlyFlightHandoff(rejection = null)
+
+    @Test
+    fun replyBanner_returnsOnlyWhenTheSendIsRejectedAfterEarlyFlightHandoff() = assertReplyBannerAfterEarlyFlightHandoff(rejection = SendRejectionReason.PERSISTENCE_FAILED)
+
+    private fun assertReplyBannerAfterEarlyFlightHandoff(rejection: SendRejectionReason?) {
+        val sendGate = CompletableDeferred<Unit>()
+        val submittedReply = CompletableDeferred<Long?>()
+        withTranslationOwner(
+            createOwner = { db, scope ->
+                ChatViewModelTest.externalTranslationFixture(
+                    db,
+                    buffer,
+                    scope,
+                    sendGate = sendGate,
+                    sendRejection = rejection,
+                    onSendMessage = { _, _, reply, _ -> submittedReply.complete(reply) },
+                )
+            },
+        ) { db, owner, parent ->
+            val store = ComposerDraftStore(db)
+            lateinit var submission: Job
+            setContent(
+                draft = { owner.composerDraft.value },
+                chatViewModel = owner,
+                pages = flowOf(PagingData.from(listOf(parent))),
+                collapseTitleBar = { false },
+                outgoingFlight = { owner.outgoingFlight.collectAsState().value },
+                onFlightSettled = owner::onFlightSettled,
+                onSubmit = { submission = owner.submit(it, onOpenBuffer = {}) },
+            )
+            compose.waitUntil(5_000) {
+                compose.waitForIdle()
+                val currentRoom = owner.state.value.buffer
+                owner.composerDraft.value.hydrated && currentRoom?.id == buffer.id
+            }
+            compose.onNodeWithTag("chat_timeline").performScrollToIndex(0)
+            compose.onNodeWithTag(timelineMessageTag(parent.msgid, parent.id), useUnmergedTree = true).assertIsDisplayed()
+            val banner = compose.onNodeWithText("Replying to alice")
+            banner.assertIsDisplayed()
+            val host = compose.onNodeWithTag("chat_bottom_host")
+
+            fun hostHeight() = host.getUnclippedBoundsInRoot().let { it.bottom - it.top }
+
+            val initialHeight = hostHeight()
+            val draft = owner.composerDraft.value
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithTag("chat_composer_send").performClick()
+            compose.waitUntil(5_000) {
+                compose.waitForIdle()
+                submittedReply.isCompleted
+            }
+            assertEquals(parent.id, runBlocking { submittedReply.await() })
+            compose.mainClock.advanceTimeBy(128)
+            compose.waitForIdle()
+            assertTrue("The reply must shrink while the result is pending", hostHeight() < initialHeight)
+            assertTrue("The test must observe a flight before the handoff", owner.outgoingFlight.value != null)
+
+            compose.mainClock.advanceTimeBy(2_000)
+            compose.waitForIdle()
+
+            assertNull(owner.outgoingFlight.value)
+            assertEquals(draft.revision, owner.composerDraft.value.revision)
+            val pending = runBlocking { store.loadDraft(buffer.id) }
+            assertEquals(parent.id, pending?.replyToEventId)
+            banner.assertDoesNotExist()
+            compose.mainClock.autoAdvance = true
+
+            sendGate.complete(Unit)
+            compose.waitUntil(5_000) {
+                compose.waitForIdle()
+                submission.isCompleted
+            }
+            assertTrue(owner.composerDraft.value.revision > draft.revision)
+            val persisted = runBlocking { store.loadDraft(buffer.id) }
+            if (rejection == null) {
+                assertNull(persisted)
+                banner.assertDoesNotExist()
+                compose.onNodeWithText("Unsent draft").assertDoesNotExist()
+            } else {
+                assertEquals(parent.id, persisted?.replyToEventId)
+                banner.assertIsDisplayed()
+                compose.onNodeWithText("Unsent draft").assertIsDisplayed()
+            }
+        }
     }
 }

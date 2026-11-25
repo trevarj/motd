@@ -33,6 +33,11 @@ import kotlin.math.min
  * Reply, compact and two-line layouts keep the ordinary bubble flight.
  */
 
+internal data class SendFlightViewport(
+    val eligible: Boolean,
+    val imeBottom: Int,
+)
+
 /**
  * Where a send flight starts and where it ends, in the coordinates of the chat surface that hosts
  * the overlay.
@@ -72,24 +77,28 @@ internal class SendFlightAnchors {
     var launchTextOrigin by mutableStateOf<Offset?>(null)
     private var pendingLaunchField: Rect? = null
     private var pendingLaunchTextOrigin: Offset? = null
-    private var launchCaptured = false
+    private var pendingViewport: SendFlightViewport? = null
 
     /** Stage submit geometry; a command that launches no flight must not move the active ghost. */
-    fun captureLaunch() {
+    fun captureLaunch(viewport: SendFlightViewport) {
+        pendingViewport = viewport
         pendingLaunchField = composerField
         pendingLaunchTextOrigin = composerTextOrigin
-        launchCaptured = true
     }
 
-    fun beginFlight() {
+    fun beginFlight(resetLanding: Boolean = true): SendFlightViewport? {
         // Promote only when a new flight starts; external launches use the latest geometry.
-        launchField = if (launchCaptured) pendingLaunchField else composerField
-        launchTextOrigin = if (launchCaptured) pendingLaunchTextOrigin else composerTextOrigin
-        launchCaptured = false
+        val viewport = pendingViewport
+        launchField = if (viewport != null) pendingLaunchField else composerField
+        launchTextOrigin = if (viewport != null) pendingLaunchTextOrigin else composerTextOrigin
         pendingLaunchField = null
         pendingLaunchTextOrigin = null
-        landingRow = null
-        ghostHeight = 0f
+        if (resetLanding) {
+            landingRow = null
+            ghostHeight = 0f
+        }
+        pendingViewport = null
+        return viewport
     }
 
     /** How far the composer field has moved down in window space since the tap frame. */
@@ -135,6 +144,39 @@ internal class SendFlightMotion(
 
     /** The launch-time transformation; row ownership waits for this as well as the flight. */
     val morph = Animatable(0f)
+
+    var detached by mutableStateOf(false)
+        private set
+
+    private var drawnShift = 0f
+
+    fun recordDrawnShift(shift: Float): Float {
+        drawnShift = shift
+        return shift
+    }
+
+    fun detach(
+        flight: OutgoingFlight,
+        landing: Pair<Long, Rect>?,
+    ): SendFlightHandoff {
+        detached = true
+        return SendFlightHandoff(
+            motion = this,
+            landingFlight = landing?.let { flight.copy(eventIds = setOf(it.first)) } ?: flight,
+            runway = drawnShift + (landing?.second?.height ?: 0f),
+        )
+    }
+}
+
+@Stable
+internal class SendFlightHandoff(
+    val motion: SendFlightMotion,
+    val landingFlight: OutgoingFlight,
+    private val runway: Float,
+) {
+    val drain = Animatable(0f)
+
+    fun residualShift(revealedGap: Float): Float = max(0f, runway - revealedGap) * (1f - drain.value)
 }
 
 /**

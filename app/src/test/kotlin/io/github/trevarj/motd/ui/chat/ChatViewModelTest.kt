@@ -2448,6 +2448,33 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun newDraftEditDetachesTheReplyReservedByAnOlderSend() =
+        runTest {
+            val gate = CompletableDeferred<Unit>()
+            val manager = FakeConnectionManager(network.id, sendGate = gate)
+            val vm = viewModel(channel, manager)
+            vm.state.first { it.buffer != null }
+            val parent = message(channel.id, "parent", "parent", "alice", 88)
+            vm.setReply(parent)
+            vm.saveDraft("reply")
+
+            val submission = vm.submit("reply", {}, {})
+            manager.messageStarted.await()
+            assertEquals(listOf(SentMessage(channel.id, "reply", parent.id)), manager.messageAttempts)
+
+            vm.saveDraft("new draft")
+            assertNull(vm.composerDraft.value.replyTo)
+            gate.complete(Unit)
+            submission.join()
+
+            val saved = requireNotNull(db.composerDraftDao().byRoom(channel.id))
+            assertEquals("new draft", saved.text)
+            assertNull(saved.replyToEventId)
+            vm.submit("new draft", {}, {}).join()
+            assertEquals(listOf(SentMessage(channel.id, "reply", parent.id), SentMessage(channel.id, "new draft", null)), manager.messages)
+        }
+
+    @Test
     fun `accepted draft clears before wire completion and flight settlement`() =
         runTest {
             val wireOutcome = CompletableDeferred<ImmediateWireAcceptance>()

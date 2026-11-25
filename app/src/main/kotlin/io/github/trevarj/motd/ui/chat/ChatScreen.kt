@@ -1783,6 +1783,11 @@ internal fun ChatContent(
         var composerText by remember(traceBufferId) {
             mutableStateOf(TextFieldValue(""))
         }
+        val composerReply = composerDraft.replyTo?.takeIf { it.bufferId == traceBufferId }
+        var lastComposerReply by remember(traceBufferId) { mutableStateOf<MessageEntity?>(null) }
+        SideEffect {
+            if (composerReply != null) lastComposerReply = composerReply
+        }
         val latestAttachmentRoom by rememberUpdatedState(traceBufferId)
         var pendingEbooksRequestRevision by remember(traceBufferId) { mutableStateOf<Long?>(null) }
         var ebooksHelpOpen by remember(eligibleEbooksRoomId) { mutableStateOf(false) }
@@ -1859,51 +1864,6 @@ internal fun ChatContent(
                     nowMs = flight.launchedAtMs,
                 )
             }
-        // One spring per tap, carrying the bubble and opening the gap it lands in.
-        val flightMotion =
-            remember(outgoingFlight?.token) {
-                // Reset here rather than in the effect below: effects are dispatched on the frame clock
-                // and can run after the new tap's first draw, which would then read the previous flight's
-                // landing rect and start the ghost mid-timeline instead of at the composer.
-                if (outgoingFlight != null) flightAnchors.beginFlight()
-                SendFlightMotion(
-                    morphEnabled =
-                        outgoingFlight != null &&
-                            outgoingFlight.replyText == null &&
-                            conversationLayout.effective == LayoutDensity.COMFORTABLE,
-                )
-            }
-        val flightProgress = remember(flightMotion) { { flightMotion.progress.value } }
-        // Driven here rather than inside the overlay: the landing row's reveal must complete even if
-        // the ghost never gets a composer rect to launch from, or the row would stay collapsed.
-        LaunchedEffect(outgoingFlight?.token) {
-            val token = outgoingFlight?.token ?: return@LaunchedEffect
-            try {
-                // The lift starts on the tap frame, before the pending row exists: the ghost rises to
-                // its hover line above the composer while persistence runs, so a slow send stays
-                // visibly in flight. The flight spring itself still waits for the landing report,
-                // because the gap must open from zero on the frame the row first composes.
-                val liftJob = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
-                val morphJob =
-                    if (flightMotion.morphEnabled) {
-                        launch { flightMotion.morph.animateTo(1f, MotdMotion.sendMorphGrow) }
-                    } else {
-                        null
-                    }
-                val landing =
-                    withTimeoutOrNull(1_000L) {
-                        snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
-                    }
-                if (landing != null) flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
-                liftJob.join()
-                // A quick Room write must not reveal the row while its body is still leaving the field.
-                morphJob?.join()
-            } finally {
-                // Also runs when this effect dies with the screen. A flight that outlived its UI would
-                // hide its row again and fly a ghost of a minutes-old message on the next visit.
-                onFlightSettled(token)
-            }
-        }
         var attachmentSheetOpen by key(traceBufferId) { rememberSaveable { mutableStateOf(false) } }
         var uploadCurrentDraftDirectly by key(traceBufferId) { rememberSaveable { mutableStateOf(false) } }
         // A shared or pasted file opens the same upload confirmation without changing the draft.
@@ -3475,11 +3435,98 @@ internal fun ChatContent(
             derivedStateOf { listState.isScrollInProgress && programmaticScrolls == 0 }
         }
         val flightToken = outgoingFlight?.token
-        val flightStartedAtBottom =
-            remember(flightToken) { flightToken != null && initialPositionSettled && atBottom && !userScrolling }
-        var releasedFlightToken by remember { mutableStateOf<Long?>(null) }
-        val holdEntriesForFlight = flightToken.takeIf { flightStartedAtBottom && !userScrolling && it != releasedFlightToken }
-        SideEffect { if (userScrolling && flightToken != null) releasedFlightToken = flightToken }
+        var handoff by remember(flightAnchors) { mutableStateOf<SendFlightHandoff?>(null) }
+        val imeInsets = WindowInsets.ime
+        val imeDensity = LocalDensity.current
+
+        fun sampleFlightViewport() =
+            SendFlightViewport(
+                eligible = handoff == null && initialPositionSettled && atBottom && !listState.isScrollInProgress,
+                imeBottom = imeInsets.getBottom(imeDensity),
+            )
+
+        fun captureFlightLaunch() = flightAnchors.captureLaunch(sampleFlightViewport())
+
+        val launchViewport =
+            remember(flightToken, flightAnchors) {
+                if (flightToken == null) null else flightAnchors.beginFlight(resetLanding = handoff == null) ?: sampleFlightViewport()
+            }
+        val flightMotion =
+            remember(flightToken, flightAnchors) {
+                SendFlightMotion(
+                    morphEnabled =
+                        outgoingFlight != null && outgoingFlight.replyText == null &&
+                            conversationLayout.effective == LayoutDensity.COMFORTABLE,
+                )
+            }
+        val landingMotion = handoff?.motion ?: flightMotion
+        val flightProgress = remember(landingMotion) { { landingMotion.progress.value } }
+        val ghostFlight = outgoingFlight.takeIf { handoff == null && launchViewport?.eligible == true && !flightMotion.detached }
+        val landingFlight = handoff?.landingFlight ?: ghostFlight
+        val holdEntriesForFlight = ghostFlight?.token.takeUnless { userScrolling }
+        val latestOutgoingFlight by rememberUpdatedState(outgoingFlight)
+        LaunchedEffect(flightToken, flightAnchors) {
+            val flight = outgoingFlight ?: return@LaunchedEffect
+            try {
+                if (ghostFlight == null || launchViewport == null) return@LaunchedEffect
+
+                fun detachFlight() {
+                    val current = latestOutgoingFlight?.takeIf { it.token == flight.token } ?: flight
+                    handoff = flightMotion.detach(current, flightAnchors.landingRow)
+                }
+
+                val animation =
+                    launch {
+                        val lift = launch { flightMotion.lift.animateTo(1f, MotdMotion.sendFlightSpring) }
+                        val morph =
+                            if (flightMotion.morphEnabled) {
+                                launch { flightMotion.morph.animateTo(1f, MotdMotion.sendMorphGrow) }
+                            } else {
+                                null
+                            }
+                        val landing =
+                            withTimeoutOrNull(1_000L) {
+                                snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
+                            }
+                        if (landing == null) {
+                            detachFlight()
+                            lift.cancel()
+                            morph?.cancel()
+                        } else {
+                            flightMotion.progress.animateTo(1f, MotdMotion.sendFlightSpring)
+                            lift.join()
+                            morph?.join()
+                        }
+                    }
+                val viewportMotion =
+                    launch {
+                        snapshotFlow { listState.isScrollInProgress || imeInsets.getBottom(imeDensity) != launchViewport.imeBottom }.first { it }
+                        if (animation.isActive && handoff == null) {
+                            detachFlight()
+                            animation.cancel()
+                        }
+                    }
+                animation.join()
+                viewportMotion.cancel()
+            } finally {
+                onFlightSettled(flight.token)
+            }
+        }
+        LaunchedEffect(handoff) {
+            val active = handoff ?: return@LaunchedEffect
+            try {
+                val reveal =
+                    launch {
+                        snapshotFlow { flightAnchors.landingRow }.filterNotNull().first()
+                        active.motion.progress.animateTo(1f, MotdMotion.sendFlightHandoff)
+                    }
+                active.drain.animateTo(1f, MotdMotion.sendFlightHandoff)
+                if (flightAnchors.landingRow == null) reveal.cancel()
+                reveal.join()
+            } finally {
+                if (handoff === active) handoff = null
+            }
+        }
 
         suspend fun scrollToNewest(
             animate: Boolean,
@@ -4391,23 +4438,27 @@ internal fun ChatContent(
                 // The runway: how far the whole timeline slides up while a flight is airborne, so
                 // vacated space exists under the ghost from the tap frame onward. Hoisted to this
                 // scope because both the timeline (deep in the pane) and the ghost overlay (a
-                // sibling drawn over the composer) read it. Deferred lambda: read only in the
-                // list's layer and the ghost's, never composed.
+                // sibling drawn over the composer) read it. Deferred until list placement or
+                // ghost drawing, never read during composition.
                 val density = LocalDensity.current
                 val flightListShift =
                     remember(
-                        outgoingFlight?.token,
+                        ghostFlight?.token,
+                        handoff,
+                        flightMotion,
                         conversationSpacing,
                         density,
                     ) {
-                        val active = outgoingFlight != null
+                        val active = ghostFlight != null
+                        val interruption = handoff
                         val gapPx =
                             with(density) {
                                 bubbleGap(flightShowSender, items.itemCount > 0, conversationSpacing).toPx()
                             }
                         val shift: () -> Float = shift@{
-                            if (!active) return@shift 0f
+                            if (!active && interruption == null) return@shift 0f
                             val revealed = flightAnchors.landingRow?.second?.height ?: 0f
+                            if (interruption != null) return@shift interruption.residualShift(revealed)
                             sendFlightListShift(
                                 runwayHeight = flightAnchors.ghostHeight + gapPx,
                                 liftFraction = flightMotion.lift.value,
@@ -4416,6 +4467,10 @@ internal fun ChatContent(
                             )
                         }
                         shift
+                    }
+                val timelineFlightShift =
+                    remember(flightListShift, flightMotion) {
+                        { flightMotion.recordDrawnShift(flightListShift()) }
                     }
                 ConversationTypography(conversationFontScalePercent) {
                     // TopAppBar owns the status-bar inset. Only the foreground follows Scaffold padding;
@@ -4555,13 +4610,15 @@ internal fun ChatContent(
                                         value = composerText,
                                         onAi = if (aiTextEnabled && plainIrcText(composerText.text).isNotBlank()) onAiComposer else null,
                                         onValueChange = {
-                                            val wasBlank = composerText.text.isBlank()
+                                            val previousText = composerText.text
                                             composerText = it
-                                            onDraftChanged(it.text)
-                                            if (it.text.isNotBlank()) {
-                                                onTyping(true)
-                                            } else if (!wasBlank) {
-                                                onTyping(false)
+                                            if (it.text != previousText) {
+                                                onDraftChanged(it.text)
+                                                if (it.text.isNotBlank()) {
+                                                    onTyping(true)
+                                                } else if (previousText.isNotBlank()) {
+                                                    onTyping(false)
+                                                }
                                             }
                                         },
                                         onSend = {
@@ -4574,7 +4631,7 @@ internal fun ChatContent(
                                                     AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
                                                         "long_draft=false"
                                                     }
-                                                    flightAnchors.captureLaunch()
+                                                    captureFlightLaunch()
                                                     // Empty the field on the tap frame. The ViewModel still owns the
                                                     // durable draft and republishes it if the send never lands, so this
                                                     // is presentation only -- notifying onDraftChanged here would count
@@ -4598,24 +4655,16 @@ internal fun ChatContent(
                                         currentNick = state.composerNick,
                                         onFieldPositioned = { flightAnchors.composerField = it },
                                         onFieldTextPositioned = { flightAnchors.composerTextOrigin = it },
-                                        // Keep the reply content mounted while its banner exits, but start that exit on
-                                        // the send tap rather than after persistence clears the durable draft.
                                         reply =
-                                            outgoingFlight?.let { flight ->
-                                                flight.replyText?.let {
-                                                    ComposerReply(
-                                                        dickordNickLabel(flight.replySender.orEmpty(), activeDickordChannel),
-                                                        it,
-                                                    )
-                                                }
-                                            } ?: state.replyTo?.let {
+                                            (composerReply ?: lastComposerReply)?.let {
                                                 ComposerReply(dickordNickLabel(it.sender, activeDickordChannel), it.text)
                                             },
-                                        replyVisible = outgoingFlight?.replyText == null,
+                                        replyVisible = composerReply != null && !composerDraft.submittingReply,
                                         replyWarning =
-                                            state.replyTo
-                                                ?.takeIf { state.replySenderNotInChannel && outgoingFlight == null }
-                                                ?.let {
+                                            composerReply
+                                                ?.takeIf {
+                                                    !composerDraft.submittingReply && state.replySenderNotInChannel && state.replyTo?.id == it.id
+                                                }?.let {
                                                     stringResource(
                                                         R.string.chat_reply_sender_not_in_channel,
                                                         dickordNickLabel(it.sender, activeDickordChannel),
@@ -4819,7 +4868,7 @@ internal fun ChatContent(
                                                         presented,
                                                         visibilityPolicy,
                                                         !isServerBuffer,
-                                                        outgoingFlight,
+                                                        landingFlight,
                                                     )
                                                 } else {
                                                     emptySet()
@@ -4881,12 +4930,13 @@ internal fun ChatContent(
                                                 onDismissExternalTranslation = onDismissExternalTranslation,
                                                 liveEntryIds = entries,
                                                 onLiveEntryConsumed = onLiveEntryConsumed,
-                                                outgoingFlight = outgoingFlight,
+                                                outgoingFlight = landingFlight,
                                                 heldLiveEntryIds = held,
                                                 flownRowIds = flownRowIds,
                                                 flightProgress = flightProgress,
+                                                showFlightLanding = handoff != null,
                                                 onFlightRowPositioned = onFlightRowPositioned,
-                                                listShift = flightListShift,
+                                                listShift = timelineFlightShift,
                                                 networkId = state.buffer?.networkId,
                                                 bufferId = state.buffer?.id,
                                                 ebooksQuietFeed = eligibleEbooksRoomId != null,
@@ -5157,7 +5207,7 @@ internal fun ChatContent(
                                         },
                             ) {
                                 val flightMessage =
-                                    outgoingFlight?.let { flight ->
+                                    ghostFlight?.let { flight ->
                                         val landingId = if (flight.eventIds.isEmpty()) flightLandingId else null
                                         items.itemSnapshotList.items.firstOrNull { row ->
                                             if (landingId != null) {
@@ -5168,7 +5218,7 @@ internal fun ChatContent(
                                         }
                                     }
                                 SendFlightOverlay(
-                                    flight = outgoingFlight,
+                                    flight = ghostFlight,
                                     pending = flightMessage == null || flightMessage.pendingLabel != null,
                                     failed = flightMessage?.failed == true,
                                     anchors = flightAnchors,
@@ -5312,7 +5362,7 @@ internal fun ChatContent(
                                                 ebooksResults = null
                                                 pendingEbooksRequestRevision = composerDraft.revision + 1
                                                 onDraftChanged(result.request)
-                                                flightAnchors.captureLaunch()
+                                                captureFlightLaunch()
                                                 onSubmit(result.request)
                                                 // Only the ViewModel clears the durable draft after acceptance;
                                                 // a rejected send republishes it to restore this optimistic clear.
@@ -5453,7 +5503,7 @@ internal fun ChatContent(
                         androidx.compose.material3.TextButton(colors = readableTextButtonColors(), onClick = {
                             AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                             if (!isEbooksSearchOnly(composerText.text)) {
-                                flightAnchors.captureLaunch()
+                                captureFlightLaunch()
                                 onSubmit(composerText.text)
                                 composerText = TextFieldValue("")
                                 scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }

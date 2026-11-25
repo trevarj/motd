@@ -200,6 +200,8 @@ data class ComposerDraftState(
     val text: String = "",
     val hydrated: Boolean = false,
     val revision: Long = 0,
+    val replyTo: MessageEntity? = null,
+    val submittingReply: Boolean = false,
 )
 
 internal data class ComposerUploadCompletion(
@@ -1017,7 +1019,6 @@ class ChatViewModel
 
         fun acknowledgeUiEvent(id: Long) = uiEventQueue.acknowledge(id)
 
-        private val replyTo = MutableStateFlow<MessageEntity?>(null)
         private val replySenderNotInChannel = MutableStateFlow(false)
         private val draftStateLock = Any()
         private val draftCommands = Channel<DraftCommand>(Channel.UNLIMITED)
@@ -1028,6 +1029,7 @@ class ChatViewModel
         internal val composerUpload: StateFlow<ComposerUploadCompletion?> = _composerUpload.asStateFlow()
         private var nextComposerUploadId = 0L
         private var currentDraftText = ""
+        private var currentReplyTo: MessageEntity? = null
         private var currentReplyToEventId: Long? = null
         private var nextDraftRevision = 0L
         private var draftTextEdited = false
@@ -1904,7 +1906,7 @@ class ChatViewModel
                 buffer,
                 _memberCount,
                 typingNicks,
-                replyTo.combine(replySenderNotInChannel) { reply, absent -> reply to absent },
+                composerDraft.map { it.replyTo }.distinctUntilChanged().combine(replySenderNotInChannel) { reply, absent -> reply to absent },
                 connState.combine(connectionManager.presenceStates) { conn, presence -> conn to presence },
             ) { buffer, memberCount, typing, replyAndWarning, connAndPresence ->
                 val (reply, absent) = replyAndWarning
@@ -2482,7 +2484,7 @@ class ChatViewModel
             }
             synchronized(draftStateLock) {
                 draftReplyEdited = true
-                replyTo.value = message
+                currentReplyTo = message
                 currentReplyToEventId = message?.id
                 draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
             }
@@ -2504,7 +2506,7 @@ class ChatViewModel
                 val normalizedSender = rules.normalize(sender)
                 if (memberNicks.any { rules.normalize(it) == normalizedSender }) return@launch
                 if (
-                    replyTo.value?.id != message.id ||
+                    composerDraft.value.replyTo?.id != message.id ||
                     operationalBufferId.value != roomId ||
                     buffer.value?.type != BufferType.CHANNEL ||
                     !replyConfig.value.visibleChannelPrefix ||
@@ -2712,7 +2714,7 @@ class ChatViewModel
                     jumpToNewest()
                     val roomId = operationalBufferId.value
                     val submission =
-                        reserveDraftForSend(raw) ?: run {
+                        reserveDraftForSend(raw, submitsReply = true) ?: run {
                             flight?.let(::abandonFlight)
                             return@launch
                         }
@@ -3387,6 +3389,11 @@ class ChatViewModel
             synchronized(draftStateLock) {
                 draftTextEdited = true
                 currentDraftText = text
+                if (_composerDraft.value.submittingReply) {
+                    currentReplyTo = null
+                    currentReplyToEventId = null
+                    replySenderNotInChannel.value = false
+                }
                 draftCommands.trySend(DraftCommand.Persist(advanceDraftRevisionLocked()))
             }
         }
@@ -3403,7 +3410,7 @@ class ChatViewModel
                     if (!draftTextEdited) currentDraftText = loaded?.text.orEmpty()
                     if (!draftReplyEdited) {
                         currentReplyToEventId = loadedReply?.id ?: loaded?.replyToEventId
-                        replyTo.value = loadedReply
+                        currentReplyTo = loadedReply
                     }
                     val snapshot = advanceDraftRevisionLocked(hydrated = true)
                     snapshot.takeIf { wasEdited }
@@ -3472,7 +3479,7 @@ class ChatViewModel
                     _composerUpload.value = completion.copy(imageReceipt = null)
                 }
             }
-            _composerDraft.value = ComposerDraftState(currentDraftText, hydrated, revision)
+            _composerDraft.value = ComposerDraftState(currentDraftText, hydrated, revision, currentReplyTo)
             return DraftSnapshot(
                 roomId = operationalBufferId.value,
                 text = currentDraftText,
@@ -3491,6 +3498,7 @@ class ChatViewModel
         private suspend fun prepareDraftSubmission(
             raw: String,
             scheduled: ScheduledDraft? = null,
+            submitsReply: Boolean = false,
         ): DraftSubmissionOutcome {
             draftHydrated.await()
             val result = CompletableDeferred<ComposerDraftEntity?>()
@@ -3523,6 +3531,9 @@ class ChatViewModel
                         inFlightDraftSubmissions.remove(key)
                         return@synchronized null
                     }
+                    if (submitsReply && candidate.replyToEventId != null) {
+                        _composerDraft.value = _composerDraft.value.copy(submittingReply = true)
+                    }
                     candidate
                 } ?: return if (duplicate) DraftSubmissionOutcome.Duplicate else DraftSubmissionOutcome.Stale
             return try {
@@ -3546,8 +3557,11 @@ class ChatViewModel
          * The composer empties on the tap frame rather than waiting for the durable clear, so a
          * refusal that leaves the text only in this ViewModel would look like the message vanished.
          */
-        private suspend fun reserveDraftForSend(raw: String): PreparedDraftSubmission? =
-            when (val outcome = prepareDraftSubmission(raw)) {
+        private suspend fun reserveDraftForSend(
+            raw: String,
+            submitsReply: Boolean = false,
+        ): PreparedDraftSubmission? =
+            when (val outcome = prepareDraftSubmission(raw, submitsReply = submitsReply)) {
                 is DraftSubmissionOutcome.Prepared -> {
                     outcome.submission
                 }
@@ -3587,7 +3601,7 @@ class ChatViewModel
             // Read the reply here rather than in the UI: an accepted send clears it moments later, and
             // the composer has already emptied, so the tap instant is the only place it is still true.
             _outgoingFlight.value =
-                launchOutgoingFlight(token, text, replyTo.value, System.currentTimeMillis())
+                launchOutgoingFlight(token, text, composerDraft.value.replyTo, System.currentTimeMillis())
             return token
         }
 
@@ -3611,6 +3625,10 @@ class ChatViewModel
         private fun releaseDraftSubmission(snapshot: DraftSnapshot) {
             synchronized(draftStateLock) {
                 inFlightDraftSubmissions.remove(DraftSubmissionKey(snapshot.roomId, snapshot.revision))
+                val draft = _composerDraft.value
+                if (draft.submittingReply && draft.revision == snapshot.revision) {
+                    _composerDraft.value = draft.copy(submittingReply = false)
+                }
             }
         }
 
@@ -3630,7 +3648,7 @@ class ChatViewModel
             if (_composerDraft.value.revision == submission.snapshot.revision) {
                 currentDraftText = ""
                 currentReplyToEventId = null
-                replyTo.value = null
+                currentReplyTo = null
                 replySenderNotInChannel.value = false
                 advanceDraftRevisionLocked(hydrated = true)
             }

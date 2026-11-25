@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.wrapContentHeight
@@ -81,6 +82,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.toSize
@@ -420,9 +422,9 @@ fun MessageList(
     // The flight's progress, read in the layout phase so the landing row's gap opens on the same
     // spring that carries the bubble. A lambda, so the value never enters composition here.
     flightProgress: () -> Float = { 1f },
+    showFlightLanding: Boolean = false,
     onFlightRowPositioned: (Long, Rect) -> Unit = { _, _ -> },
-    // The send-flight runway: how far the whole list slides up while a ghost is airborne, read
-    // in the draw phase like [flightProgress] so a frame moves one layer and composes nothing.
+    // Move the runway during placement without measuring or recomposing the timeline.
     listShift: () -> Float = { 0f },
     reactionChips: (String) -> List<ReactionChip> = { emptyList() },
     replyPreview: (ReplyTarget) -> StateFlow<ReplyPreviewData?> = { MutableStateFlow(null) },
@@ -570,7 +572,7 @@ fun MessageList(
                 .fillMaxSize()
                 // The runway: while a sent bubble is airborne the whole timeline yields upward so
                 // vacated space exists at the foot before the landing row can open its own gap.
-                .graphicsLayer { translationY = -listShift() }
+                .offset { IntOffset(0, -listShift().roundToInt()) }
                 .testTag("chat_timeline"),
         contentPadding = timelineContentPadding,
     ) {
@@ -922,6 +924,7 @@ fun MessageList(
                 onFlightRowPositioned,
                 onRunningChanged = onLiveEntryRunningChanged,
                 modifier = placementModifier,
+                showFlightLanding = showFlightLanding,
                 content = { rowModifier ->
                     if (isFool) {
                         val foolContent: @Composable (Modifier) -> Unit = { contentModifier ->
@@ -1349,6 +1352,7 @@ private fun LiveTimelineEntry(
     onFlightRowPositioned: (Long, Rect) -> Unit,
     onRunningChanged: (Boolean) -> Unit,
     modifier: Modifier,
+    showFlightLanding: Boolean = false,
     content: @Composable (Modifier) -> Unit,
 ) {
     when {
@@ -1356,7 +1360,7 @@ private fun LiveTimelineEntry(
         // animation, so the row waits underneath it rather than revealing itself as well. Checked
         // before [flownRowIds], which this very row joins the moment it first reports its bounds.
         outgoingFlight?.matches(message) == true -> {
-            FlightLandingEntry(message.id, flightProgress, onFlightRowPositioned, modifier) { content(Modifier) }
+            FlightLandingEntry(message.id, flightProgress, onFlightRowPositioned, modifier, showFlightLanding) { content(Modifier) }
         }
 
         // Already delivered by a ghost. Its entrance is spent, so it renders plainly forever after
@@ -1393,6 +1397,7 @@ private fun FlightLandingEntry(
     progress: () -> Float,
     onPositioned: (Long, Rect) -> Unit,
     modifier: Modifier,
+    visible: Boolean,
     content: @Composable () -> Unit,
 ) {
     val latestOnPositioned = rememberUpdatedState(onPositioned)
@@ -1414,7 +1419,7 @@ private fun FlightLandingEntry(
                     layout(placeable.width, revealedHeight) {
                         placeable.placeRelative(0, revealedHeight - placeable.height)
                     }
-                }.graphicsLayer { alpha = 0f },
+                }.graphicsLayer { alpha = if (visible) 1f else 0f },
     ) {
         content()
     }

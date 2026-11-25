@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.theme
 import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.Easing
 import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
@@ -127,6 +128,8 @@ object MotdMotion {
             dampingRatio = 0.8f,
             stiffness = 260f,
         )
+
+    val sendFlightHandoff: FiniteAnimationSpec<Float> = tween(MicroDurationMs, easing = LinearEasing)
 
     /**
      * The send morph's transformation: field text into the real bubble (surface growth and

@@ -164,7 +164,7 @@ class OutgoingFlightTest {
         val anchors = SendFlightAnchors()
         anchors.hostOrigin = Offset(0f, 100f)
         anchors.composerField = Rect(20f, 500f, 380f, 540f)
-        anchors.captureLaunch()
+        anchors.captureLaunch(SendFlightViewport(eligible = true, imeBottom = 320))
         anchors.beginFlight()
         anchors.composerField = Rect(20f, 820f, 380f, 860f)
 
@@ -276,17 +276,18 @@ class OutgoingFlightTest {
         val textOrigin = Offset(32f, 912f)
         anchors.composerField = field
         anchors.composerTextOrigin = textOrigin
-        anchors.captureLaunch()
+        val viewport = SendFlightViewport(eligible = false, imeBottom = 240)
+        anchors.captureLaunch(viewport)
 
         anchors.composerField = Rect(20f, 940f, 380f, 980f)
         anchors.composerTextOrigin = Offset(32f, 952f)
-        anchors.beginFlight()
+        assertEquals(viewport, anchors.beginFlight())
 
         assertEquals(field, anchors.launchField)
         assertEquals(textOrigin, anchors.launchTextOrigin)
         assertEquals(40f, anchors.composerFootDrop(), 0.001f)
         // An externally launched next flight cannot reuse the previous tap's pinned geometry.
-        anchors.beginFlight()
+        assertNull(anchors.beginFlight())
         assertEquals(anchors.composerField, anchors.launchField)
         assertEquals(anchors.composerTextOrigin, anchors.launchTextOrigin)
     }
@@ -298,7 +299,7 @@ class OutgoingFlightTest {
         val textOrigin = Offset(32f, 912f)
         anchors.composerField = field
         anchors.composerTextOrigin = textOrigin
-        anchors.captureLaunch()
+        anchors.captureLaunch(SendFlightViewport(eligible = true, imeBottom = 240))
         anchors.composerField = Rect(20f, 940f, 380f, 980f)
         anchors.composerTextOrigin = Offset(32f, 952f)
         anchors.beginFlight()
@@ -317,7 +318,7 @@ class OutgoingFlightTest {
         assertEquals(740f, hoverTop(), 0.001f)
 
         // An emote/command is submitted from the collapsed field but creates no new flight.
-        anchors.captureLaunch()
+        anchors.captureLaunch(SendFlightViewport(eligible = false, imeBottom = 0))
         assertEquals(field, anchors.launchField)
         assertEquals(textOrigin, anchors.launchTextOrigin)
         assertEquals(40f, anchors.composerFootDrop(), 0.001f)
@@ -326,8 +327,9 @@ class OutgoingFlightTest {
         // A subsequent actual flight adopts its own tap geometry, not the previous command's.
         anchors.composerField = Rect(20f, 920f, 380f, 980f)
         anchors.composerTextOrigin = Offset(32f, 932f)
-        anchors.captureLaunch()
-        anchors.beginFlight()
+        val viewport = SendFlightViewport(eligible = true, imeBottom = 0)
+        anchors.captureLaunch(viewport)
+        assertEquals(viewport, anchors.beginFlight())
         assertEquals(920f, anchors.launchField!!.top, 0.001f)
         assertEquals(Offset(32f, 932f), anchors.launchTextOrigin)
         assertEquals(0f, anchors.composerFootDrop(), 0.001f)

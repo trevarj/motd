@@ -522,6 +522,12 @@ flowchart TD
   glyph without shortening the morph or taking ownership from the accessible real row.
   Landing-row discovery is capped at one second; an absent/offscreen row cannot keep
   the flight alive or restore submitted text to the composer.
+  A submit captures launch geometry and keyboard inset at the tap, and flies only from a
+  stationary, laid-out live end. On scroll or keyboard movement, the replica stops drawing;
+  remaining timeline translation eases to zero. The matching row starts or continues its own
+  reveal once it lays out; if it arrives after the runway settles, it enters normally.
+  Submission and scroll-to-newest are unchanged.
+  The composer hides a submitted reply until the draft submission resolves, not until the flight ends.
   A zero-height landing gap still reports its real window position, never the viewport origin.
   Landing geometry updates stay in layout and drawing; the status lookup observes only the
   landing ID until acceptance supplies canonical event IDs. Updating a room's read anchor
