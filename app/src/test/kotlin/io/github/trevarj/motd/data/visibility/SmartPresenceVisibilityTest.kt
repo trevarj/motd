@@ -37,14 +37,16 @@ class SmartPresenceVisibilityTest {
     @Before
     fun setUp() =
         runTest {
-            db = inMemoryDb()
+            db = inMemoryDb(directCommit = true)
             val networkId = db.networkDao().insert(network())
             bufferId = db.bufferDao().insert(buffer(networkId, "#smart"))
             otherBufferId = db.bufferDao().insert(buffer(networkId, "#other"))
         }
 
     @After
-    fun tearDown() = db.close()
+    fun tearDown() {
+        if (::db.isInitialized) db.close()
+    }
 
     private suspend fun insert(
         kind: MessageKind,
@@ -77,11 +79,12 @@ class SmartPresenceVisibilityTest {
             db.messageDao().pagingSource(
                 messagePagingQuery(bufferId, MessageVisibilitySpec(presenceMode = mode, customPresenceKinds = customKinds)),
             )
-        val page =
-            source.load(
-                PagingSource.LoadParams.Refresh(null, 100, false),
-            ) as PagingSource.LoadResult.Page
-        return page.data
+        return try {
+            val page = source.load(PagingSource.LoadParams.Refresh(null, 100, false)) as PagingSource.LoadResult.Page
+            page.data
+        } finally {
+            source.invalidate()
+        }
     }
 
     private suspend fun visibleKinds(mode: PresenceMode): List<Pair<MessageKind, String>> = visibleRows(mode).map { it.kind to it.sender }
