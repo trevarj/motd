@@ -5354,17 +5354,21 @@ class ComposerSendClearUiTest {
             onSubmit = {},
         )
         compose.waitForIdle()
-        compose.onNodeWithContentDescription("Sending…").assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
-        compose.onNodeWithText("Retry").assertDoesNotExist()
+        val sending = compose.onNodeWithContentDescription("Sending…")
+        val retry = compose.onNodeWithContentDescription("Retry")
+        sending.assert(SemanticsMatcher.keyIsDefined(SemanticsProperties.ProgressBarRangeInfo))
+        retry.assertDoesNotExist()
         compose.runOnIdle { pages.value = PagingData.from(listOf(pending.copy(failed = true))) }
         compose.waitForIdle()
-        compose.onNodeWithText("Retry").performClick()
+        retry.performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(1, retries) }
-        compose.onNodeWithContentDescription("Sending…").assertIsDisplayed()
+        sending.assertIsDisplayed()
         compose.runOnIdle { pages.value = PagingData.from(listOf(pending.copy(failed = true))) }
         compose.waitForIdle()
-        compose.onNodeWithText("Delete").performClick()
+        compose.onNodeWithContentDescription("Delete").performClick()
+        compose.runOnIdle { assertEquals(0, deletes) }
+        compose.onNodeWithTag("chat_failed_delete_confirm").performClick()
         compose.waitForIdle()
         compose.runOnIdle { assertEquals(1, deletes) }
         compose.onNodeWithText("hello").assertDoesNotExist()
