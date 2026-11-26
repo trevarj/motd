@@ -490,6 +490,7 @@ flowchart TD
   Once placed, surviving keyed timeline rows ease history reflow with native placement-only
   motion, never a refresh fade. Entry alignment, reader scrolling and active live/send gap
   animations retain exclusive placement ownership.
+  The reply-jump pulse redraws only the target highlight without recomposing the row.
   History-gap dividers keep the same native content subtree when appearing or closing;
   expanded network batches, invite actions and transfer rows are not remounted by seam changes.
 - Forwarding destinations observe the whole chat list only while the forwarding picker

@@ -67,6 +67,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
@@ -766,14 +767,15 @@ fun MessageList(
             val highlighted = messageHighlightMatches(msg, highlightMsgid, highlightEventId)
             // Deep jumps are rare. Do not install an animation state object in every ordinary row;
             // only the single target needs one while the highlight is active.
-            val highlightColor =
+            val highlight =
                 if (highlighted) {
                     val pulse = remember(msg.id, highlightMsgid, highlightEventId) { Animatable(0f) }
                     LaunchedEffect(msg.id, highlightMsgid, highlightEventId) {
                         pulse.animateTo(1f, tween(durationMillis = 800))
                         pulse.animateTo(0f, tween(durationMillis = 800))
                     }
-                    MaterialTheme.colorScheme.primary.copy(alpha = 0.14f * pulse.value)
+                    val tint = MaterialTheme.colorScheme.primary
+                    Modifier.drawBehind { drawRect(tint, alpha = 0.14f * pulse.value) }
                 } else {
                     Modifier
                 }
@@ -800,7 +802,7 @@ fun MessageList(
                     modifier =
                         rowModifier
                             .fillMaxWidth()
-                            .background(highlightColor)
+                            .then(highlight)
                             .then(if (activeMetrics != null) Modifier.onSizeChanged { activeMetrics.fullHeightPx = it.height } else Modifier)
                             .then(if (senderMetrics != null) Modifier.onGloballyPositioned { senderMetrics.senderCoordinates = it } else Modifier),
                 ) {
