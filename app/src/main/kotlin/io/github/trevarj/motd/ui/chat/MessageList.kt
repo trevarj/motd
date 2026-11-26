@@ -30,16 +30,20 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentHeight
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -80,6 +84,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
@@ -157,6 +162,7 @@ import io.github.trevarj.motd.ui.components.withoutPreviewUrls
 import io.github.trevarj.motd.ui.theme.LocalSpacing
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdSpacing
+import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -769,7 +775,7 @@ fun MessageList(
                     }
                     MaterialTheme.colorScheme.primary.copy(alpha = 0.14f * pulse.value)
                 } else {
-                    Color.Transparent
+                    Modifier
                 }
 
             val contentMetrics = if (rowContentMetrics != null) remember(msg.id) { TimelineRowContentMetrics() } else null
@@ -2453,6 +2459,7 @@ private fun MessageRow(
                     fadeOut(MotdMotion.microFadeOut),
         ) {
             RetryRow(
+                failed = msg.failed,
                 onRetry = if (canRetry) ({ onRetry(msg) }) else null,
                 onDelete = { onDelete(msg) },
             )
@@ -2791,64 +2798,85 @@ private fun HistoryRetryFooter(
     }
 }
 
-/** Right-aligned retry (when safe) and delete affordances under a failed message bubble. */
 @Composable
 private fun RetryRow(
+    failed: Boolean,
     onRetry: (() -> Unit)?,
     onDelete: () -> Unit,
 ) {
-    androidx.compose.foundation.layout.Row(
+    var confirmDelete by remember(failed) { mutableStateOf(false) }
+    val scheme = MaterialTheme.colorScheme
+    val background = scheme.surfaceContainer
+    Row(
         modifier =
             Modifier
                 .fillMaxWidth()
-                .padding(horizontal = LocalSpacing.current.messageOuterHPad, vertical = 2.dp),
-        horizontalArrangement = androidx.compose.foundation.layout.Arrangement.End,
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                .padding(horizontal = LocalSpacing.current.messageOuterHPad)
+                .wrapContentWidth(Alignment.End)
+                .background(background, CircleShape)
+                .padding(start = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
+        Text(
+            text = stringResource(R.string.chat_not_sent),
+            style = MaterialTheme.typography.labelSmall,
+            color = scheme.readableForeground(scheme.error, background),
+        )
+        Spacer(Modifier.size(4.dp))
         if (onRetry != null) {
-            RetryRowAction(
-                icon = Icons.Filled.Refresh,
-                label = stringResource(R.string.chat_retry),
+            IconButton(
                 onClick = onRetry,
-            )
-            androidx.compose.foundation.layout
-                .Spacer(Modifier.size(8.dp))
+                enabled = failed,
+                modifier = Modifier.size(48.dp).testTag("chat_failed_retry"),
+                colors = IconButtonDefaults.iconButtonColors(contentColor = scheme.readableForeground(scheme.primary, background)),
+            ) {
+                Icon(
+                    Icons.Filled.Refresh,
+                    contentDescription = stringResource(R.string.chat_retry),
+                    modifier = Modifier.size(18.dp),
+                )
+            }
         }
-        RetryRowAction(
-            icon = Icons.Filled.DeleteOutline,
-            label = stringResource(R.string.chat_delete_failed),
-            onClick = onDelete,
-        )
+        IconButton(
+            onClick = { confirmDelete = true },
+            enabled = failed,
+            modifier = Modifier.size(48.dp).testTag("chat_failed_delete"),
+            colors = IconButtonDefaults.iconButtonColors(contentColor = scheme.readableForeground(scheme.onSurfaceVariant, background)),
+        ) {
+            Icon(
+                Icons.Filled.DeleteOutline,
+                contentDescription = stringResource(R.string.chat_delete_failed),
+                modifier = Modifier.size(18.dp),
+            )
+        }
     }
-}
-
-/** One error-tinted, >=48dp-tall tappable label used by [RetryRow]. */
-@Composable
-private fun RetryRowAction(
-    icon: androidx.compose.ui.graphics.vector.ImageVector,
-    label: String,
-    onClick: () -> Unit,
-) {
-    androidx.compose.foundation.layout.Row(
-        modifier =
-            Modifier
-                .heightIn(min = 48.dp)
-                .wrapContentHeight()
-                .clickable { onClick() }
-                .padding(horizontal = 8.dp),
-        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-    ) {
-        Icon(
-            icon,
-            contentDescription = null,
-            tint = androidx.compose.material3.MaterialTheme.colorScheme.error,
-            modifier = Modifier.size(16.dp),
-        )
-        io.github.trevarj.motd.ui.components.EmojiText(
-            text = label,
-            style = androidx.compose.material3.MaterialTheme.typography.labelSmall,
-            color = androidx.compose.material3.MaterialTheme.colorScheme.error,
-            modifier = Modifier.padding(start = 4.dp),
+    if (confirmDelete) {
+        AlertDialog(
+            modifier = Modifier.semantics { testTagsAsResourceId = true },
+            onDismissRequest = { confirmDelete = false },
+            title = { Text(stringResource(R.string.chat_delete_failed_title)) },
+            text = { Text(stringResource(R.string.chat_delete_failed_body)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        confirmDelete = false
+                        onDelete()
+                    },
+                    colors = readableTextButtonColors(),
+                    modifier = Modifier.testTag("chat_failed_delete_confirm"),
+                ) {
+                    Text(stringResource(R.string.action_delete))
+                }
+            },
+            dismissButton = {
+                TextButton(
+                    onClick = { confirmDelete = false },
+                    colors = readableTextButtonColors(),
+                    modifier = Modifier.testTag("chat_failed_delete_cancel"),
+                ) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+            },
         )
     }
 }

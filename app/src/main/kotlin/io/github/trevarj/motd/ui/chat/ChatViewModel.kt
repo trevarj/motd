@@ -2611,7 +2611,7 @@ class ChatViewModel
                 }
             }
 
-        /** Delete a failed local row without resending (action-sheet delete affordance). */
+        /** Delete a failed local row without resending. */
         fun deleteFailed(message: MessageEntity) =
             viewModelScope.launch {
                 messageRepository.deleteMessage(message.id)

@@ -529,6 +529,32 @@ class MessageTimelineUiTest {
     }
 
     @Test
+    fun failedMessageCanRetryAndOnlyDeletesAfterConfirmation() {
+        val failed = message(1, 100, MessageKind.PRIVMSG, "failed message", self = true, failed = true).copy(msgid = null)
+        var retriedId: Long? = null
+        val deletedIds = mutableListOf<Long>()
+        render(
+            pages = flowOf(PagingData.from(listOf(failed))),
+            onRetry = { retriedId = it.id },
+            onDelete = { deletedIds += it.id },
+        )
+
+        compose.onNodeWithContentDescription("Retry").assertHeightIsAtLeast(48.dp).performClick()
+        assertEquals(failed.id, retriedId)
+        val delete = compose.onNodeWithContentDescription("Delete").assertHeightIsAtLeast(48.dp)
+        val confirm = compose.onNodeWithTag("chat_failed_delete_confirm")
+        delete.performClick()
+        assertTrue(deletedIds.isEmpty())
+        compose.onNodeWithTag("chat_failed_delete_cancel").performClick()
+        confirm.assertDoesNotExist()
+        assertTrue(deletedIds.isEmpty())
+        delete.performClick()
+        confirm.performClick()
+        confirm.assertDoesNotExist()
+        assertEquals(listOf(failed.id), deletedIds)
+    }
+
+    @Test
     fun differentNickAfterReplyStartsANewGroupEvenWithTheSameAccount() {
         val reply =
             message(1, 100, MessageKind.PRIVMSG, "first reply").copy(
@@ -2026,6 +2052,8 @@ class MessageTimelineUiTest {
         outgoingFlight: () -> OutgoingFlight? = { null },
         flightProgress: () -> Float = { 1f },
         onFlightRowPositioned: (Long, Rect) -> Unit = { _, _ -> },
+        onRetry: (MessageEntity) -> Unit = {},
+        onDelete: (MessageEntity) -> Unit = {},
     ) {
         compose.setContent {
             CompositionLocalProvider(
@@ -2080,7 +2108,8 @@ class MessageTimelineUiTest {
                         onReply = onReply,
                         onReact = { _, _ -> },
                         onImageClick = {},
-                        onRetry = {},
+                        onRetry = onRetry,
+                        onDelete = onDelete,
                         loadPreview = loadPreview,
                         cachedPreview = cachedPreview,
                         loadAudioMetadata = loadAudioMetadata,

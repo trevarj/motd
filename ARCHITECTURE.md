@@ -541,7 +541,9 @@ flowchart TD
 - Outgoing acceptance transfers ownership from the draft to durable transcript rows before
   waiting for transport. Ordered per-network service work retains lifecycle protection;
   immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,
-  then confirmation or failure with retry/delete. Forwarding closes on durable acceptance.
+  then confirmation or failure. Failed rows show a status and eligible retry beside local
+  deletion, which requires confirmation and only removes a row still locally failed.
+  Forwarding closes on durable acceptance.
 - Scheduled text stays in a device-local Room queue, outside the transcript until its
   registered network and current-session channel membership permit dispatch. A
   persisted Android job requests a temporary connection for due timed messages;
