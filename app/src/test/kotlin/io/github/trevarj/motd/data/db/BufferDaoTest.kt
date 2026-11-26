@@ -552,23 +552,46 @@ class BufferDaoTest {
         }
 
     @Test
-    fun `deleting anchored event falls back to prior exact timeline row`() =
+    fun `deleting through a stale id only falls back for a failed self message`() =
         runTest {
-            val room = db.bufferDao().insert(buffer(networkId, "#fallback"))
-            val ids =
-                db.messageDao().insertAll(
+            val buffers = db.bufferDao()
+            val messages = db.messageDao()
+            val room = buffers.insert(buffer(networkId, "#fallback"))
+            val (priorId, failedId, aliasId) =
+                messages.insertAll(
                     listOf(
                         message(room, "first", serverTime = 100, dedupKey = "fallback-1"),
-                        message(room, "second", serverTime = 100, dedupKey = "fallback-2"),
+                        message(room, "failed", serverTime = 100, dedupKey = "fallback-2", isSelf = true).copy(failed = true),
+                        message(room, "alias", serverTime = 100, dedupKey = "fallback-3"),
                     ),
                 )
-            db.bufferDao().advanceLocalReadAnchor(room, 100, ids.last())
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(aliasId, failedId))
+            messages.deleteById(aliasId)
+            buffers.advanceLocalReadAnchor(room, 100, failedId)
+            val failed = requireNotNull(messages.byId(failedId))
+            val protectedRows =
+                listOf(
+                    failed.copy(failed = false, pendingLabel = "retry"),
+                    failed.copy(msgid = "confirmed"),
+                    failed.copy(isSelf = false),
+                )
+            for (row in protectedRows) {
+                messages.update(row)
 
-            db.messageDao().deleteWithAnchorFallback(ids.last())
+                assertNull(messages.deleteFailedWithAnchorFallback(aliasId))
+                assertEquals(row, messages.byCanonicalId(aliasId))
+                val buffer = buffers.observeById(room)
+                assertEquals(100L, buffer?.localReadAnchorTime)
+                assertEquals(failedId, buffer?.localReadAnchorEventId)
+            }
 
-            val buffer = db.bufferDao().observeById(room)
+            messages.update(failed)
+
+            assertEquals(room, messages.deleteFailedWithAnchorFallback(aliasId))
+            assertNull(messages.byId(failedId))
+            val buffer = buffers.observeById(room)
             assertEquals(100L, buffer?.localReadAnchorTime)
-            assertEquals(ids.first(), buffer?.localReadAnchorEventId)
+            assertEquals(priorId, buffer?.localReadAnchorEventId)
         }
 
     @Test

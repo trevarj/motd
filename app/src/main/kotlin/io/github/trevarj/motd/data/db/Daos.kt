@@ -1808,10 +1808,12 @@ interface MessageDao {
     suspend fun deleteById(id: Long)
 
     @Transaction
-    suspend fun deleteWithAnchorFallback(id: TimelineEventId) {
-        val event = byCanonicalId(id) ?: return
+    suspend fun deleteFailedWithAnchorFallback(id: TimelineEventId): Long? {
+        val event = byCanonicalId(id) ?: return null
+        if (!event.isSelf || !event.failed || event.msgid != null) return null
         fallbackReadAnchorBeforeDelete(event.id, event.serverTime)
         deleteById(event.id)
+        return event.bufferId
     }
 
     /** 0-based reverse-list index: strict complement of pagingSource ORDER BY serverTime DESC, timelineOrder DESC, id DESC. */

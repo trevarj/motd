@@ -134,12 +134,15 @@ class ComposerDraftStoreTest {
                 db
                     .messageDao()
                     .insertAll(
-                        listOf(message(roomId, "reply", serverTime = 100, dedupKey = "reply-delete")),
+                        listOf(
+                            message(roomId, "reply", serverTime = 100, dedupKey = "reply-delete", isSelf = true).copy(failed = true),
+                        ),
                     ).single()
             store.saveDraft(roomId, "keep me", eventId)
 
-            db.messageDao().deleteWithAnchorFallback(eventId)
+            db.messageDao().deleteFailedWithAnchorFallback(eventId)
 
+            assertNull(db.messageDao().byId(eventId))
             assertEquals("keep me", store.loadDraft(roomId)?.text)
             assertEquals(eventId, store.loadDraft(roomId)?.replyToEventId)
         }

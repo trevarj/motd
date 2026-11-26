@@ -366,7 +366,10 @@ interface MessageRepository {
         visibility: MessageVisibilitySpec,
     ): Flow<List<TimelineSeam>> = flowOf(emptyList())
 
-    /** Delete a locally-stored failed row by id, repairing any exact local read anchor. */
+    /**
+     * Delete the canonical row only if it is still self-authored, failed, and has no server msgid.
+     * Repairs any exact local read anchor when a row is deleted.
+     */
     suspend fun deleteMessage(id: Long)
 }
 

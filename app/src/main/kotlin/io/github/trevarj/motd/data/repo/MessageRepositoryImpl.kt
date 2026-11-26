@@ -245,9 +245,7 @@ class MessageRepositoryImpl
         }
 
         override suspend fun deleteMessage(id: Long) {
-            val bufferId = messageDao.byCanonicalId(id)?.bufferId
-            messageDao.deleteWithAnchorFallback(id)
-            bufferId?.let { bufferDao.refreshMonitorActivity(it) }
+            messageDao.deleteFailedWithAnchorFallback(id)?.let { bufferDao.refreshMonitorActivity(it) }
         }
 
         // Observe the room's stored gaps and resolve both edges against the local store, then project
