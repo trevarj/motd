@@ -226,33 +226,19 @@ class ChatInteractionBenchmark {
             device.await(rowWithBody(survivor))
             delete = device.failedControl(payload, deleteControls).visibleCenter
         }) { timings ->
-            val title = By.text("Delete failed message?")
             val confirmButton = By.res("chat_failed_delete_confirm")
-            val timeline = By.res(TIMELINE)
             val removed = rowWithBody(payload)
-            val confirmation =
-                timings.observe<Boolean>("deleteTapToDialogOrDirectRemoval") {
-                    device.tap(delete)
-                    awaitValue("failed row removed directly or delete confirmation shown") {
-                        when {
-                            device.hasObject(confirmButton) || device.hasObject(title) -> true
-                            device.hasObject(timeline) && !device.hasObject(removed) -> false
-                            else -> null
-                        }
-                    }
-                }
-            if (confirmation) {
-                val button =
-                    device.findObject(confirmButton)
-                        ?: device.await(By.text("Delete").hasAncestor(By.hasDescendant(title)))
-                val confirm = button.visibleCenter
-                timings.observe<Boolean>("confirmTapToRowRemoval") {
-                    device.tap(confirm)
-                    awaitValue("failed row removed after confirmation") {
-                        true.takeIf {
-                            !device.hasObject(confirmButton) && !device.hasObject(title) &&
-                                device.hasObject(timeline) && !device.hasObject(removed)
-                        }
+            timings.observe("deleteTapToConfirmation") {
+                device.tap(delete)
+                device.await(confirmButton)
+            }
+            device.await(removed)
+            val confirm = device.await(confirmButton).visibleCenter
+            timings.observe("confirmTapToRowRemoval") {
+                device.tap(confirm)
+                awaitValue("failed row removed after confirmation") {
+                    true.takeIf {
+                        device.hasObject(By.res(TIMELINE)) && !device.hasObject(confirmButton) && !device.hasObject(removed)
                     }
                 }
             }

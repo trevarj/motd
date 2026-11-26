@@ -543,7 +543,8 @@ flowchart TD
   waiting for transport. Ordered per-network service work retains lifecycle protection;
   immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,
   then confirmation or failure. Failed rows show a status and eligible retry beside local
-  deletion, which requires confirmation and only removes a row still locally failed.
+  inline deletion confirmation. Cancel or Back keeps the row; confirmation only
+  removes a row still locally failed.
   Forwarding closes on durable acceptance.
 - Scheduled text stays in a device-local Room queue, outside the transcript until its
   registered network and current-session channel membership permit dispatch. A

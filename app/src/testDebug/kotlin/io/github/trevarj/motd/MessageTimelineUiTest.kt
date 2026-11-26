@@ -531,27 +531,44 @@ class MessageTimelineUiTest {
     @Test
     fun failedMessageCanRetryAndOnlyDeletesAfterConfirmation() {
         val failed = message(1, 100, MessageKind.PRIVMSG, "failed message", self = true, failed = true).copy(msgid = null)
+        val survivor = failed.copy(id = 2, serverTime = 200, text = "other failed message")
         var retriedId: Long? = null
         val deletedIds = mutableListOf<Long>()
         render(
-            pages = flowOf(PagingData.from(listOf(failed))),
+            pages = flowOf(PagingData.from(listOf(survivor, failed))),
             onRetry = { retriedId = it.id },
             onDelete = { deletedIds += it.id },
         )
 
-        compose.onNodeWithContentDescription("Retry").assertHeightIsAtLeast(48.dp).performClick()
+        fun recoveryAction(
+            label: String,
+            row: MessageEntity,
+        ) = compose.onAllNodesWithContentDescription(label).let { buttons ->
+            val bottom = bounds("chat_message_${row.id}").bottom
+            val closest =
+                buttons
+                    .fetchSemanticsNodes()
+                    .withIndex()
+                    .filter { it.value.boundsInRoot.center.y >= bottom }
+                    .minBy { it.value.boundsInRoot.center.y }
+            buttons[closest.index].assertHeightIsAtLeast(48.dp)
+        }
+        recoveryAction("Retry", failed).performClick()
         assertEquals(failed.id, retriedId)
-        val delete = compose.onNodeWithContentDescription("Delete").assertHeightIsAtLeast(48.dp)
+
+        fun delete(row: MessageEntity) = recoveryAction("Delete", row).performClick()
         val confirm = compose.onNodeWithTag("chat_failed_delete_confirm")
-        delete.performClick()
+        delete(failed)
         assertTrue(deletedIds.isEmpty())
         compose.onNodeWithTag("chat_failed_delete_cancel").performClick()
         confirm.assertDoesNotExist()
         assertTrue(deletedIds.isEmpty())
-        delete.performClick()
-        confirm.performClick()
+        delete(survivor)
+        delete(failed)
+        confirm.assertHeightIsAtLeast(48.dp).performClick()
         confirm.assertDoesNotExist()
         assertEquals(listOf(failed.id), deletedIds)
+        recoveryAction("Retry", survivor).assertIsDisplayed()
     }
 
     @Test

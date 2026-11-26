@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedVisibility
@@ -20,6 +21,7 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -30,6 +32,7 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -39,7 +42,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VisibilityOff
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.IconButton
@@ -52,6 +54,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -83,6 +86,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
@@ -492,6 +497,7 @@ fun MessageList(
             )
         }
     val scrolling by remember(listState) { derivedStateOf { listState.isScrollInProgress } }
+    val failedDeleteTarget = remember(bufferId) { mutableStateOf<Long?>(null) }
     // Keep the user's expanded JOIN/PART runs above the volatile Paging rows. A history sync may
     // briefly replace or rechunk those rows, but overlapping event identities remain stable.
     var expandedSystemEventIds by remember(bufferId) { mutableStateOf(emptySet<Long>()) }
@@ -890,6 +896,7 @@ fun MessageList(
                         onRetry = onRetry,
                         canRetry = canRetry(msg),
                         onDelete = onDelete,
+                        failedDeleteTarget = failedDeleteTarget,
                         loadPreview = loadPreview,
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
@@ -1929,6 +1936,7 @@ private fun MessageRow(
     onRetry: (MessageEntity) -> Unit,
     canRetry: Boolean,
     onDelete: (MessageEntity) -> Unit,
+    failedDeleteTarget: MutableState<Long?>,
     loadPreview: suspend (String, Long?) -> LinkPreview?,
     showImages: Boolean,
     showLinkPreviews: Boolean,
@@ -2462,6 +2470,8 @@ private fun MessageRow(
         ) {
             RetryRow(
                 failed = msg.failed,
+                messageId = msg.id,
+                deleteTarget = failedDeleteTarget,
                 onRetry = if (canRetry) ({ onRetry(msg) }) else null,
                 onDelete = { onDelete(msg) },
             )
@@ -2803,12 +2813,69 @@ private fun HistoryRetryFooter(
 @Composable
 private fun RetryRow(
     failed: Boolean,
+    messageId: Long,
+    deleteTarget: MutableState<Long?>,
     onRetry: (() -> Unit)?,
     onDelete: () -> Unit,
 ) {
-    var confirmDelete by remember(failed) { mutableStateOf(false) }
     val scheme = MaterialTheme.colorScheme
     val background = scheme.surfaceContainer
+    if (failed && deleteTarget.value == messageId) {
+        val title = stringResource(R.string.chat_delete_failed_title)
+        val dismiss = { if (deleteTarget.value == messageId) deleteTarget.value = null }
+        BackHandler(onBack = dismiss)
+        DisposableEffect(deleteTarget, messageId) {
+            onDispose(dismiss)
+        }
+        Column(
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = LocalSpacing.current.messageOuterHPad)
+                    .wrapContentWidth(Alignment.End)
+                    .widthIn(max = 320.dp)
+                    .background(background, MaterialTheme.shapes.large)
+                    .semantics {
+                        paneTitle = title
+                        testTagsAsResourceId = true
+                    }.padding(start = 12.dp, top = 12.dp, end = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
+            Text(
+                title,
+                modifier = Modifier.semantics { heading() },
+                style = MaterialTheme.typography.titleSmall,
+                color = scheme.onSurface,
+            )
+            Text(
+                stringResource(R.string.chat_delete_failed_body),
+                style = MaterialTheme.typography.bodySmall,
+                color = scheme.onSurfaceVariant,
+            )
+            FlowRow(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = dismiss,
+                    colors = readableTextButtonColors(),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("chat_failed_delete_cancel"),
+                ) {
+                    Text(stringResource(R.string.action_cancel))
+                }
+                TextButton(
+                    onClick = {
+                        if (deleteTarget.value == messageId) {
+                            dismiss()
+                            onDelete()
+                        }
+                    },
+                    colors = readableTextButtonColors(),
+                    modifier = Modifier.heightIn(min = 48.dp).testTag("chat_failed_delete_confirm"),
+                ) {
+                    Text(stringResource(R.string.action_delete))
+                }
+            }
+        }
+        return
+    }
     Row(
         modifier =
             Modifier
@@ -2840,7 +2907,7 @@ private fun RetryRow(
             }
         }
         IconButton(
-            onClick = { confirmDelete = true },
+            onClick = { deleteTarget.value = messageId },
             enabled = failed,
             modifier = Modifier.size(48.dp).testTag("chat_failed_delete"),
             colors = IconButtonDefaults.iconButtonColors(contentColor = scheme.readableForeground(scheme.onSurfaceVariant, background)),
@@ -2851,34 +2918,5 @@ private fun RetryRow(
                 modifier = Modifier.size(18.dp),
             )
         }
-    }
-    if (confirmDelete) {
-        AlertDialog(
-            modifier = Modifier.semantics { testTagsAsResourceId = true },
-            onDismissRequest = { confirmDelete = false },
-            title = { Text(stringResource(R.string.chat_delete_failed_title)) },
-            text = { Text(stringResource(R.string.chat_delete_failed_body)) },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        confirmDelete = false
-                        onDelete()
-                    },
-                    colors = readableTextButtonColors(),
-                    modifier = Modifier.testTag("chat_failed_delete_confirm"),
-                ) {
-                    Text(stringResource(R.string.action_delete))
-                }
-            },
-            dismissButton = {
-                TextButton(
-                    onClick = { confirmDelete = false },
-                    colors = readableTextButtonColors(),
-                    modifier = Modifier.testTag("chat_failed_delete_cancel"),
-                ) {
-                    Text(stringResource(R.string.action_cancel))
-                }
-            },
-        )
     }
 }
