@@ -49,6 +49,8 @@ flowchart TD
 - Equal-time push-first messages follow socket order when a live copy proves
   an inversion. Reordering leaves unmatched push arrivals provisional and
   preserves the confirmed playback order and canonical message IDs.
+- A labelled server rejection marks the corresponding send failed. Server feedback is
+  a separate timeline event, not an echo that can replace the original message.
 - History and reconnect playback consume each precomputed chat route even when
   a network ignore drops its message, keeping subsequent authors, bodies and
   self-attribution aligned.

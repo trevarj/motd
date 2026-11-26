@@ -3671,7 +3671,9 @@ class EventProcessor
                 insertCommandResponse(response, e.ctx, kind, text)
                 if (e.severity == IrcEvent.StandardReplySeverity.FAIL) finishCommandResponse(response)
             } else {
-                insertSystem(protocolBufferId, e.ctx, kind, "", text, origin = origin)
+                // The reply label correlates a command, not this standalone timeline row.
+                val context = if (e.ctx.label == null) e.ctx else e.ctx.copy(label = null)
+                insertSystem(protocolBufferId, context, kind, "", text, origin = origin)
             }
         }
 
@@ -3681,8 +3683,8 @@ class EventProcessor
             e: IrcEvent.ServerError,
         ) {
             val st = stateFor(networkId)
-            val response = commandResponse(networkId, e.ctx?.label)
-            val responseContext = e.ctx ?: serverCtx()
+            val label = e.ctx?.label
+            val response = commandResponse(networkId, label)
             if (e.code in PART_ALREADY_CLOSED_NUMERICS) {
                 val channel = e.params.firstOrNull { isChannel(networkId, it, st) }
                 val buffer = channel?.let { existingChannelBuffer(networkId, it, st) }
@@ -3700,6 +3702,8 @@ class EventProcessor
                     messageDao.failJoiningInvites(inviteBufferId, e.text.ifBlank { e.code })
                 }
             }
+            val context = e.ctx ?: serverCtx()
+            val responseContext = if (response == null && label != null) context.copy(label = null) else context
             // "Not in channel" / "cannot send" numerics are only useful if surfaced where the user is
             // looking — the channel they tried to talk to. Route these inline into that channel buffer
             // (instead of the SERVER buffer) so a bouncer that never echoed the self-PART still makes
@@ -3717,11 +3721,18 @@ class EventProcessor
                     } else {
                         insertSystem(bufferId, responseContext, MessageKind.ERROR, "", text)
                     }
-                    // Mark the just-sent message as failed; the server never accepted it. Retry is still
-                    // available, and after rejoining it will succeed. Capture the row first — failLatestPending
-                    // flips it to failed=0-excluded.
-                    val failedRow = messageDao.latestPendingRow(bufferId)
-                    if (messageDao.failLatestPending(bufferId) > 0 && failedRow != null) {
+                    val failedRow =
+                        if (label != null) {
+                            // A labeled refusal identifies one attempt; never fall back to a newer send.
+                            messageDao.byPendingLabel(bufferId, label)?.takeIf {
+                                !it.failed && messageDao.failIfStillPending(bufferId, label) > 0
+                            }
+                        } else {
+                            messageDao.latestPendingRow(bufferId)?.takeIf {
+                                messageDao.failLatestPending(bufferId) > 0
+                            }
+                        }
+                    if (failedRow != null) {
                         traceMessageWrite("room_pending_failed", failedRow, fromHistory = false)
                     }
                     if (e.code in NOT_IN_CHANNEL_NUMERICS) markJoined(bufferId, false)

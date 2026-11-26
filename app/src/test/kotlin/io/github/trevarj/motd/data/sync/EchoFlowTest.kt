@@ -126,6 +126,94 @@ class EchoFlowTest {
         }
 
     @Test
+    fun labeledStandardFailurePreservesMessageThroughRetryAndEcho() =
+        runTest {
+            val label = "motd-rejected"
+            val text = "original message"
+            val description = "Fixture rejects first attempt"
+            val eventId = processor.insertPending(bufferId, label, "me", text, null, MessageKind.PRIVMSG)
+            processor.process(
+                networkId,
+                IrcEvent.StandardReply(
+                    ctx = MessageContext(null, 600, null, null, label),
+                    severity = IrcEvent.StandardReplySeverity.FAIL,
+                    commandName = "PRIVMSG",
+                    code = "CANNOTSENDTOCHAN",
+                    context = listOf("#chan"),
+                    description = description,
+                ),
+            )
+
+            val failedRows = rows()
+            assertEquals(2, failedRows.size)
+            val failed = failedRows.single { it.id == eventId }
+            assertEquals(MessageKind.PRIVMSG, failed.kind)
+            assertEquals(text, failed.text)
+            assertEquals(label, failed.pendingLabel)
+            assertTrue(failed.failed)
+            val error = failedRows.single { it.kind == MessageKind.ERROR }
+            assertEquals("PRIVMSG failed (CANNOTSENDTOCHAN): $description", error.text)
+
+            val retryLabel = "motd-retry"
+            val retry = checkNotNull(processor.beginRetry(eventId, retryLabel))
+            assertEquals(eventId, retry.id)
+            assertEquals(text, retry.text)
+            assertEquals(retryLabel, retry.pendingLabel)
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = MessageContext("accepted-msgid", 700, null, null, retryLabel),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("me"),
+                    target = "#chan",
+                    text = text,
+                    isSelf = true,
+                    replyToMsgid = null,
+                ),
+            )
+
+            val confirmedRows = rows()
+            assertEquals(2, confirmedRows.size)
+            val confirmed = confirmedRows.single { it.id == eventId }
+            assertEquals(MessageKind.PRIVMSG, confirmed.kind)
+            assertEquals(text, confirmed.text)
+            assertEquals("accepted-msgid", confirmed.msgid)
+            assertNull(confirmed.pendingLabel)
+            assertEquals(false, confirmed.failed)
+            assertEquals(error, confirmedRows.single { it.kind == MessageKind.ERROR })
+        }
+
+    @Test
+    fun labeledCannotSendErrorFailsOnlyTheMatchingPendingMessage() =
+        runTest {
+            val label = "motd-refused"
+            val newerLabel = "motd-newer"
+            val older = processor.insertPending(bufferId, label, "me", "older message", null, MessageKind.PRIVMSG)
+            val newer = processor.insertPending(bufferId, newerLabel, "me", "newer message", null, MessageKind.PRIVMSG)
+            val refusal =
+                IrcEvent.ServerError(
+                    code = "404",
+                    params = listOf("me", "#chan", "Cannot send to channel"),
+                    text = "Cannot send to channel",
+                    ctx = MessageContext(null, 600, null, null, label),
+                )
+            processor.process(networkId, refusal)
+
+            val inlineRows = rows()
+            assertEquals(3, inlineRows.size)
+            val failed = inlineRows.single { it.id == older }
+            assertEquals(MessageKind.PRIVMSG, failed.kind)
+            assertEquals("older message", failed.text)
+            assertEquals(label, failed.pendingLabel)
+            assertTrue(failed.failed)
+            assertEquals("404 Cannot send to channel", inlineRows.single { it.kind == MessageKind.ERROR }.text)
+            assertEquals(newer, processor.pendingOutgoingByLabel(networkId, newerLabel)?.id)
+
+            processor.process(networkId, refusal.copy(code = "403", ctx = refusal.ctx?.copy(serverTime = 700, label = "unknown")))
+            assertEquals(newer, processor.pendingOutgoingByLabel(networkId, newerLabel)?.id)
+        }
+
+    @Test
     fun liveWithoutMsgid_thenHistoryWithMsgid_promotesBoundaryRow() =
         runTest {
             val live =
