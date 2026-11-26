@@ -354,7 +354,8 @@ class LinkPreviewRepositoryImpl
                 val declared = responseKind(contentType)
                 val generic = isGenericContentType(contentType)
                 if (!generic && (declared == LinkPreviewKind.VIDEO || declared == LinkPreviewKind.FILE)) {
-                    return@request filePreview(finalUrl, contentType, declared)
+                    // MIME identifies the video; playback resolves any expiring redirect from the chat link.
+                    return@request filePreview(if (declared == LinkPreviewKind.VIDEO) url else finalUrl, contentType, declared)
                 }
                 if (!generic && declared == null) return@request null
                 val textByExtension = hasTextExtension(finalUrl)
@@ -852,7 +853,7 @@ class LinkPreviewRepositoryImpl
                     imageUrl = null,
                     siteName = URL(url).host,
                     kind = kind,
-                    directVideoUrl = url.takeIf { declaredType?.startsWith("video/", ignoreCase = true) == true },
+                    isDirectVideo = declaredType?.startsWith("video/", ignoreCase = true) == true,
                 )
             }
 

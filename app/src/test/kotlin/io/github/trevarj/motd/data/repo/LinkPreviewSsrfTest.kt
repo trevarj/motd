@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.data.repo
 
 import io.github.trevarj.motd.audio.MediaRouteResolver
+import io.github.trevarj.motd.audio.NetworkMediaHttp
 import io.github.trevarj.motd.audio.NetworkMediaRoute
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -10,6 +11,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.runTest
+import okhttp3.Request
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.After
@@ -209,27 +211,42 @@ class LinkPreviewSsrfTest {
         }
 
     @Test
-    fun redirect_to_extensionless_video_exposes_the_final_playback_url_from_headers() =
+    fun redirect_to_extensionless_video_caches_mime_classification_under_the_original_url() =
         runTest {
+            val policy = LinkPreviewFetchPolicy(enforceDestinationPolicy = false)
             val repository =
                 LinkPreviewRepositoryImpl(
                     prefs,
                     directResolver,
-                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+                    policy,
                     this,
                     StandardTestDispatcher(testScheduler),
                 )
             val original = server.url("/watch").toString()
-            val playbackUrl = server.url("/stream?token=keep%2Fexact").toString()
-            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", playbackUrl))
+            val signedRedirect = server.url("/signed-stream?token=keep%2Fexact").toString()
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", signedRedirect))
             server.enqueue(MockResponse().setHeader("Content-Type", "VIDEO/MP4; charset=binary").setHeader("Content-Length", 1024 * 1024))
 
             val preview = repository.preview(original, NETWORK_ID)
 
             assertEquals(LinkPreviewKind.VIDEO, preview?.kind)
-            assertEquals(playbackUrl, preview?.directVideoUrl)
-            assertEquals(playbackUrl, repository.cachedPreview(original, NETWORK_ID)?.preview?.directVideoUrl)
+            assertTrue(preview?.isDirectVideo == true)
+            assertEquals(original, preview?.url)
+            assertEquals("watch", preview?.title)
+            assertEquals(preview, repository.cachedPreview(original, NETWORK_ID)?.preview)
             assertEquals(2, server.requestCount)
+
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/signed-stream?token=fresh"))
+            server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setBody("fresh stream"))
+            val playbackRequest = Request.Builder().url(requireNotNull(preview).url).build()
+            NetworkMediaHttp(directResolver, policy).callFactory(NETWORK_ID).newCall(playbackRequest).execute().use {
+                assertEquals("token=fresh", it.request.url.encodedQuery)
+                assertEquals("fresh stream", it.body.string())
+            }
+            assertEquals("/watch", server.takeRequest().path)
+            assertEquals("/signed-stream?token=keep%2Fexact", server.takeRequest().path)
+            assertEquals("/watch", server.takeRequest().path)
+            assertEquals("/signed-stream?token=fresh", server.takeRequest().path)
         }
 
     @Test

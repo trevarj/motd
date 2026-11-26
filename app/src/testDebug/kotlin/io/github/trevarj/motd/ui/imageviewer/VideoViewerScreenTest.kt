@@ -4,8 +4,11 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.os.Build
+import android.os.Looper
 import android.view.View
 import android.view.ViewGroup
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
@@ -49,6 +52,7 @@ import org.robolectric.RuntimeEnvironment
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.util.concurrent.TimeUnit
 
 @OptIn(UnstableApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -63,30 +67,38 @@ class VideoViewerScreenTest {
 
     @Test
     @Config(qualifiers = "w320dp-h240dp", fontScale = 2f)
-    fun playbackFailureAndRetryUseTheOwningNetwork() {
+    fun playbackFailureAndRetryFollowFreshRedirectsThroughTheOwningNetwork() {
+        val url = "http://media.invalid/watch"
+        val browserComponent = registerHttpBrowser()
         RoutedInlineMediaFixture().use { fixture ->
-            repeat(2) {
+            val targets = listOf("/stream?token=first%2Fone", "/stream?token=second%2Ftwo")
+            for (target in targets) {
+                fixture.server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", target))
                 fixture.server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setBody("invalid video"))
             }
             compose.setContent {
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(LocalNetworkMediaHttp provides fixture.http) {
-                        VideoViewerScreen(VIDEO_URL, fixture.networkId, onBack = {})
+                        VideoViewerScreen(url, fixture.networkId, onBack = {})
                     }
                 }
             }
 
             awaitTag("video_viewer_failed")
-            assertEquals(1, fixture.server.requestCount)
+            assertEquals(2, fixture.server.requestCount)
             val browser = compose.onNodeWithText(label(R.string.chat_link_open_browser))
             browser.assertIsNotDisplayed()
             compose.onNodeWithText(label(R.string.video_viewer_browser_warning)).performScrollTo().assertIsDisplayed()
             browser.performScrollTo().assertIsDisplayed()
             compose.onNodeWithContentDescription(label(R.string.image_viewer_back)).assertIsDisplayed()
             compose.onNodeWithText(label(R.string.chat_retry)).performScrollTo().performClick()
-            compose.waitUntil(10_000) { fixture.server.requestCount == 2 }
+            compose.waitUntil(10_000) { fixture.server.requestCount == 4 }
             awaitTag("video_viewer_failed")
             assertEquals(List(2) { fixture.networkId }, fixture.selectedNetworks.toList())
+            val requests = List(4) { requireNotNull(fixture.server.takeRequest(1, TimeUnit.SECONDS)).requestLine }
+            assertEquals(targets.flatMap { listOf("GET $url HTTP/1.1", "GET http://media.invalid$it HTTP/1.1") }, requests)
+            browser.performScrollTo().performClick()
+            assertBrowserOpened(url, browserComponent)
         }
     }
 
@@ -207,6 +219,7 @@ class VideoViewerScreenTest {
             viewerBack.assertDoesNotExist()
             compose.runOnIdle {
                 assertEquals(hiddenBars, decor.systemUiVisibility and hiddenBars)
+                assertEquals(5_000, decor.findPlayerView()?.controllerShowTimeoutMs)
                 assertSame(player, decor.findPlayerView()?.player)
                 assertFalse(player.playWhenReady)
                 assertEquals(2_000L, player.currentPosition)
@@ -224,21 +237,58 @@ class VideoViewerScreenTest {
     }
 
     @Test
-    fun playerMenuOpensTheOriginalUrlInABrowser() {
-        val app = RuntimeEnvironment.getApplication()
-        val browser = ComponentName("test.browser", "test.browser.OpenLink")
-        val packageShadow = shadowOf(app.packageManager)
-        packageShadow.addActivityIfNotPresent(browser)
-        packageShadow.addIntentFilterForActivity(
-            browser,
-            IntentFilter(Intent.ACTION_VIEW).apply {
-                addCategory(Intent.CATEGORY_DEFAULT)
-                addCategory(Intent.CATEGORY_BROWSABLE)
-                addDataScheme("http")
-            },
-        )
-        val url = "$VIDEO_URL?quality=720%2Fp#t=1"
+    @Config(sdk = [28, 36])
+    fun immersiveControlsStayVisibleForAccessibility() {
+        val manager = ApplicationProvider.getApplicationContext<Context>().getSystemService(AccessibilityManager::class.java)
+        val accessibility = shadowOf(manager)
+        val hasRecommendedTimeout = Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q
+        if (hasRecommendedTimeout) {
+            accessibility.setInteractiveUiTimeout(10_000)
+        } else {
+            accessibility.setTouchExplorationEnabled(true)
+        }
         RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            lateinit var activity: ComponentActivity
+            compose.setContent {
+                activity = LocalActivity.current as ComponentActivity
+                MotdTheme(dynamicColor = false) {
+                    CompositionLocalProvider(LocalNetworkMediaHttp provides fixture.http) {
+                        VideoViewerScreen(VIDEO_URL, fixture.networkId, onBack = {})
+                    }
+                }
+            }
+            awaitTag("video_viewer_player")
+            compose.onNodeWithContentDescription(label(R.string.video_viewer_fullscreen)).performClick()
+            val exit = compose.onNodeWithContentDescription(label(R.string.video_viewer_exit_fullscreen))
+            exit.assertIsDisplayed()
+            val view =
+                compose.runOnIdle {
+                    requireNotNull(activity.window.decorView.findPlayerView()).also {
+                        assertEquals(if (hasRecommendedTimeout) 10_000 else 0, it.controllerShowTimeoutMs)
+                        assertTrue(it.player?.playWhenReady == true)
+                    }
+                }
+
+            val mainLooper = shadowOf(Looper.getMainLooper())
+            compose.runOnUiThread { mainLooper.idleFor(6, TimeUnit.SECONDS) }
+            exit.assertIsDisplayed()
+            compose.runOnIdle { assertTrue(view.isControllerFullyVisible) }
+
+            if (hasRecommendedTimeout) {
+                compose.runOnUiThread { mainLooper.idleFor(5, TimeUnit.SECONDS) }
+                exit.assertDoesNotExist()
+                compose.runOnIdle { assertFalse(view.isControllerFullyVisible) }
+            }
+        }
+    }
+
+    @Test
+    fun playerMenuOpensTheOriginalUrlInABrowser() {
+        val browser = registerHttpBrowser()
+        val url = "http://media.invalid/watch?quality=720%2Fp#t=1"
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", "/signed-stream?token=keep%2Fexact"))
             fixture.server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
             compose.setContent {
                 MotdTheme(dynamicColor = false) {
@@ -248,16 +298,39 @@ class VideoViewerScreenTest {
                 }
             }
             awaitTag("video_viewer_player")
+            compose.waitUntil(10_000) { fixture.server.requestCount == 2 }
             compose.onNodeWithContentDescription(label(R.string.action_more)).performClick()
             compose.onNodeWithText(label(R.string.video_viewer_browser_warning)).assertIsDisplayed()
             compose.onNodeWithText(label(R.string.chat_link_open_browser)).performClick()
-            compose.runOnIdle {
-                val intent = requireNotNull(shadowOf(app).nextStartedActivity)
-                assertEquals(Intent.ACTION_VIEW, intent.action)
-                assertEquals(browser, intent.component)
-                assertEquals(url, intent.dataString)
-            }
+            assertBrowserOpened(url, browser)
             compose.onNodeWithTag("video_viewer_player").assertIsDisplayed()
+        }
+    }
+
+    private fun registerHttpBrowser(): ComponentName {
+        val browser = ComponentName("test.browser", "test.browser.OpenLink")
+        val packageShadow = shadowOf(RuntimeEnvironment.getApplication().packageManager)
+        packageShadow.addActivityIfNotPresent(browser)
+        packageShadow.addIntentFilterForActivity(
+            browser,
+            IntentFilter(Intent.ACTION_VIEW).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addDataScheme("http")
+            },
+        )
+        return browser
+    }
+
+    private fun assertBrowserOpened(
+        url: String,
+        browser: ComponentName,
+    ) {
+        compose.runOnIdle {
+            val intent = requireNotNull(shadowOf(RuntimeEnvironment.getApplication()).nextStartedActivity)
+            assertEquals(Intent.ACTION_VIEW, intent.action)
+            assertEquals(browser, intent.component)
+            assertEquals(url, intent.dataString)
         }
     }
 

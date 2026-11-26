@@ -239,7 +239,7 @@ private fun LinkPreviewContent(
                 .heightIn(min = LINK_PREVIEW_MIN_HEIGHT)
                 .clip(RoundedCornerShape(LocalMediaCornerStyle.current.cornerRadius(12.dp)))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
-                .linkPreviewClicks(onClick, onLongClick)
+                .linkPreviewClicks(onClick, onLongClick, onClickLabel = if (preview.isDirectVideo) stringResource(R.string.chat_video_play) else null)
                 .padding(8.dp),
     ) {
         LinkPreviewLeading(preview, networkId)

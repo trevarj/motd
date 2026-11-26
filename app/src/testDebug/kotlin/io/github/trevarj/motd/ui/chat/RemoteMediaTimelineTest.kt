@@ -338,9 +338,8 @@ class RemoteMediaTimelineTest {
     }
 
     @Test
-    fun extensionlessDirectVideoOpensFinalUrlOnlyAfterPreviewTap() {
-        val original = "$LINK/${UUID.randomUUID()}"
-        val playbackUrl = "$original/stream?token=keep%2Fexact"
+    fun extensionlessDirectVideoLabelsPlayAndOpensTheOriginalChatUrl() {
+        val original = "$LINK/${UUID.randomUUID()}?from=chat%2Fcard#video"
         val openedMedia = mutableListOf<Pair<String, Boolean>>()
         val openedLinks = mutableListOf<String>()
         var loads = 0
@@ -350,7 +349,7 @@ class RemoteMediaTimelineTest {
             loadPreview = { url, _ ->
                 assertEquals(original, url)
                 loads++
-                PREVIEW.copy(url = playbackUrl, kind = LinkPreviewKind.VIDEO, directVideoUrl = playbackUrl)
+                PREVIEW.copy(url = url, kind = LinkPreviewKind.VIDEO, isDirectVideo = true)
             },
             onOpenMedia = { url, isVideo -> openedMedia.add(url to isVideo) },
             onOpenLink = openedLinks::add,
@@ -365,11 +364,34 @@ class RemoteMediaTimelineTest {
             assertTrue(openedMedia.isEmpty())
             assertTrue(openedLinks.isEmpty())
         }
-        compose.onNodeWithTag("link_preview_video_thumbnail", useUnmergedTree = true).performTouchInput { click() }
+        val card = compose.onNodeWithText("Example preview")
+        assertEquals(
+            RuntimeEnvironment.getApplication().getString(R.string.chat_video_play),
+            card.fetchSemanticsNode().config[SemanticsActions.OnClick].label,
+        )
+        card.performClick()
         compose.runOnIdle {
-            assertEquals(listOf(playbackUrl to true), openedMedia)
+            assertEquals(listOf(original to true), openedMedia)
             assertTrue(openedLinks.isEmpty())
         }
+    }
+
+    @Test
+    fun webVideoPreviewKeepsItsUnlabeledLinkAction() {
+        val original = "$LINK/${UUID.randomUUID()}"
+        val openedLinks = mutableListOf<String>()
+        render(
+            automatic = true,
+            text = original,
+            loadPreview = { _, _ -> PREVIEW.copy(kind = LinkPreviewKind.VIDEO) },
+            onOpenLink = openedLinks::add,
+        )
+
+        awaitTag("link_preview_video_thumbnail")
+        val card = compose.onNodeWithText("Example preview")
+        assertNull(card.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        card.performClick()
+        compose.runOnIdle { assertEquals(listOf(original), openedLinks) }
     }
 
     @Test

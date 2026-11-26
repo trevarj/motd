@@ -2355,11 +2355,10 @@ private fun MessageRow(
                                 }
 
                                 else -> {
-                                    val directVideoUrl = preview?.directVideoUrl
                                     if (preview?.palette != null) {
                                         if (!selecting) linkUrl?.let { onOpenPalette(preview.palette, it) }
-                                    } else if (directVideoUrl != null) {
-                                        onOpenMedia(directVideoUrl, true)
+                                    } else if (preview?.isDirectVideo == true) {
+                                        linkUrl?.let { onOpenMedia(it, true) }
                                     } else if (preview?.imageUrl == preview?.url && preview?.description?.startsWith("image/", ignoreCase = true) == true) {
                                         onOpenMedia(preview.url, false)
                                     } else {

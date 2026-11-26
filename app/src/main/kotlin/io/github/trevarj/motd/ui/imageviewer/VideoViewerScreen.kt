@@ -1,6 +1,9 @@
 package io.github.trevarj.motd.ui.imageviewer
 
+import android.content.Context
+import android.os.Build
 import android.view.View
+import android.view.accessibility.AccessibilityManager
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
@@ -270,7 +273,7 @@ internal fun VideoViewerScreen(
                     update = {
                         it.player = activePlayer
                         it.controllerHideOnTouch = immersive
-                        it.controllerShowTimeoutMs = if (immersive) 5_000 else 0
+                        it.controllerShowTimeoutMs = if (immersive) context.immersiveControlsTimeoutMillis() else 0
                         it.useController = lifecycle.currentState == Lifecycle.State.RESUMED
                         if (it.useController) it.showController()
                     },
@@ -345,6 +348,25 @@ internal fun VideoViewerScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+private fun Context.immersiveControlsTimeoutMillis(): Int {
+    val defaultTimeout = 5_000
+    val manager = getSystemService(AccessibilityManager::class.java) ?: return defaultTimeout
+    return when {
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+            manager.getRecommendedTimeoutMillis(defaultTimeout, AccessibilityManager.FLAG_CONTENT_CONTROLS or AccessibilityManager.FLAG_CONTENT_TEXT)
+        }
+
+        // Media3 treats zero as no auto-hide. Older Android has no recommended timeout API.
+        manager.isTouchExplorationEnabled -> {
+            0
+        }
+
+        else -> {
+            defaultTimeout
         }
     }
 }

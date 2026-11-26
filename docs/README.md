@@ -42,9 +42,11 @@ a readable image URI, not its URL. Copy uses the image's owning network route
 and the same 25 MiB streaming limit as Save; Share still shares the URL.
 
 Tap a direct video attachment in chat to watch it in the in-app player using
-the owning IRC network's media route. Use the fullscreen button to hide Android's
-system bars; Back exits fullscreen before returning to chat. **More actions →
-Open in browser** uses the browser's own network connection. Leaving the player
+the owning IRC network's media route. Playback follows redirects from the original
+chat link each time it requests the video. Use the fullscreen button to hide Android's
+system bars; Back exits fullscreen before returning to chat. Fullscreen controls
+honor Android's accessibility timeout. **More actions → Open in browser** opens the
+original chat link using the browser's own network connection. Leaving the player
 stops playback.
 
 Settings → Uploads links to each selected provider’s website and explains its

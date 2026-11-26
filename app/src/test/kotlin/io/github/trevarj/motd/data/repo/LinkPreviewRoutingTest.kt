@@ -25,6 +25,7 @@ import okhttp3.mockwebserver.SocketPolicy
 import okio.Buffer
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -171,7 +172,7 @@ class LinkPreviewRoutingTest {
                 assertEquals("Video author", preview.description)
                 assertEquals("https://i.ytimg.com/vi/dQw4w9WgXcQ/hqdefault.jpg", preview.imageUrl)
                 assertEquals(LinkPreviewKind.VIDEO, preview.kind)
-                assertNull(preview.directVideoUrl)
+                assertFalse(preview.isDirectVideo)
                 assertEquals("youtu.be", preview.siteName)
                 assertEquals(preview, repository.preview(url, NETWORK_ID))
                 assertEquals(2, server.requestCount)
