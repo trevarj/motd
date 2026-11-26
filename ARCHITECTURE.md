@@ -491,6 +491,7 @@ flowchart TD
   motion, never a refresh fade. Entry alignment, reader scrolling and active live/send gap
   animations retain exclusive placement ownership.
   The reply-jump pulse redraws only the target highlight without recomposing the row.
+  Swipe-to-reply keeps its resting row height and draws its indicator only during the gesture or settle.
   History-gap dividers keep the same native content subtree when appearing or closing;
   expanded network batches, invite actions and transfer rows are not remounted by seam changes.
 - Forwarding destinations observe the whole chat list only while the forwarding picker

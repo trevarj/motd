@@ -8,6 +8,7 @@ import androidx.compose.foundation.gestures.horizontalDrag
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.systemGestures
@@ -15,11 +16,13 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Reply
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.structuralEqualityPolicy
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.graphicsLayer
@@ -112,6 +115,7 @@ internal fun SwipeToReplyContainer(
     val haptics = LocalHapticFeedback.current
     val currentOnReply by rememberUpdatedState(onReply)
     var offsetPx by remember { mutableFloatStateOf(0f) }
+    val showIndicator by remember { derivedStateOf(structuralEqualityPolicy()) { offsetPx != 0f } }
     val sourceCoordinates = remember { Ref<LayoutCoordinates>() }
     val view = LocalView.current
     val thresholdPx = with(density) { SWIPE_REPLY_THRESHOLD_DP.dp.toPx() }
@@ -125,6 +129,7 @@ internal fun SwipeToReplyContainer(
         modifier =
             Modifier
                 .fillMaxWidth()
+                .heightIn(min = 24.dp)
                 .onGloballyPositioned { sourceCoordinates.value = it }
                 .pointerInput(
                     enabled,
@@ -199,24 +204,28 @@ internal fun SwipeToReplyContainer(
                     }
                 },
     ) {
-        val progress = (abs(offsetPx) / thresholdPx).coerceIn(0f, 1f)
-        Icon(
-            imageVector = Icons.AutoMirrored.Filled.Reply,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0),
-            modifier =
-                Modifier
-                    .align(if (layoutDirection == LayoutDirection.Ltr) Alignment.CenterStart else Alignment.CenterEnd)
-                    .padding(horizontal = 16.dp)
-                    .graphicsLayer {
-                        alpha = progress
-                        scaleX = 0.75f + 0.25f * progress
-                        scaleY = 0.75f + 0.25f * progress
-                    },
-        )
-        Box(modifier = Modifier.offset { IntOffset(offsetPx.roundToInt(), 0) }) {
-            content(
-                modifier.semantics {
+        if (showIndicator) {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.Reply,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary, minimumContrast = 3.0),
+                modifier =
+                    Modifier
+                        .align(if (layoutDirection == LayoutDirection.Ltr) Alignment.CenterStart else Alignment.CenterEnd)
+                        .padding(horizontal = 16.dp)
+                        .graphicsLayer {
+                            val progress = (abs(offsetPx) / thresholdPx).coerceIn(0f, 1f)
+                            alpha = progress
+                            scaleX = 0.75f + 0.25f * progress
+                            scaleY = 0.75f + 0.25f * progress
+                        },
+            )
+        }
+        content(
+            Modifier
+                .offset { IntOffset(offsetPx.roundToInt(), 0) }
+                .then(modifier)
+                .semantics {
                     customActions =
                         listOf(
                             CustomAccessibilityAction(replyLabel) {
@@ -225,7 +234,6 @@ internal fun SwipeToReplyContainer(
                             },
                         )
                 },
-            )
-        }
+        )
     }
 }
