@@ -109,7 +109,7 @@ internal fun LinkActionsSheet(
                     modifier =
                         Modifier.testTag("link_action_open_browser").clickable {
                             onDismiss()
-                            context.launchLink(browserLinkIntent(context.packageManager, link), R.string.chat_link_no_browser)
+                            context.openChatLinkInBrowser(url)
                         },
                 )
             }
@@ -160,6 +160,10 @@ private fun externalLinkIntent(url: String): Intent {
     val scheme = url.substringBefore(':')
     val normalized = scheme.lowercase()
     return browsableIntent((if (scheme == normalized) url else url.replaceRange(0, scheme.length, normalized)).toUri())
+}
+
+internal fun Context.openChatLinkInBrowser(url: String) {
+    launchLink(browserLinkIntent(packageManager, url.toUri()), R.string.chat_link_no_browser)
 }
 
 private fun browserLinkIntent(

@@ -209,6 +209,30 @@ class LinkPreviewSsrfTest {
         }
 
     @Test
+    fun redirect_to_extensionless_video_exposes_the_final_playback_url_from_headers() =
+        runTest {
+            val repository =
+                LinkPreviewRepositoryImpl(
+                    prefs,
+                    directResolver,
+                    LinkPreviewFetchPolicy(enforceDestinationPolicy = false),
+                    this,
+                    StandardTestDispatcher(testScheduler),
+                )
+            val original = server.url("/watch").toString()
+            val playbackUrl = server.url("/stream?token=keep%2Fexact").toString()
+            server.enqueue(MockResponse().setResponseCode(302).setHeader("Location", playbackUrl))
+            server.enqueue(MockResponse().setHeader("Content-Type", "VIDEO/MP4; charset=binary").setHeader("Content-Length", 1024 * 1024))
+
+            val preview = repository.preview(original, NETWORK_ID)
+
+            assertEquals(LinkPreviewKind.VIDEO, preview?.kind)
+            assertEquals(playbackUrl, preview?.directVideoUrl)
+            assertEquals(playbackUrl, repository.cachedPreview(original, NETWORK_ID)?.preview?.directVideoUrl)
+            assertEquals(2, server.requestCount)
+        }
+
+    @Test
     fun redirect_chains_are_capped() =
         runTest {
             val repository =

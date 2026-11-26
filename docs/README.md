@@ -41,6 +41,10 @@ In the full-screen image viewer, Copy image copies the original image bytes as
 a readable image URI, not its URL. Copy uses the image's owning network route
 and the same 25 MiB streaming limit as Save; Share still shares the URL.
 
+Tap a direct video attachment in chat to watch it in the full-screen player.
+Playback starts only after a tap and uses the owning IRC network's media route.
+Back returns to the same chat; leaving the player stops playback.
+
 Settings → Uploads links to each selected provider’s website and explains its
 retention or security caveats. CrafterBin privacy and Litterbox expiry remain in
 Security. Custom services need a 0x0-compatible multipart HTTPS endpoint, with
@@ -274,8 +278,6 @@ never Apply, Quote, Send, draft insertion, or history replacement. Redaction, so
 changes, search replacement, leaving the screen, or disabling the feature clear
 this local preview. No translation result cache is
 stored. Language coverage and factual preservation are experimental, not guarantees.
-The active video view forwards its owning-message hold while retaining playback
-controls; physical-device video gesture behavior remains unmeasured.
 
 ## Removed Labs feature
 

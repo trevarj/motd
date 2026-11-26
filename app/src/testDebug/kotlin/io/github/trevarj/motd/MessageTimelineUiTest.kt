@@ -390,7 +390,7 @@ class MessageTimelineUiTest {
                                         onLongPress = {},
                                         onReply = {},
                                         onReact = { _, _ -> },
-                                        onImageClick = {},
+                                        onOpenMedia = { _, _ -> },
                                         onRetry = {},
                                         loadPreview = { _, _ ->
                                             loads++
@@ -2124,7 +2124,7 @@ class MessageTimelineUiTest {
                         onDismissExternalTranslation = onDismissExternalTranslation,
                         onReply = onReply,
                         onReact = { _, _ -> },
-                        onImageClick = {},
+                        onOpenMedia = { _, _ -> },
                         onRetry = onRetry,
                         onDelete = onDelete,
                         loadPreview = loadPreview,

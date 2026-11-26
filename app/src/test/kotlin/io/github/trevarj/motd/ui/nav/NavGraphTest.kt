@@ -5,6 +5,7 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.LifecycleRegistry
 import androidx.lifecycle.ViewModelStore
+import androidx.navigation.NavDestination.Companion.hasRoute
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.ComposeNavigator
 import androidx.navigation.compose.composable
@@ -137,7 +138,7 @@ class NavGraphTest {
     }
 
     @Test
-    fun `restored image viewer keeps the selected network and exact URL`() {
+    fun `both media viewers restore their URL and network and ignore repeat taps from chat`() {
         fun controller() =
             NavHostController(ApplicationProvider.getApplicationContext<Context>()).apply {
                 setLifecycleOwner(ResumedOwner())
@@ -150,19 +151,32 @@ class NavGraphTest {
                 createGraph(startDestination = ChatListRoute) {
                     composable<ChatListRoute> {}
                     composable<ImageViewerRoute> {}
+                    composable<VideoViewerRoute> {}
                 }
         }
 
-        val original = controller().apply { installGraph() }
-        val image = ImageViewerRoute("https://irc.trevs.site:9443/upload/user/account/123-cat%20photo.png?x=1&y=2", networkId = 42)
-        original.navigate(image)
-        val restored =
+        fun restored(original: NavHostController) =
             controller().apply {
                 restoreState(original.saveState())
                 installGraph()
             }
 
-        assertEquals(image, restored.currentBackStackEntry!!.toRoute<ImageViewerRoute>())
+        val original = controller().apply { installGraph() }
+        val origin = requireNotNull(original.currentBackStackEntry)
+        val url = "https://irc.trevs.site:9443/upload/user/account/123%20media.mp4?x=1&y=2"
+        original.openMediaViewer(origin, url, networkId = 42, isVideo = false)
+        original.openMediaViewer(origin, url, networkId = 42, isVideo = true)
+
+        val imageViewer = restored(original)
+        assertTrue(imageViewer.currentDestination!!.hasRoute<ImageViewerRoute>())
+        assertEquals(ImageViewerRoute(url, 42), imageViewer.currentBackStackEntry!!.toRoute<ImageViewerRoute>())
+        assertTrue(imageViewer.popBackStack())
+        assertEquals(ChatListRoute, imageViewer.currentBackStackEntry!!.toRoute<ChatListRoute>())
+
+        imageViewer.openMediaViewer(requireNotNull(imageViewer.currentBackStackEntry), url, networkId = 42, isVideo = true)
+        val videoViewer = restored(imageViewer)
+        assertTrue(videoViewer.currentDestination!!.hasRoute<VideoViewerRoute>())
+        assertEquals(VideoViewerRoute(url, 42), videoViewer.currentBackStackEntry!!.toRoute<VideoViewerRoute>())
     }
 
     @Test

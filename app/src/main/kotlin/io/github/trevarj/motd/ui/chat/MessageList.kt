@@ -393,7 +393,7 @@ fun MessageList(
     // queued by the VM instead of silently dropped (bug: react on a just-sent message did nothing).
     onReact: (MessageEntity, String) -> Unit,
     onOpenReactions: ((MessageEntity) -> Unit)? = null,
-    onImageClick: (String) -> Unit,
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     bufferId: Long? = null,
     ebooksQuietFeed: Boolean = false,
@@ -892,7 +892,7 @@ fun MessageList(
                         swipeToReplyEnabled = swipeToReplyEnabled,
                         onReact = onReact,
                         onOpenReactions = onOpenReactions,
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onRetry = onRetry,
                         canRetry = canRetry(msg),
                         onDelete = onDelete,
@@ -1932,7 +1932,7 @@ private fun MessageRow(
     swipeToReplyEnabled: Boolean,
     onReact: (MessageEntity, String) -> Unit,
     onOpenReactions: ((MessageEntity) -> Unit)?,
-    onImageClick: (String) -> Unit,
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit,
     onRetry: (MessageEntity) -> Unit,
     canRetry: Boolean,
     onDelete: (MessageEntity) -> Unit,
@@ -2327,7 +2327,7 @@ private fun MessageRow(
                         // Pass the entity, not just msgid: the VM handles pending reactions uniformly.
                         onReact = { emoji -> onReact(msg, emoji) },
                         onOpenReactions = openReactions,
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onLinkPreviewClick = {
                             when (previewState) {
                                 PreviewState.Awaiting -> {
@@ -2340,10 +2340,13 @@ private fun MessageRow(
                                 }
 
                                 else -> {
+                                    val directVideoUrl = preview?.directVideoUrl
                                     if (preview?.palette != null) {
                                         if (!selecting) linkUrl?.let { onOpenPalette(preview.palette, it) }
+                                    } else if (directVideoUrl != null) {
+                                        onOpenMedia(directVideoUrl, true)
                                     } else if (preview?.imageUrl == preview?.url && preview?.description?.startsWith("image/", ignoreCase = true) == true) {
-                                        onImageClick(preview.url)
+                                        onOpenMedia(preview.url, false)
                                     } else {
                                         linkUrl?.let(onOpenLink)
                                     }

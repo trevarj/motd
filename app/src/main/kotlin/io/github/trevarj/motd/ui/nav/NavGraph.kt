@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.nav
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.ReportDrawn
+import androidx.compose.animation.AnimatedContentScope
 import androidx.compose.animation.AnimatedContentTransitionScope
 import androidx.compose.animation.AnimatedContentTransitionScope.SlideDirection
 import androidx.compose.animation.EnterTransition
@@ -33,6 +34,8 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavBackStackEntry
 import androidx.navigation.NavController
+import androidx.navigation.NavDestination.Companion.hasRoute
+import androidx.navigation.NavGraphBuilder
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -66,6 +69,7 @@ import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
 import io.github.trevarj.motd.ui.feed.MentionsScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
+import io.github.trevarj.motd.ui.imageviewer.VideoViewerScreen
 import io.github.trevarj.motd.ui.invite.AccountSetupScreen
 import io.github.trevarj.motd.ui.invite.CreateContactInviteScreen
 import io.github.trevarj.motd.ui.invite.CreateInviteScreen
@@ -361,8 +365,8 @@ fun MotdNavGraph(
                                 onOpenScheduledMessages = {
                                     navController.navigate(ScheduledMessagesRoute(it)) { launchSingleTop = true }
                                 },
-                                onOpenImage = { url, networkId ->
-                                    navController.navigate(ImageViewerRoute(url, networkId))
+                                onOpenMedia = { url, networkId, isVideo ->
+                                    navController.openMediaViewer(entry, url, networkId, isVideo)
                                 },
                                 onOpenPalette = { palette, sourceLink ->
                                     navController.navigate(
@@ -718,18 +722,22 @@ fun MotdNavGraph(
                 onBack = { navController.popBackStack() },
             )
         }
-        composable<ImageViewerRoute>(
-            // Full-screen image reads better appearing/dismissing in place than sliding sideways.
-            enterTransition = { fadeIn(MotdMotion.navigationFade) },
-            exitTransition = { fadeOut(MotdMotion.navigationFade) },
-            popEnterTransition = { fadeIn(MotdMotion.navigationFade) },
-            popExitTransition = { fadeOut(MotdMotion.navigationFade) },
-        ) { entry ->
+        fadingMediaViewer<ImageViewerRoute> { entry ->
             val route = entry.toRoute<ImageViewerRoute>()
             ImageViewerScreen(
                 url = route.url,
                 networkId = route.networkId,
                 onBack = { navController.popBackStack() },
+            )
+        }
+        fadingMediaViewer<VideoViewerRoute> { entry ->
+            val route = entry.toRoute<VideoViewerRoute>()
+            VideoViewerScreen(
+                url = route.url,
+                networkId = route.networkId,
+                onBack = {
+                    if (navController.currentBackStackEntry == entry) navController.popBackStack()
+                },
             )
         }
         composable<SharePickerRoute> {
@@ -1049,14 +1057,14 @@ private fun NavHostController.openSettingsResult(destination: SettingsSearchDest
 internal fun AnimatedContentTransitionScope<NavBackStackEntry>.motdPredictivePopEnterTransition(swipeEdge: Int): EnterTransition =
     when {
         isChatInitial() -> EnterTransition.None
-        isImageViewerInitial() -> fadeIn(MotdMotion.navigationFade)
+        isMediaViewerInitial() -> fadeIn(MotdMotion.navigationFade)
         else -> slideIntoContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
     }
 
 internal fun AnimatedContentTransitionScope<NavBackStackEntry>.motdPredictivePopExitTransition(swipeEdge: Int): ExitTransition =
     when {
         isChatInitial() -> slideOutOfContainer(SlideDirection.End, MotdMotion.chatBackSpatial)
-        isImageViewerInitial() -> fadeOut(MotdMotion.navigationFade)
+        isMediaViewerInitial() -> fadeOut(MotdMotion.navigationFade)
         else -> slideOutOfContainer(SlideDirection.End, MotdMotion.navigationDrawerSpatial)
     }
 
@@ -1066,7 +1074,29 @@ private fun AnimatedContentTransitionScope<NavBackStackEntry>.isChatInitial(): B
 
 // The viewer deliberately dismisses in place rather than sliding, so its pop must key on the
 // destination being left.
-private fun AnimatedContentTransitionScope<NavBackStackEntry>.isImageViewerInitial(): Boolean = initialState.destination.route == ImageViewerRoute::class.qualifiedName
+private fun AnimatedContentTransitionScope<NavBackStackEntry>.isMediaViewerInitial(): Boolean = initialState.destination.hasRoute<ImageViewerRoute>() || initialState.destination.hasRoute<VideoViewerRoute>()
+
+private inline fun <reified T : Any> NavGraphBuilder.fadingMediaViewer(noinline content: @Composable AnimatedContentScope.(NavBackStackEntry) -> Unit) {
+    composable<T>(
+        enterTransition = { fadeIn(MotdMotion.navigationFade) },
+        exitTransition = { fadeOut(MotdMotion.navigationFade) },
+        content = content,
+    )
+}
+
+internal fun NavHostController.openMediaViewer(
+    from: NavBackStackEntry,
+    url: String,
+    networkId: Long?,
+    isVideo: Boolean,
+) {
+    if (currentBackStackEntry != from) return
+    if (isVideo) {
+        navigate(VideoViewerRoute(url, networkId))
+    } else {
+        navigate(ImageViewerRoute(url, networkId))
+    }
+}
 
 internal fun isChatRoutePattern(route: String?): Boolean {
     val chatRouteName = ChatRoute::class.qualifiedName ?: return false

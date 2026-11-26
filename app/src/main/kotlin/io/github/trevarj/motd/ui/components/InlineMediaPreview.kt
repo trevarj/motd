@@ -1,6 +1,5 @@
 package io.github.trevarj.motd.ui.components
 
-import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Box
@@ -13,7 +12,6 @@ import androidx.compose.material.icons.outlined.Download
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -38,15 +36,6 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.viewinterop.AndroidView
-import androidx.media3.common.MediaItem
-import androidx.media3.common.PlaybackException
-import androidx.media3.common.Player
-import androidx.media3.common.util.UnstableApi
-import androidx.media3.datasource.okhttp.OkHttpDataSource
-import androidx.media3.exoplayer.ExoPlayer
-import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
-import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import coil.request.videoFrameMillis
@@ -112,17 +101,15 @@ internal fun InlineMediaPreview(
     url: String,
     networkId: Long?,
     modifier: Modifier,
-    onImageClick: (String) -> Unit,
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit,
     onLongPress: () -> Unit,
 ) {
     val automatic = LocalAutomaticRemoteMedia.current
-    var consent by rememberSaveable(url, networkId) { mutableStateOf(false) }
-    val networkAllowed = automatic || consent
-    val requestNetwork = { consent = true }
     if (isVideoUrl(url)) {
-        InlineVideoPreview(url, networkId, networkAllowed, requestNetwork, modifier, onLongPress)
+        InlineVideoPreview(url, networkId, automatic, modifier, { onOpenMedia(url, true) }, onLongPress)
     } else {
-        InlineImagePreview(url, networkId, networkAllowed, requestNetwork, modifier, onImageClick, onLongPress)
+        var consent by rememberSaveable(url, networkId) { mutableStateOf(false) }
+        InlineImagePreview(url, networkId, automatic || consent, { consent = true }, modifier, { onOpenMedia(url, false) }, onLongPress)
     }
 }
 
@@ -133,7 +120,7 @@ private fun InlineImagePreview(
     networkAllowed: Boolean,
     requestNetwork: () -> Unit,
     modifier: Modifier,
-    onImageClick: (String) -> Unit,
+    onImageClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
     var state by remember(url, networkId) { mutableStateOf(RemoteMediaLoadState.AWAITING) }
@@ -150,7 +137,7 @@ private fun InlineImagePreview(
             modifier.remoteMediaClicks(
                 state = state,
                 loadedLabel = stringResource(R.string.chat_image_open),
-                onLoaded = { onImageClick(url) },
+                onLoaded = onImageClick,
                 requestNetwork = requestNetwork,
                 retry = { retry++ },
                 onLongPress = onLongPress,
@@ -158,127 +145,44 @@ private fun InlineImagePreview(
     )
 }
 
-@OptIn(UnstableApi::class)
 @Composable
 private fun InlineVideoPreview(
     url: String,
     networkId: Long?,
     networkAllowed: Boolean,
-    requestNetwork: () -> Unit,
     modifier: Modifier,
+    onVideoClick: () -> Unit,
     onLongPress: () -> Unit,
 ) {
-    var playing by rememberSaveable(url, networkId) { mutableStateOf(false) }
-    if (playing) {
-        val context = LocalContext.current
-        val http = LocalNetworkMediaHttp.current
-        var playbackRetry by remember(url, networkId) { mutableIntStateOf(0) }
-        val player =
-            remember(context, url, networkId, http, playbackRetry) {
-                http?.let {
-                    ExoPlayer
-                        .Builder(context)
-                        .setMediaSourceFactory(DefaultMediaSourceFactory(OkHttpDataSource.Factory(it.callFactory(networkId))))
-                        .build()
-                }
-            }
-        var playbackFailed by remember(player) { mutableStateOf(false) }
-        if (player != null) {
-            DisposableEffect(player) {
-                val listener =
-                    object : Player.Listener {
-                        override fun onPlayerError(error: PlaybackException) {
-                            playbackFailed = true
-                        }
-                    }
-                player.addListener(listener)
-                player.setMediaItem(MediaItem.fromUri(url))
-                player.prepare()
-                player.play()
-                onDispose {
-                    player.removeListener(listener)
-                    player.release()
-                }
-            }
-        }
-        if (player == null || playbackFailed) {
-            Box(
-                contentAlignment = Alignment.Center,
-                modifier =
-                    modifier
-                        .testTag("inline_video_failed")
-                        .remoteMediaClicks(
-                            state = RemoteMediaLoadState.FAILED,
-                            loadedLabel = stringResource(R.string.chat_video_play),
-                            onLoaded = {},
-                            requestNetwork = requestNetwork,
-                            retry = { playbackRetry++ },
-                            onLongPress = onLongPress,
-                        ),
-            ) {
-                MediaStatus(stringResource(R.string.chat_remote_media_failed))
-            }
-        } else {
-            AndroidView(
-                factory = {
-                    PlayerView(it).apply {
-                        this.player = player
-                        setOnLongClickListener {
-                            onLongPress()
-                            true
-                        }
-                    }
-                },
-                update = {
-                    it.player = player
-                    it.setOnLongClickListener {
-                        onLongPress()
-                        true
-                    }
-                },
-                modifier = modifier.testTag("inline_video_preview"),
-            )
-        }
-        return
-    }
-
     var state by remember(url, networkId) { mutableStateOf(RemoteMediaLoadState.AWAITING) }
-    var retry by rememberSaveable(url, networkId) { mutableIntStateOf(0) }
+    val playLabel = stringResource(R.string.chat_video_play)
     Box(
         contentAlignment = Alignment.Center,
         modifier =
             modifier
                 .testTag("inline_video_preview")
-                .remoteMediaClicks(
-                    state = state,
-                    loadedLabel = stringResource(R.string.chat_video_play),
-                    onLoaded = {
-                        requestNetwork()
-                        playing = true
-                    },
-                    requestNetwork = requestNetwork,
-                    retry = { retry++ },
-                    onLongPress = onLongPress,
-                ),
+                .combinedClickable(
+                    onClick = onVideoClick,
+                    onClickLabel = playLabel,
+                    onLongClick = onLongPress,
+                ).semantics { contentDescription = playLabel },
     ) {
         RemoteMediaImage(
             url = url,
             networkId = networkId,
             videoFrame = true,
             networkAllowed = networkAllowed,
-            retry = retry,
+            retry = 0,
             state = state,
             onState = { state = it },
             modifier = Modifier.fillMaxSize(),
         )
-        if (state == RemoteMediaLoadState.LOADED) {
-            Icon(
-                imageVector = Icons.Filled.PlayCircle,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurface,
-                modifier = Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = 0.56f)),
-            )
-        }
+        Icon(
+            imageVector = Icons.Filled.PlayCircle,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.background(MaterialTheme.colorScheme.surface.copy(alpha = 0.56f)),
+        )
     }
 }
 
@@ -329,6 +233,7 @@ private fun RemoteMediaImage(
             },
             modifier = Modifier.fillMaxSize(),
         )
+        if (videoFrame) return@Box
         when (state) {
             RemoteMediaLoadState.AWAITING -> {
                 Icon(

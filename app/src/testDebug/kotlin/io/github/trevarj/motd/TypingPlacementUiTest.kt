@@ -103,7 +103,7 @@ class TypingPlacementUiTest {
                         onBack = {},
                         onOpenChannelInfo = {},
                         onOpenSearch = {},
-                        onOpenImage = {},
+                        onOpenMedia = { _, _ -> },
                         onOpenPalette = { _, _ -> },
                         nickNormalizer = { it.lowercase() },
                         onSubmit = {},

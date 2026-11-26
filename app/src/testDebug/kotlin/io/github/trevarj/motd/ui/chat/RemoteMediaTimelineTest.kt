@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.CachedLinkPreview
 import io.github.trevarj.motd.data.repo.LinkPreview
+import io.github.trevarj.motd.data.repo.LinkPreviewKind
 import io.github.trevarj.motd.data.repo.RetryableLinkPreviewException
 import io.github.trevarj.motd.ui.components.LinkActionsSheet
 import io.github.trevarj.motd.ui.components.LocalAutomaticRemoteMedia
@@ -308,12 +309,12 @@ class RemoteMediaTimelineTest {
     }
 
     @Test
-    fun extensionlessImagePreviewOpensViewerInsteadOfBrowser() {
+    fun mimeConfirmedImageWithVideoSuffixOpensAsAnImageInsteadOfInBrowser() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(imageResponse())
             val original = "http://media.invalid/${UUID.randomUUID()}"
-            val resolved = "$original/photo"
-            val openedImages = mutableListOf<String>()
+            val resolved = "$original/photo.mp4"
+            val openedMedia = mutableListOf<Pair<String, Boolean>>()
             val openedLinks = mutableListOf<String>()
             render(
                 automatic = true,
@@ -323,16 +324,51 @@ class RemoteMediaTimelineTest {
                 loadPreview = { _, _ ->
                     PREVIEW.copy(url = resolved, imageUrl = resolved, description = "IMAGE/PNG")
                 },
-                onImageClick = openedImages::add,
+                onOpenMedia = { url, isVideo -> openedMedia.add(url to isVideo) },
                 onOpenLink = openedLinks::add,
             )
 
             awaitTag("link_preview_thumbnail")
             compose.onNodeWithTag("link_preview_thumbnail", useUnmergedTree = true).performTouchInput { click() }
             compose.runOnIdle {
-                assertEquals(listOf(resolved), openedImages)
+                assertEquals(listOf(resolved to false), openedMedia)
                 assertEquals(emptyList<String>(), openedLinks)
             }
+        }
+    }
+
+    @Test
+    fun extensionlessDirectVideoOpensFinalUrlOnlyAfterPreviewTap() {
+        val original = "$LINK/${UUID.randomUUID()}"
+        val playbackUrl = "$original/stream?token=keep%2Fexact"
+        val openedMedia = mutableListOf<Pair<String, Boolean>>()
+        val openedLinks = mutableListOf<String>()
+        var loads = 0
+        render(
+            automatic = false,
+            text = original,
+            loadPreview = { url, _ ->
+                assertEquals(original, url)
+                loads++
+                PREVIEW.copy(url = playbackUrl, kind = LinkPreviewKind.VIDEO, directVideoUrl = playbackUrl)
+            },
+            onOpenMedia = { url, isVideo -> openedMedia.add(url to isVideo) },
+            onOpenLink = openedLinks::add,
+        )
+
+        awaitTag("link_preview_awaiting")
+        compose.runOnIdle { assertEquals(0, loads) }
+        compose.onNodeWithTag("link_preview_awaiting", useUnmergedTree = true).performTouchInput { click() }
+        awaitTag("link_preview_video_thumbnail")
+        compose.runOnIdle {
+            assertEquals(1, loads)
+            assertTrue(openedMedia.isEmpty())
+            assertTrue(openedLinks.isEmpty())
+        }
+        compose.onNodeWithTag("link_preview_video_thumbnail", useUnmergedTree = true).performTouchInput { click() }
+        compose.runOnIdle {
+            assertEquals(listOf(playbackUrl to true), openedMedia)
+            assertTrue(openedLinks.isEmpty())
         }
     }
 
@@ -419,7 +455,7 @@ class RemoteMediaTimelineTest {
                 networkMediaHttp = fixture.http,
                 text = "$url $LINK/${UUID.randomUUID()}",
                 showImages = { showImages.value },
-                onImageClick = openedImages::add,
+                onOpenMedia = { openedUrl, _ -> openedImages.add(openedUrl) },
                 loadPreview = { _, _ ->
                     linkLoads++
                     PREVIEW
@@ -465,7 +501,7 @@ class RemoteMediaTimelineTest {
                 networkMediaHttp = fixture.http,
                 text = "$LINK/article ${images.joinToString(" ")}",
                 loadPreview = { _, _ -> null },
-                onImageClick = openedImages::add,
+                onOpenMedia = { openedUrl, _ -> openedImages.add(openedUrl) },
             )
 
             compose.waitUntil(10_000) {
@@ -512,7 +548,7 @@ class RemoteMediaTimelineTest {
                 layoutDensity = { density.value },
                 messageKind = { kind.value },
                 onLongPress = longPressed::add,
-                onImageClick = openedImages::add,
+                onOpenMedia = { openedUrl, _ -> openedImages.add(openedUrl) },
                 uriHandler =
                     object : UriHandler {
                         override fun openUri(uri: String) {
@@ -647,44 +683,35 @@ class RemoteMediaTimelineTest {
     @Test
     @GraphicsMode(GraphicsMode.Mode.NATIVE)
     @Config(qualifiers = "w411dp-h891dp")
-    @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
-    fun activePlayerViewLongHoldPreservesControllerChildren() {
+    fun coldVideoTileLongPressDoesNotOpenAndTapDoesNotDownloadThumbnail() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(imageResponse())
-            // Keep playback active without a decoder error replacing the AndroidView.
-            fixture.server.enqueue(MockResponse().setSocketPolicy(okhttp3.mockwebserver.SocketPolicy.NO_RESPONSE))
+            val url = "http://media.invalid/${UUID.randomUUID()}.mp4"
+            val opened = mutableListOf<Pair<String, Boolean>>()
             val held = mutableListOf<MessageEntity>()
             render(
-                automatic = true,
+                automatic = false,
                 networkId = fixture.networkId,
                 networkMediaHttp = fixture.http,
                 loadPreview = { _, _ -> null },
-                text = "http://media.invalid/${UUID.randomUUID()}.mp4",
+                text = url,
+                onOpenMedia = { openedUrl, isVideo -> opened.add(openedUrl to isVideo) },
                 onLongPress = held::add,
             )
-            awaitTag("inline_media_loaded")
-            compose.onNodeWithTag("inline_video_preview", useUnmergedTree = true).performTouchInput { click() }
+            awaitTag("inline_media_awaiting")
+            val tile = compose.onNodeWithTag("inline_video_preview", useUnmergedTree = true)
+            tile.performTouchInput { longClick() }
             compose.runOnIdle {
-                val activity =
-                    androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
-                        .getInstance()
-                        .getActivitiesInStage(androidx.test.runner.lifecycle.Stage.RESUMED)
-                        .single()
-
-                fun find(view: android.view.View): androidx.media3.ui.PlayerView? {
-                    if (view is androidx.media3.ui.PlayerView) return view
-                    if (view is android.view.ViewGroup) {
-                        for (index in 0 until view.childCount) find(view.getChildAt(index))?.let { return it }
-                    }
-                    return null
-                }
-                val playerView = checkNotNull(find(activity.window.decorView))
-                assertTrue(playerView.player != null)
-                assertTrue(playerView.performLongClick())
+                assertEquals(url, held.single().text)
+                assertTrue(opened.isEmpty())
+                assertEquals(0, fixture.server.requestCount)
+            }
+            tile.performTouchInput { click() }
+            compose.runOnIdle {
+                assertEquals(listOf(url to true), opened)
                 assertEquals(1, held.size)
-                assertEquals("http://media.invalid/", held.single().text.substringBeforeLast('/') + "/")
-                val play = playerView.findViewById<android.view.View>(androidx.media3.ui.R.id.exo_play_pause)
-                assertTrue("controller child remains clickable", play.hasOnClickListeners())
+                assertEquals(0, fixture.server.requestCount)
+                assertTrue(fixture.selectedNetworks.isEmpty())
             }
         }
     }
@@ -699,7 +726,7 @@ class RemoteMediaTimelineTest {
         onOpenLink: (String) -> Unit = {},
         text: String = LINK,
         showImages: () -> Boolean = { true },
-        onImageClick: (String) -> Unit = {},
+        onOpenMedia: (String, Boolean) -> Unit = { _, _ -> },
         layoutDensity: () -> LayoutDensity = { LayoutDensity.COMFORTABLE },
         messageKind: () -> MessageKind = { MessageKind.PRIVMSG },
         onLongPress: (MessageEntity) -> Unit = {},
@@ -726,7 +753,7 @@ class RemoteMediaTimelineTest {
                         onLongPress = onLongPress,
                         onReply = {},
                         onReact = { _, _ -> },
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onRetry = {},
                         loadPreview = loadPreview,
                         richContentReady = true,

@@ -843,15 +843,18 @@ class LinkPreviewRepositoryImpl
                 url: String,
                 contentType: String?,
                 kind: LinkPreviewKind,
-            ): LinkPreview =
-                LinkPreview(
+            ): LinkPreview {
+                val declaredType = contentType?.substringBefore(';')?.trim()?.takeIf(String::isNotBlank)
+                return LinkPreview(
                     url = url,
                     title = textTitle(url),
-                    description = contentType?.substringBefore(';')?.trim()?.takeIf(String::isNotBlank),
+                    description = declaredType,
                     imageUrl = null,
                     siteName = URL(url).host,
                     kind = kind,
+                    directVideoUrl = url.takeIf { declaredType?.startsWith("video/", ignoreCase = true) == true },
                 )
+            }
 
             internal fun youtubeOEmbedUrl(url: String): String? {
                 val parsed = runCatching { URL(url) }.getOrNull() ?: return null

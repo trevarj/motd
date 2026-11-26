@@ -74,7 +74,7 @@ class InlineMediaPreviewTest {
                             url = url,
                             networkId = fixture.networkId,
                             modifier = Modifier.size(160.dp),
-                            onImageClick = { opens++ },
+                            onOpenMedia = { _, _ -> opens++ },
                             onLongPress = {},
                         )
                     }
@@ -118,7 +118,7 @@ class InlineMediaPreviewTest {
                             url = url,
                             networkId = fixture.networkId,
                             modifier = Modifier.size(160.dp),
-                            onImageClick = {},
+                            onOpenMedia = { _, _ -> },
                             onLongPress = {},
                         )
                     }
@@ -137,12 +137,11 @@ class InlineMediaPreviewTest {
     }
 
     @Test
-    fun videoPlaybackFailureOffersRoutedRetry() {
+    fun videoWithThumbnailOpensOnlyOnTap() {
         RoutedInlineMediaFixture().use { fixture ->
             fixture.server.enqueue(imageResponse())
-            fixture.server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setBody("invalid video"))
-            fixture.server.enqueue(MockResponse().setHeader("Content-Type", "video/mp4").setBody("invalid video"))
             val url = "http://media.invalid/${UUID.randomUUID()}.mp4"
+            val opened = mutableListOf<Pair<String, Boolean>>()
             compose.setContent {
                 MotdTheme(dynamicColor = false) {
                     CompositionLocalProvider(
@@ -153,7 +152,7 @@ class InlineMediaPreviewTest {
                             url = url,
                             networkId = fixture.networkId,
                             modifier = Modifier.size(160.dp),
-                            onImageClick = {},
+                            onOpenMedia = { openedUrl, isVideo -> opened.add(openedUrl to isVideo) },
                             onLongPress = {},
                         )
                     }
@@ -161,40 +160,47 @@ class InlineMediaPreviewTest {
             }
 
             awaitTag("inline_media_loaded")
-            compose.onNodeWithTag("inline_video_preview", useUnmergedTree = true).performTouchInput { click() }
-            awaitTag("inline_video_failed")
-            assertEquals(2, fixture.server.requestCount)
-            compose.onNodeWithTag("inline_video_failed", useUnmergedTree = true).performTouchInput { click() }
-            compose.waitUntil(10_000) { fixture.server.requestCount == 3 }
-            awaitTag("inline_video_failed")
-            assertEquals(List(3) { fixture.networkId }, fixture.selectedNetworks.toList())
+            compose.runOnIdle { assertTrue(opened.isEmpty()) }
+            compose.onNodeWithTag("inline_video_preview").assertHasClickAction().performTouchInput { click() }
+            compose.runOnIdle {
+                assertEquals(listOf(url to true), opened)
+                assertEquals(1, fixture.server.requestCount)
+                assertEquals(listOf(fixture.networkId), fixture.selectedNetworks.toList())
+            }
         }
     }
 
     @Test
-    fun missingVideoClientFailsWithoutStartingAnotherRequest() {
+    fun videoWithFailedThumbnailStillOpensOnTap() {
         RoutedInlineMediaFixture().use { fixture ->
-            fixture.server.enqueue(imageResponse())
+            fixture.server.enqueue(MockResponse().setResponseCode(404))
             val url = "http://media.invalid/${UUID.randomUUID()}.mp4"
+            val opened = mutableListOf<Pair<String, Boolean>>()
             compose.setContent {
                 MotdTheme(dynamicColor = false) {
-                    CompositionLocalProvider(LocalAutomaticRemoteMedia provides true) {
+                    CompositionLocalProvider(
+                        LocalAutomaticRemoteMedia provides true,
+                        LocalNetworkMediaHttp provides fixture.http,
+                    ) {
                         InlineMediaPreview(
                             url = url,
                             networkId = fixture.networkId,
                             modifier = Modifier.size(160.dp),
-                            onImageClick = {},
+                            onOpenMedia = { openedUrl, isVideo -> opened.add(openedUrl to isVideo) },
                             onLongPress = {},
                         )
                     }
                 }
             }
 
-            awaitTag("inline_media_loaded")
-            compose.onNodeWithTag("inline_video_preview", useUnmergedTree = true).performTouchInput { click() }
-            awaitTag("inline_video_failed")
-            compose.onNodeWithTag("inline_video_failed", useUnmergedTree = true).performTouchInput { click() }
-            compose.runOnIdle { assertEquals(1, fixture.server.requestCount) }
+            awaitTag("inline_media_failed")
+            compose.runOnIdle { assertTrue(opened.isEmpty()) }
+            compose.onNodeWithTag("inline_video_preview").assertHasClickAction().performTouchInput { click() }
+            compose.runOnIdle {
+                assertEquals(listOf(url to true), opened)
+                assertEquals(1, fixture.server.requestCount)
+                assertEquals(listOf(fixture.networkId), fixture.selectedNetworks.toList())
+            }
         }
     }
 

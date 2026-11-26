@@ -436,7 +436,7 @@ fun ChatScreen(
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
     onOpenSearch: (Long) -> Unit = {},
-    onOpenImage: (String, Long?) -> Unit = { _, _ -> },
+    onOpenMedia: (url: String, networkId: Long?, isVideo: Boolean) -> Unit = { _, _, _ -> },
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
     onOpenBuffer: (Long) -> Unit = {},
     onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
@@ -758,7 +758,7 @@ fun ChatScreen(
         },
         onOpenSearch = onOpenSearch,
         onOpenConversationLinks = viewModel::openConversationLinks,
-        onOpenImage = { onOpenImage(it, state.buffer?.networkId) },
+        onOpenMedia = { url, isVideo -> onOpenMedia(url, state.buffer?.networkId, isVideo) },
         onOpenPalette = onOpenPalette,
         onInviteUser = {
             viewModel.ensureMembersObserved()
@@ -1307,7 +1307,7 @@ internal fun ChatContent(
     onOpenChannelInfo: (Long) -> Unit,
     onOpenSearch: (Long) -> Unit,
     onOpenConversationLinks: (() -> Unit)? = null,
-    onOpenImage: (String) -> Unit,
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit,
     onOpenPalette: (PaletteDocument, String) -> Unit,
     nickNormalizer: (String) -> String,
     onSubmit: (String) -> Unit,
@@ -4973,7 +4973,7 @@ internal fun ChatContent(
                                                 swipeToReplyEnabled = swipeToReplyEnabled,
                                                 onReact = onReact,
                                                 onOpenReactions = onTimelineOpenReactions,
-                                                onImageClick = onOpenImage,
+                                                onOpenMedia = onOpenMedia,
                                                 onRetry = onRetry,
                                                 canRetry = canRetryMessage,
                                                 onDelete = onDelete,

@@ -109,7 +109,7 @@ internal fun CompactMessageRow(
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onOpenReactions: (() -> Unit)? = null,
-    onImageClick: (String) -> Unit = {},
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit = { _, _ -> },
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
     onSenderLongClick: (() -> Unit)? = null,
@@ -286,7 +286,7 @@ internal fun CompactMessageRow(
                 InlineMediaPreview(
                     url = url,
                     networkId = networkId,
-                    onImageClick = onImageClick,
+                    onOpenMedia = onOpenMedia,
                     onLongPress = onLongPress,
                     modifier =
                         Modifier

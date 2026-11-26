@@ -329,6 +329,11 @@ enum class ChatSoundCue { SEND, RECEIVE }
     val networkId: Long? = null,
 )
 
+@Serializable data class VideoViewerRoute(
+    val url: String,
+    val networkId: Long? = null,
+)
+
 // Inbound ACTION_SEND: pick the chat that receives the shared payload.
 @Serializable data object SharePickerRoute
 

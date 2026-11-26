@@ -1093,6 +1093,9 @@
     <string name="image_viewer_saved">Saved to Pictures/motd</string>
     <string name="image_viewer_save_failed">Couldn\'t save image</string>
     <string name="image_viewer_load_failed">Couldn\'t load image</string>
+    <string name="video_viewer_loading">Loading video</string>
+    <string name="video_viewer_failed">Couldn\'t play video</string>
+    <string name="video_viewer_browser_warning">Your browser won’t use this chat’s network route.</string>
 
     <!-- Round 4: customizable UI settings. Consumers land in WP-U1/U2/U3; each entry is
          tagged so lint (warningsAsErrors) stays green mid-wave.

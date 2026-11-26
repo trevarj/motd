@@ -241,7 +241,7 @@ class ComposerUploadedImageUiTest {
                                 onBack = {},
                                 onOpenChannelInfo = {},
                                 onOpenSearch = {},
-                                onOpenImage = { error("The draft preview is local-only") },
+                                onOpenMedia = { _, _ -> error("The draft preview is local-only") },
                                 onOpenPalette = { _, _ -> },
                                 nickNormalizer = String::lowercase,
                                 onSubmit = {

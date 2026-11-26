@@ -100,7 +100,7 @@ class ReadAloudPlayerUiTest {
         onSetReply: (MessageEntity?) -> Unit = {},
         uriHandler: UriHandler? = null,
         loadPreview: suspend (String, Long?) -> LinkPreview? = { _, _ -> null },
-        onOpenImage: (String) -> Unit = {},
+        onOpenMedia: (String, Boolean) -> Unit = { _, _ -> },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
         networkId: Long = 0,
         networkMediaHttp: NetworkMediaHttp? = null,
@@ -150,7 +150,7 @@ class ReadAloudPlayerUiTest {
                                 onBack = {},
                                 onOpenChannelInfo = {},
                                 onOpenSearch = {},
-                                onOpenImage = onOpenImage,
+                                onOpenMedia = onOpenMedia,
                                 nickNormalizer = { it.lowercase() },
                                 onSubmit = {},
                                 onTyping = {},
@@ -376,7 +376,7 @@ class ReadAloudPlayerUiTest {
                         null
                     }
                 },
-                onOpenImage = openedImages::add,
+                onOpenMedia = { url, _ -> openedImages.add(url) },
                 onAudioToggle = audioRequests::add,
             ) { f, room ->
                 admit(f, room)

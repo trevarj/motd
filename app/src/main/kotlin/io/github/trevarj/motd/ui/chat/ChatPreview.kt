@@ -137,7 +137,7 @@ fun ChatContentPreviewBody(
         onBack = {},
         onOpenChannelInfo = {},
         onOpenSearch = {},
-        onOpenImage = {},
+        onOpenMedia = { _, _ -> },
         nickNormalizer = { it.lowercase() },
         onSubmit = {},
         onTyping = {},

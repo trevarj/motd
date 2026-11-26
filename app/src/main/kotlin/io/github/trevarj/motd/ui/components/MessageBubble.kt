@@ -441,7 +441,7 @@ fun MessageBubble(
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onOpenReactions: (() -> Unit)? = null,
-    onImageClick: (String) -> Unit = {},
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit = { _, _ -> },
     onLinkPreviewClick: () -> Unit = {},
     // Nickname taps and holds are independent of ordinary message actions.
     onSenderClick: (() -> Unit)? = null,
@@ -514,7 +514,7 @@ fun MessageBubble(
                 onLongPressLabel = onLongPressLabel,
                 onReact = onReact,
                 onOpenReactions = onOpenReactions,
-                onImageClick = onImageClick,
+                onOpenMedia = onOpenMedia,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
                 onSenderLongClick = onSenderLongClick,
@@ -561,7 +561,7 @@ fun MessageBubble(
                 onLongPressLabel = onLongPressLabel,
                 onReact = onReact,
                 onOpenReactions = onOpenReactions,
-                onImageClick = onImageClick,
+                onOpenMedia = onOpenMedia,
                 onLinkPreviewClick = onLinkPreviewClick,
                 onSenderClick = onSenderClick,
                 onSenderLongClick = onSenderLongClick,
@@ -612,7 +612,7 @@ fun MessageBubble(
             onLongPressLabel = onLongPressLabel,
             onReact = onReact,
             onOpenReactions = onOpenReactions,
-            onImageClick = onImageClick,
+            onOpenMedia = onOpenMedia,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
             onSenderLongClick = onSenderLongClick,
@@ -666,7 +666,7 @@ fun MessageBubble(
             onLongPressLabel = onLongPressLabel,
             onReact = onReact,
             onOpenReactions = onOpenReactions,
-            onImageClick = onImageClick,
+            onOpenMedia = onOpenMedia,
             onLinkPreviewClick = onLinkPreviewClick,
             onSenderClick = onSenderClick,
             onSenderLongClick = onSenderLongClick,
@@ -931,7 +931,7 @@ fun MessageBubble(
                     InlineMediaPreview(
                         url = url,
                         networkId = networkId,
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onLongPress = onLongPress,
                         // Reserve a 4:3 box until the bitmap lands so rows don't jump the reversed-list
                         // anchor.
@@ -1057,7 +1057,7 @@ private fun ComfortableActionBubble(
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onOpenReactions: (() -> Unit)? = null,
-    onImageClick: (String) -> Unit = {},
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit = { _, _ -> },
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
     onSenderLongClick: (() -> Unit)? = null,
@@ -1281,7 +1281,7 @@ private fun ComfortableActionBubble(
                     InlineMediaPreview(
                         url = url,
                         networkId = networkId,
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onLongPress = onLongPress,
                         modifier =
                             Modifier
@@ -1355,7 +1355,7 @@ private fun ActionMessageRow(
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onOpenReactions: (() -> Unit)? = null,
-    onImageClick: (String) -> Unit = {},
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit = { _, _ -> },
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
     onSenderLongClick: (() -> Unit)? = null,
@@ -1535,7 +1535,7 @@ private fun ActionMessageRow(
                     InlineMediaPreview(
                         url = url,
                         networkId = networkId,
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onLongPress = onLongPress,
                         modifier =
                             Modifier
@@ -1783,7 +1783,7 @@ private fun TwoLineMessageRow(
     onLongPressLabel: String? = null,
     onReact: (String) -> Unit = {},
     onOpenReactions: (() -> Unit)? = null,
-    onImageClick: (String) -> Unit = {},
+    onOpenMedia: (url: String, isVideo: Boolean) -> Unit = { _, _ -> },
     onLinkPreviewClick: () -> Unit = {},
     onSenderClick: (() -> Unit)? = null,
     onSenderLongClick: (() -> Unit)? = null,
@@ -2002,7 +2002,7 @@ private fun TwoLineMessageRow(
                     InlineMediaPreview(
                         url = url,
                         networkId = networkId,
-                        onImageClick = onImageClick,
+                        onOpenMedia = onOpenMedia,
                         onLongPress = onLongPress,
                         modifier =
                             Modifier

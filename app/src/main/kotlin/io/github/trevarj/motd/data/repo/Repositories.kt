@@ -464,6 +464,7 @@ data class LinkPreview(
     val siteName: String?,
     val kind: LinkPreviewKind = LinkPreviewKind.WEB,
     val palette: PaletteDocument? = null,
+    val directVideoUrl: String? = null,
 ) {
     init {
         require((kind == LinkPreviewKind.PALETTE) == (palette != null))

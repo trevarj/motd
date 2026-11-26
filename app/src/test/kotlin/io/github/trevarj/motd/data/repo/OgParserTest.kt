@@ -109,6 +109,7 @@ class OgParserTest {
                 """.trimIndent(),
             )!!
         assertEquals(LinkPreviewKind.VIDEO, preview.kind)
+        assertNull(preview.directVideoUrl)
     }
 
     @Test
