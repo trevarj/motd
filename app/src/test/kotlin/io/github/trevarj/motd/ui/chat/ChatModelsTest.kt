@@ -3,6 +3,7 @@ package io.github.trevarj.motd.ui.chat
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.unit.dp
+import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -336,7 +337,7 @@ class ChatModelsTest {
     }
 
     @Test fun `no autoscroll when count did not grow`() {
-        // Same count (e.g. an echo-confirm msgid swap) or a shrink must not yank the viewport.
+        // A stable-position echo or a shrink is not a new arrival.
         assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 10))
         assertFalse(shouldAutoscrollToNewest(atBottom = true, oldCount = 10, newCount = 9))
     }
@@ -443,6 +444,50 @@ class ChatModelsTest {
 
         tracker.onScrollStateChanged(scrolling = true, programmatic = false, atBottom = false)
         assertNull(tracker.onTimelineChangedWithEntry(13, 9).liveEntryId)
+    }
+
+    @Test fun `confirmed retry promoted over its newer error row repins without a live entrance`() {
+        val failed = message(self = true, failed = true, id = 7, serverTime = 100)
+        val error = message(kind = MessageKind.ERROR, id = 8, serverTime = 200)
+        val pending = failed.copy(failed = false, pendingLabel = "retry")
+        val echoed = pending.copy(msgid = "wire", pendingLabel = null, serverTime = 300)
+        val previous = ItemSnapshotList(0, 0, listOf(error, pending))
+        val current = ItemSnapshotList(0, 0, listOf(echoed, error))
+        val tracker = AutoFollowTracker(initialItemCount = previous.size)
+        tracker.reset(previous.size, atBottom = true, newestEffectiveId = error.id)
+
+        assertTrue(hasConfirmedOwnHeadPromotion(previous, current))
+        val bareEcho = echoed.copy(msgid = null)
+        assertTrue(hasConfirmedOwnHeadPromotion(previous, ItemSnapshotList(0, 0, listOf(bareEcho, error))))
+        // Paging may conflate the intermediate retry-pending presentation.
+        assertTrue(hasConfirmedOwnHeadPromotion(ItemSnapshotList(0, 0, listOf(error, failed)), current))
+        assertFalse(tracker.onTimelineChanged(current.size, echoed.id))
+        assertTrue(leadingLiveEntries(previous.items, error.id, current.items, MessageVisibilityPolicy(MessageVisibilitySpec()), false, null).isEmpty())
+
+        assertFalse(hasConfirmedOwnHeadPromotion(previous, ItemSnapshotList(0, 0, listOf(error, echoed))))
+        assertFalse(hasConfirmedOwnHeadPromotion(previous, ItemSnapshotList(1, 0, current.items)))
+        assertFalse(hasConfirmedOwnHeadPromotion(ItemSnapshotList(0, 0, listOf(error, echoed)), current))
+        assertFalse(hasConfirmedOwnHeadPromotion(ItemSnapshotList(0, 0, listOf(error, bareEcho)), current))
+        assertFalse(hasConfirmedOwnHeadPromotion(previous, ItemSnapshotList(0, 0, listOf(failed, error))))
+        assertFalse(hasConfirmedOwnHeadPromotion(previous, ItemSnapshotList(0, 0, listOf(pending, error))))
+        assertFalse(hasConfirmedOwnHeadPromotion(ItemSnapshotList(0, 0, listOf(error)), current))
+    }
+
+    @Test fun `ordered echoes of split sends repin regardless of durable id order`() {
+        val first = message(self = true, id = 7, serverTime = 100).copy(pendingLabel = "first")
+        val second = message(self = true, id = 8, serverTime = 101).copy(pendingLabel = "second")
+        val pending = ItemSnapshotList(0, 0, listOf(second, first))
+        val confirmedFirst = first.copy(msgid = "first-echo", pendingLabel = null, serverTime = 200)
+        val confirmedSecond = second.copy(msgid = "second-echo", pendingLabel = null, serverTime = 201)
+        val afterFirst = ItemSnapshotList(0, 0, listOf(confirmedFirst, second))
+        val afterSecond = ItemSnapshotList(0, 0, listOf(confirmedSecond, confirmedFirst))
+        val tracker = AutoFollowTracker(initialItemCount = pending.size)
+        tracker.reset(pending.size, atBottom = true, newestEffectiveId = second.id)
+
+        assertFalse(tracker.onTimelineChanged(afterFirst.size, confirmedFirst.id))
+        assertTrue(hasConfirmedOwnHeadPromotion(pending, afterFirst))
+        assertFalse(tracker.onTimelineChanged(afterSecond.size, confirmedSecond.id))
+        assertTrue(hasConfirmedOwnHeadPromotion(afterFirst, afterSecond))
     }
 
     @Test fun `one presentation reveals new leading rows but not the flight or a reordered echo`() {

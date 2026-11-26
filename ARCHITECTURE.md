@@ -559,6 +559,8 @@ flowchart TD
   A confirmation committed after the first SQL read but before its caller resumes discards that
   generation; the replacement page keeps the canonical event ID and viewport/read anchors.
   This covers Room 2.8.5's initial-load invalidation gap without a separate delivery-status store.
+  If confirming an existing send moves it to index zero, an already-following viewport stays
+  pinned without replaying its entrance. A reader scroll or explicit jump keeps viewport ownership.
   A retained load defers to its room-version bracket while in flight, and table-wide commits
   afterwards only trigger a conflated version recheck, so commits elsewhere cannot restart it or
   discard a page on its way to the screen. Notification deferral and the last concurrent load's

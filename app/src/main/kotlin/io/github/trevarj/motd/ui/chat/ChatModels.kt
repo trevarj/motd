@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.paging.ItemSnapshotList
 import androidx.paging.LoadState
 import androidx.paging.PagingData
 import io.github.trevarj.motd.data.db.BufferType
@@ -740,6 +741,22 @@ internal class AutoFollowTracker(
             liveEntryId = newNewestEffectiveId.takeIf { shouldFollow },
         )
     }
+}
+
+/** An echo can move an existing optimistic row to raw index zero without inserting a live row. */
+internal fun hasConfirmedOwnHeadPromotion(
+    previous: ItemSnapshotList<MessageEntity>,
+    current: ItemSnapshotList<MessageEntity>,
+): Boolean {
+    val head = current.getOrNull(0) ?: return false
+    val previousHead = previous.getOrNull(0) ?: return false
+    if (head.id == previousHead.id || !head.isSelf || head.pendingLabel != null || head.failed) return false
+    // ponytail: scan only on this candidate transition; no per-presentation identity index.
+    for (index in 1 until previous.items.size) {
+        val row = previous.items[index]
+        if (row.id == head.id) return row.isSelf && row.msgid == null && (row.pendingLabel != null || row.failed)
+    }
+    return false
 }
 
 /** The small piece of timeline state that is allowed to cross into row rendering. */

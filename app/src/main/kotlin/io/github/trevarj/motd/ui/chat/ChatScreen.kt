@@ -3681,17 +3681,15 @@ internal fun ChatContent(
         // row away from. [timelinePresentationPin] restores that index from a row conserved across both
         // presentations, or declines; see its documentation for why every uncertain case declines.
         //
-        // Guards, in order, and all of them mandatory:
-        //   * initialPositionSettled — entry positioning owns the viewport until it says otherwise, and
-        //     it deliberately scrolls through unloaded rows to get there.
-        //   * not scrolling and not mid-programmatic-scroll — a pin landing inside a drag or a fling
-        //     would itself be the jump this exists to prevent.
-        //   * not following, and not at the bottom — the auto-follow effect above issues its own
-        //     requestScrollToItem(0) for the same presentation and must win; two requests in one frame
-        //     resolve to the last one issued, and it must not be this.
+        // Entry positioning owns the viewport until settled; a drag, fling or explicit scroll
+        // also takes precedence. While following, the only correction here is for a same-ID echo
+        // that moves to the head without qualifying as a new arrival above. Otherwise, pin a
+        // parked reader only when they are not already at the bottom.
         //
         // The collector never suspends, so it keeps up with the conflated presentation flow and the
         // request reaches the same remeasure that presents the update.
+        val latestPayloadAllowed by rememberUpdatedState(payloadAllowed)
+        val explicitJumpPending by rememberUpdatedState(jumpTarget != null)
         LaunchedEffect(items, listState, initialPositionSettled) {
             if (!initialPositionSettled) return@LaunchedEffect
             var previous: ItemSnapshotList<MessageEntity>? = null
@@ -3700,7 +3698,17 @@ internal fun ChatContent(
                 previous = snapshot
                 if (prior == null) return@collect
                 if (listState.isScrollInProgress || programmaticScrolls > 0) return@collect
-                if (autoFollow.following || atBottom) return@collect
+                if (autoFollow.following) {
+                    // Exact jump placement also uses requestScrollToItem, so scroll state alone
+                    // cannot tell whether the next remeasure belongs to the jump.
+                    if (!explicitJumpPending && latestPayloadAllowed && !suppressNextAutoFollow &&
+                        hasConfirmedOwnHeadPromotion(prior, snapshot)
+                    ) {
+                        listState.requestScrollToItem(0)
+                    }
+                    return@collect
+                }
+                if (atBottom) return@collect
                 val index = listState.firstVisibleItemIndex
                 val key = prior.getOrNull(index)?.id ?: return@collect
                 // Fast path, and the same answer timelinePresentationPin gives: a key the presentation
