@@ -1,0 +1,5 @@
+- Play videos in chat, switch to immersive fullscreen, or open them in your browser.
+- Fix metadata stripping for photos from cameras that leave EXIF orientation undefined.
+- Make failed messages easier to retry or delete without jumping the timeline.
+- Recognize IRC bots in joins, WHO, and WHOIS. Improve channel-context routing and support shared avatars on servers with IRCv3 metadata-3.
+- Smooth swipe-to-reply and the highlight after jumping to a replied-to message.
