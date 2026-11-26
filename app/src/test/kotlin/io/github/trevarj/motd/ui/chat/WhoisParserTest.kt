@@ -35,6 +35,21 @@ class WhoisParserTest {
         assertEquals("cached.host", cachedOnly.host)
     }
 
+    @Test fun whois_bot_badge_needs_fresh_numeric_not_cached_roster_state() {
+        val end = numeric("318", "me", "alice", "End of WHOIS")
+        val info = parseWhois(listOf(numeric("335", "me", "alice", "arbitrary text"), end))
+        assertEquals(true, info?.isBot)
+        assertNull(parseWhois(listOf(numeric("335", "me", "alice"), end))?.isBot)
+        assertNull(parseWhois(listOf(end))?.isBot)
+
+        val cached = UserEntity(networkId = 1, nick = "alice", username = "aliceuser", isBot = true)
+        val sheet = NickSheetState("Alice", cached = cached)
+        assertEquals("aliceuser", sheet.details?.username)
+        assertNull(sheet.details?.isBot)
+        assertNull(sheet.copy(whois = parseWhois(listOf(end))).details?.isBot)
+        assertEquals(true, sheet.copy(whois = info).details?.isBot)
+    }
+
     private fun numeric(
         code: String,
         vararg params: String,

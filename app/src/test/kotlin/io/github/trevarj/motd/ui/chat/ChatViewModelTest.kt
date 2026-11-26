@@ -3736,6 +3736,58 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun reopened_nick_sheet_waits_for_prior_unlabeled_whois_to_finish() =
+        runTest {
+            val transport = RecordingTransport()
+            val client = testClient(transport)
+            client.start()
+            runCurrent()
+            transport.feed(":srv CAP * LS :message-tags")
+            transport.feed(":srv CAP me ACK :message-tags")
+            transport.feed(":srv 001 me :Welcome")
+            runCurrent()
+            assertTrue(client.state.value is IrcClientState.Ready)
+
+            val vm = viewModel(channel, FakeConnectionManager(network.id, client = client))
+            vm.state.first { it.buffer != null }
+            vm.openNickSheet("alice")
+            runCurrent()
+            assertEquals(1, transport.sent.count { it == "WHOIS alice" })
+
+            vm.dismissNickSheet()
+            vm.openNickSheet("alice")
+            runCurrent()
+            assertEquals(1, transport.sent.count { it == "WHOIS alice" })
+
+            transport.feed(":srv 335 me alice :old bot result")
+            transport.feed(":srv 318 me alice :End of WHOIS")
+            runCurrent()
+            assertEquals(2, transport.sent.count { it == "WHOIS alice" })
+            assertNull(vm.nickSheet.value?.whois)
+
+            transport.feed(":srv 311 me alice user host * :Fresh identity")
+            transport.feed(":srv 335 me alice :fresh bot result")
+            transport.feed(":srv 318 me alice :End of WHOIS")
+            runCurrent()
+            assertEquals(
+                "Fresh identity",
+                vm.nickSheet.value
+                    ?.details
+                    ?.realname,
+            )
+            assertEquals(
+                true,
+                vm.nickSheet.value
+                    ?.details
+                    ?.isBot,
+            )
+
+            client.stop()
+            runCurrent()
+            assertNull(vm.nickSheet.value?.whois)
+        }
+
+    @Test
     fun `nick sheet without IRC details keeps raw identity and cancels cached lookup`() =
         runTest {
             val manager = FakeConnectionManager(network.id, state = IrcClientState.Disconnected)
@@ -8202,6 +8254,10 @@ class ChatViewModelTest {
     private class RecordingTransport : IrcTransport {
         private val inbound = Channel<String>(Channel.UNLIMITED)
         val sent = mutableListOf<String>()
+
+        suspend fun feed(line: String) {
+            inbound.send(line)
+        }
 
         override suspend fun connect() = Unit
 

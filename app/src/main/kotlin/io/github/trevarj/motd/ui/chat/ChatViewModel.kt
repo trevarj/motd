@@ -3037,7 +3037,7 @@ class ChatViewModel
         ) {
             nickDetailsJob?.cancel()
             nickDetailsJob = null
-            val sheet = nickSheets.open(nick, allowIgnore = loadIrcDetails)
+            val sheet = nickSheets.open(nick, loadIrcDetails = loadIrcDetails)
             if (!loadIrcDetails) return
             // Moderation visibility depends on our prefixes in the channel roster. Load it on this
             // explicit interaction, not on every channel entry.
@@ -3047,6 +3047,7 @@ class ChatViewModel
             val normalizedNick = identityRules.value.normalize(nick)
             nickDetailsJob =
                 viewModelScope.launch {
+                    if (client != null) launch { sheet.loadWhois(client) { connectionManager.clientFor(networkId) === client } }
                     userDao.observeByNick(networkId, normalizedNick).collect { cached ->
                         sheet.update { it.copy(cached = cached) }
                     }
@@ -3056,11 +3057,6 @@ class ChatViewModel
                 // WhoxRow events still flow through EventProcessor while the correlated request waits,
                 // so UserEntity and this sheet's userDao collector converge through the normal path.
                 viewModelScope.launch { runCatching { client.whox(nick) } }
-            }
-            viewModelScope.launch {
-                val lines = runCatching { client.whois(nick) }.getOrNull().orEmpty()
-                val info = parseWhois(lines)
-                if (info != null) sheet.update { it.copy(whois = info) }
             }
         }
 

@@ -7,7 +7,7 @@ import java.util.concurrent.atomic.AtomicInteger
 fun whoxFlagsIndicateBot(
     flags: String?,
     botMode: Char?,
-): Boolean = botMode != null && flags?.contains(botMode) == true
+): Boolean = botMode != null && flags?.indexOf(botMode, startIndex = 1)?.let { it >= 0 } == true
 
 internal object WhoxCommands {
     const val FIELDS = "tuhnafr"

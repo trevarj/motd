@@ -277,6 +277,10 @@ class EventMapper(
                 finishNames(msg)
             }
 
+            "352" -> {
+                mapWho(msg)
+            }
+
             "354" -> {
                 mapWhox(msg)
             }
@@ -446,7 +450,7 @@ class EventMapper(
         // extended-join: JOIN <channel> <account> :<realname>
         val account = msg.params.getOrNull(1)?.let { if (it == "*") null else it }
         val realname = msg.params.getOrNull(2)
-        return IrcEvent.Joined(ctx, nick, channel, account, realname, isSelf(msg.source))
+        return IrcEvent.Joined(ctx, nick, channel, account, realname, isSelf(msg.source), isBot = "bot" in msg.tags)
     }
 
     private fun mapMarkRead(msg: IrcMessage): IrcEvent {
@@ -559,6 +563,16 @@ class EventMapper(
         pendingNamesMembers -= members.size
         val display = namesDisplay.remove(key) ?: channel
         return IrcEvent.Names(display, members)
+    }
+
+    private fun mapWho(msg: IrcMessage): IrcEvent {
+        val username = msg.params.getOrNull(2) ?: return IrcEvent.Raw(msg)
+        val host = msg.params.getOrNull(3) ?: return IrcEvent.Raw(msg)
+        val nick = msg.params.getOrNull(5)?.takeIf(String::isNotBlank) ?: return IrcEvent.Raw(msg)
+        val flags = msg.params.getOrNull(6) ?: return IrcEvent.Raw(msg)
+        if (!flags.startsWith('H') && !flags.startsWith('G')) return IrcEvent.Raw(msg)
+        val realname = msg.params.getOrNull(7)?.substringAfter(' ', missingDelimiterValue = "")
+        return IrcEvent.WhoRow(nick, username, host, flags, realname, msg)
     }
 
     private fun mapWhox(msg: IrcMessage): IrcEvent {

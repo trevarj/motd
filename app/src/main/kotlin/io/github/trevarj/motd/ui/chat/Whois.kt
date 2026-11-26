@@ -9,13 +9,17 @@ import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.hasExactNickIgnore
 import io.github.trevarj.motd.data.repo.isExactIgnoreNick
 import io.github.trevarj.motd.dickord.isDickordRelayNick
+import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.PresenceState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -41,6 +45,7 @@ data class WhoisInfo(
     val signonEpochSecs: Long? = null,
     val awayMessage: String? = null,
     val away: Boolean? = null,
+    val isBot: Boolean? = null,
 )
 
 /** Nick-sheet state: the target nick plus its WHOIS details once they land. */
@@ -75,13 +80,13 @@ internal class NickSheetController(
 
     fun open(
         nick: String,
-        allowIgnore: Boolean = true,
+        loadIrcDetails: Boolean = true,
     ): Session {
         dismiss()
         val opened = Session(nick, currentRoom())
         session = opened
         _state.value = NickSheetState(nick)
-        if (allowIgnore && !isDickordRelayNick(nick)) observation = scope.launch { opened.observeIgnore() }
+        if (loadIrcDetails && !isDickordRelayNick(nick)) observation = scope.launch { opened.observeIgnore() }
         return opened
     }
 
@@ -110,6 +115,33 @@ internal class NickSheetController(
 
         fun update(transform: (NickSheetState) -> NickSheetState) {
             if (session === this) _state.value = _state.value?.let(transform)
+        }
+
+        suspend fun loadWhois(
+            client: IrcClient,
+            isCurrent: () -> Boolean,
+        ) {
+            val generation = client.criticalEvents
+
+            if (!connectionIsCurrent()) return
+            coroutineScope {
+                launch(start = CoroutineStart.UNDISPATCHED) {
+                    client.awaitTermination()
+                    update { it.copy(whois = null) }
+                }
+                val info =
+                    scope
+                        .async {
+                            if (!connectionIsCurrent()) return@async null
+                            val lines =
+                                runCatching { client.whois(nick) }.getOrElse {
+                                    if (it is CancellationException) throw it
+                                    return@async null
+                                }
+                            parseWhois(lines)
+                        }.await()
+                if (info != null && connectionIsCurrent()) update { it.copy(whois = info) }
+            }
         }
 
         private fun eligibleRules(ready: IrcClientState.Ready?): IrcIdentityRules? {
@@ -253,6 +285,10 @@ fun parseWhois(lines: List<IrcMessage>): WhoisInfo? {
 
             "330" -> {
                 info = info.copy(account = p.getOrNull(2))
+            }
+
+            "335" -> {
+                if (p.size >= 3) info = info.copy(isBot = true)
             }
         }
     }

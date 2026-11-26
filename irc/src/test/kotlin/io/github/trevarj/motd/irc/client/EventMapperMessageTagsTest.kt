@@ -51,6 +51,17 @@ class EventMapperMessageTagsTest {
     }
 
     @Test
+    fun `server bot tag marks a JOIN while a client-only tag does not`() {
+        val tagged = mapper.map(IrcMessage.parse("@bot=future :Alice!u@h JOIN #chan account :Real Name")) as IrcEvent.Joined
+        val clientOnly = mapper.map(IrcMessage.parse("@+bot :Alice!u@h JOIN #chan")) as IrcEvent.Joined
+
+        assertTrue(tagged.isBot)
+        assertEquals("account", tagged.account)
+        assertEquals("Real Name", tagged.realname)
+        assertFalse(clientOnly.isBot)
+    }
+
+    @Test
     fun `reaction aliases map onto tag message`() {
         val event =
             mapper.map(

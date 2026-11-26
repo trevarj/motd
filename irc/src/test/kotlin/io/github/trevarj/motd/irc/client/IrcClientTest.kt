@@ -768,7 +768,10 @@ class IrcClientTest {
                 val reset = client.state.value as IrcClientState.Ready
                 assertNull(reset.isupport["CASEMAPPING"])
                 assertEquals(setOf("CASEMAPPING", "CHANTYPES"), reset.removedIsupport)
-                assertEquals(IrcEvent.Registered(reset.nick, reset.caps, reset.isupport, reset.removedIsupport), events.last())
+                assertEquals(
+                    IrcEvent.Registered(reset.nick, reset.caps, reset.isupport, reset.removedIsupport, startsSession = false),
+                    events.last(),
+                )
                 assertEquals("nick{|}^", client.isupport.normalize("Nick[\\]~"))
                 assertEquals(setOf("CHANTYPES"), channelReset.removedIsupport)
                 assertEquals(setOf("CHANTYPES"), events.first().removedIsupport)
@@ -2007,6 +2010,29 @@ class IrcClientTest {
         }
 
     @Test
+    fun `unlabeled whois does not consume same target ISON reply`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val whois = clientScope().async { client.whois("alice") }
+            val ison =
+                clientScope().async {
+                    client.broadcastEvents.first { it is IrcEvent.Raw && it.message.command == "303" }
+                }
+            runCurrent()
+
+            val reply = ":srv 303 motd :alice"
+            ft.feed(reply)
+            ft.feed(":srv 335 motd Alice :is a bot")
+            ft.feed(":srv 318 motd alice :End of WHOIS")
+            runCurrent()
+
+            assertTrue(ison.isCompleted)
+            assertEquals(IrcEvent.Raw(IrcMessage.parse(reply)), ison.await())
+            assertEquals(listOf("335", "318"), whois.await().map { it.command })
+        }
+
+    @Test
     fun `unlabeled whois ends on error and timeout`() =
         runTest {
             val ft = FakeTransport()
@@ -2493,7 +2519,7 @@ class IrcClientTest {
             ft.feed(":quaff!peer@host JOIN #peer")
             runCurrent()
 
-            val corrected = IrcEvent.Registered(actual, fallback.caps, fallback.isupport)
+            val corrected = IrcEvent.Registered(actual, fallback.caps, fallback.isupport, startsSession = false)
             assertEquals(fallback.copy(nick = actual), client.state.value)
             assertEquals(corrected, events[0])
             assertEquals(IrcEvent.Raw(IrcMessage.parse(welcome)), events[1])
@@ -2514,7 +2540,7 @@ class IrcClientTest {
             assertEquals("#", ready.isupport["CHANTYPES"])
             assertEquals("ascii", ready.isupport["CASEMAPPING"])
             assertEquals(
-                listOf(corrected, IrcEvent.Registered(actual, fallback.caps, ready.isupport)),
+                listOf(corrected, IrcEvent.Registered(actual, fallback.caps, ready.isupport, startsSession = false)),
                 events.filterIsInstance<IrcEvent.Registered>(),
             )
             assertEquals(2, events.filterIsInstance<IrcEvent.Raw>().count { it.message.command == "001" })

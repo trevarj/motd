@@ -28,6 +28,8 @@ class WhoxTest {
         assertTrue(whoxFlagsIndicateBot("H@B", 'B'))
         assertFalse(whoxFlagsIndicateBot("H@", 'B'))
         assertFalse(whoxFlagsIndicateBot("HB", null))
+        assertFalse(whoxFlagsIndicateBot("G", 'G'))
+        assertTrue(whoxFlagsIndicateBot("Gb*", 'b'))
     }
 
     @Test fun `token pool wraps and reports exhaustion without collision`() {
@@ -72,6 +74,19 @@ class WhoxTest {
         assertEquals(null, row.account)
         assertEquals(null, row.flags)
         assertEquals(null, row.realname)
+    }
+
+    @Test fun `ordinary WHO maps identity and ignores malformed flags`() {
+        val mapper = EventMapper({ "motd" }, { Isupport() })
+        val reply = IrcMessage.parse(":srv 352 motd #Room alice example.org irc.example Alice Gb@ :2 Alice Real")
+        val row = mapper.map(reply) as IrcEvent.WhoRow
+        assertEquals("Alice", row.nick)
+        assertEquals("alice", row.username)
+        assertEquals("example.org", row.host)
+        assertEquals("Gb@", row.flags)
+        assertEquals("Alice Real", row.realname)
+        val malformed = IrcMessage.parse(":srv 352 motd #Room alice example.org irc.example Alice B")
+        assertEquals(IrcEvent.Raw(malformed), mapper.map(malformed))
     }
 
     @Test fun `same normalized mask coalesces and concurrent masks keep tokens separate`() =

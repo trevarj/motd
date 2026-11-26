@@ -32,11 +32,13 @@ import io.github.trevarj.motd.dickord.DICKORD_CHANNEL_TAG
 import io.github.trevarj.motd.irc.client.ChatHistoryReference
 import io.github.trevarj.motd.irc.client.ChatHistoryRequest
 import io.github.trevarj.motd.irc.client.ChatHistoryResponse
+import io.github.trevarj.motd.irc.client.EventMapper
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.ext.ChatHistorySelectors
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.Isupport
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.push.PushEventHandler
 import io.github.trevarj.motd.push.WebPushCrypto
@@ -178,6 +180,136 @@ class EventProcessorTest {
             assertEquals("hello world", rows.single().text)
             assertNull(rows.single().ircFormattedText)
             assertFalse(rows.single().hasMention)
+        }
+
+    @Test
+    fun bot_join_survives_roster_refresh_and_nick_change_but_not_a_new_session() =
+        runTest {
+            processor.process(networkId, IrcEvent.NamesStarted("#chan"))
+            processor.process(networkId, IrcEvent.Joined(ctx(msgid = "bot-join"), "Helper", "#chan", "acct", null, false, isBot = true))
+            processor.process(networkId, IrcEvent.Names("#chan", emptyList()))
+            val buffer = db.bufferDao().byName(networkId, "#chan")!!
+            assertTrue(
+                db
+                    .memberDao()
+                    .allNow(buffer.id)
+                    .single()
+                    .isBot,
+            )
+            assertTrue(db.messageDao().byMsgid(buffer.id, "bot-join")!!.isBot)
+
+            processor.process(networkId, IrcEvent.NickChanged(ctx(), "Helper", "Renamed", false))
+            processor.process(
+                networkId,
+                IrcEvent.Registered("me", emptySet(), mapOf("BOT" to "b"), startsSession = false),
+            )
+            assertFalse(db.userDao().isBot(networkId, "helper"))
+            assertTrue(db.userDao().isBot(networkId, "renamed"))
+            assertTrue(
+                db
+                    .memberDao()
+                    .allNow(buffer.id)
+                    .single()
+                    .isBot,
+            )
+
+            processor.process(networkId, IrcEvent.Registered("me", emptySet(), emptyMap()))
+            assertFalse(db.userDao().isBot(networkId, "renamed"))
+            assertFalse(
+                db
+                    .memberDao()
+                    .allNow(buffer.id)
+                    .single()
+                    .isBot,
+            )
+            assertEquals("acct", db.userDao().byNick(networkId, "renamed")?.account)
+        }
+
+    @Test
+    fun ordinary_who_marks_rfc1459_equivalent_nicks_and_preserves_account() =
+        runTest {
+            val mapper = EventMapper({ "me" }, { Isupport() })
+            val bot = mapper.map(IrcMessage.parse(":srv 352 me #chan username host srv HELPER{ Gb* :0 Name")) as IrcEvent.WhoRow
+            processor.process(networkId, IrcEvent.Joined(ctx(), "Helper[", "#chan", "account", null, false))
+            val buffer = db.bufferDao().byName(networkId, "#chan")!!
+            processor.process(networkId, bot)
+            assertFalse(
+                db
+                    .memberDao()
+                    .allNow(buffer.id)
+                    .single()
+                    .isBot,
+            )
+
+            processor.process(networkId, IrcEvent.Registered("me", emptySet(), mapOf("BOT" to "b"), startsSession = false))
+            processor.process(networkId, bot)
+            val user = db.userDao().byNick(networkId, "helper{")!!
+            assertEquals("account", user.account)
+            assertEquals("username@host", user.hostmask)
+            assertEquals("Name", user.realname)
+            assertTrue(user.away)
+            assertTrue(user.isBot)
+            assertTrue(
+                db
+                    .memberDao()
+                    .allNow(buffer.id)
+                    .single()
+                    .isBot,
+            )
+
+            processor.process(networkId, bot.copy(flags = "HB"))
+            assertFalse(db.userDao().isBot(networkId, "helper{"))
+            assertFalse(
+                db
+                    .memberDao()
+                    .allNow(buffer.id)
+                    .single()
+                    .isBot,
+            )
+        }
+
+    @Test
+    fun whois_bot_numeric_stays_in_command_output_and_only_message_tag_marks_chat() =
+        runTest {
+            processor.process(networkId, IrcEvent.Joined(ctx(), "Helper", "#chan", null, null, false, isBot = true))
+            val buffer = db.bufferDao().byName(networkId, "#chan")!!
+            processor.beginCommandResponse(networkId, buffer.id, "WHOIS", label = null)
+            processor.process(networkId, IrcEvent.Raw(IrcMessage.parse(":srv 335 me Other :is a robot")))
+            processor.process(networkId, IrcEvent.Raw(IrcMessage.parse(":srv 318 me Other :End of WHOIS")))
+            assertNull(db.userDao().byNick(networkId, "other"))
+            assertTrue(pagingList(buffer.id).any { it.kind == MessageKind.SERVER_INFO && it.text.contains("is a robot") })
+
+            val chat = IrcEvent.ChatMessage(ctx("untagged", 2000), IrcEvent.ChatKind.PRIVMSG, Prefix("Helper"), "#chan", "hello", false, null)
+            processor.process(networkId, chat)
+            processor.process(networkId, chat.copy(ctx = ctx("tagged", 3000), isBot = true))
+            assertTrue(db.userDao().isBot(networkId, "helper"))
+            assertFalse(db.messageDao().byMsgid(buffer.id, "untagged")!!.isBot)
+            assertTrue(db.messageDao().byMsgid(buffer.id, "tagged")!!.isBot)
+        }
+
+    @Test
+    fun bot_status_expires_after_last_shared_part_without_leaking_to_rejoin() =
+        runTest {
+            val join = IrcEvent.Joined(ctx(), "Helper", "#first", null, null, false, isBot = true)
+            processor.process(networkId, join)
+            processor.process(networkId, join.copy(channel = "#second", isBot = false))
+            processor.process(networkId, IrcEvent.Parted(ctx(), "Helper", "#first", null, false))
+            assertTrue(db.userDao().isBot(networkId, "helper"))
+
+            processor.process(networkId, IrcEvent.Parted(ctx(), "Helper", "#second", null, false))
+            assertFalse(db.userDao().isBot(networkId, "helper"))
+
+            processor.process(networkId, join.copy(ctx = ctx(msgid = "human-join", time = 2000), isBot = false))
+            val room = db.bufferDao().byName(networkId, "#first")!!
+            assertFalse(db.userDao().isBot(networkId, "helper"))
+            assertFalse(
+                db
+                    .memberDao()
+                    .allNow(room.id)
+                    .single()
+                    .isBot,
+            )
+            assertFalse(db.messageDao().byMsgid(room.id, "human-join")!!.isBot)
         }
 
     @Test
@@ -2420,17 +2552,20 @@ class EventProcessorTest {
                         pendingCloseAt = 123,
                     ),
                 )
+            processor.process(networkId, IrcEvent.Joined(ctx(), "Helper", "#already-gone", null, null, false, isBot = true))
+            assertTrue(db.userDao().isBot(networkId, "helper"))
 
             processor.process(
                 networkId,
                 IrcEvent.ServerError(
-                    code = "442",
-                    params = listOf("me", "#already-gone", "You're not on that channel"),
-                    text = "You're not on that channel",
+                    code = "403",
+                    params = listOf("me", "#already-gone", "No such channel"),
+                    text = "No such channel",
                 ),
             )
 
             assertNull(db.bufferDao().observeById(bufferId))
+            assertFalse(db.userDao().isBot(networkId, "helper"))
         }
 
     @Test
@@ -2446,6 +2581,8 @@ class EventProcessorTest {
                         joined = true,
                     ),
                 )
+            processor.process(networkId, IrcEvent.Joined(ctx(), "Helper", "#gone", null, null, false, isBot = true))
+            assertTrue(db.userDao().isBot(networkId, "helper"))
             // A self-send is sitting un-echoed in the buffer; the server never accepted it.
             val pendingId =
                 db.canonicalTimelineDao().insertEvent(
@@ -2472,6 +2609,8 @@ class EventProcessorTest {
 
             val buffer = db.bufferDao().observeById(bufferId)!!
             assertFalse(buffer.joined)
+            assertTrue(db.memberDao().allNow(bufferId).isEmpty())
+            assertFalse(db.userDao().isBot(networkId, "helper"))
             // The error surfaced inline in the channel buffer, not the SERVER buffer.
             val channelRows = pagingList(bufferId)
             assertTrue(channelRows.any { it.kind == MessageKind.ERROR && it.text.contains("442") })

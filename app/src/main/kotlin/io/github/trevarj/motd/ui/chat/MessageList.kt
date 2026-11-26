@@ -192,6 +192,7 @@ internal data class SystemRunContentKey(
     val newestId: Long,
     val oldestId: Long,
     val count: Int,
+    val botJoinIds: List<Long> = emptyList(),
 )
 
 /** An expanded run stays expanded when synchronization reshapes its bounded Paging chunk. */
@@ -207,7 +208,14 @@ internal fun updateExpandedSystemEvents(
 ): Set<Long> = if (expanded) current + runIds else current - runIds.toSet()
 
 /** Present a newest-first storage chunk chronologically inside its pill. */
-internal fun systemRunPresentationLines(run: List<MessageEntity>): List<String> = run.asReversed().map { it.text }
+internal fun systemRunPresentationLines(run: List<MessageEntity>): List<String> = run.asReversed().map(::systemEventDisplayText)
+
+internal fun systemEventDisplayText(row: MessageEntity): String =
+    if (row.kind == MessageKind.JOIN && row.isBot && row.text.startsWith(row.sender) && row.text.getOrNull(row.sender.length) == ' ') {
+        botDisplayName(row.sender, true) + row.text.substring(row.sender.length)
+    } else {
+        row.text
+    }
 
 /** The rendered row's blank leading gap and unclipped height, owned by its native lazy item. */
 class TimelineRowContentMetrics {
@@ -1744,11 +1752,12 @@ private fun SystemEventRun(
     val olderThanRun = if (index + run.size < snapshot.size) snapshot[index + run.size] else null
 
     val commandResponse = commandResponseGroup(newest) != null
+    val expanded = systemRunExpanded(runIds, expandedEventIds)
     val summary =
         if (commandResponse) {
             summarizeCommandResponse(run)
         } else if (run.size == 1) {
-            newest.text
+            systemEventDisplayText(newest)
         } else {
             summarizeSystemRun(run)
         }
@@ -1782,8 +1791,14 @@ private fun SystemEventRun(
             summary = summary,
             lineCount = run.size,
             loadLines = { systemRunPresentationLines(run) },
-            contentKey = SystemRunContentKey(newest.id, oldest.id, run.size),
-            expanded = systemRunExpanded(runIds, expandedEventIds),
+            contentKey =
+                SystemRunContentKey(
+                    newest.id,
+                    oldest.id,
+                    run.size,
+                    if (expanded) run.mapNotNull { if (it.kind == MessageKind.JOIN && it.isBot) it.id else null } else emptyList(),
+                ),
+            expanded = expanded,
             onExpandedChange = { expanded -> onExpandedChange(runIds, expanded) },
             forceCollapsible = commandResponse,
             modifier = Modifier.testTag("chat_system_pill"),

@@ -50,6 +50,7 @@ import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.components.avatarsHidden
+import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
@@ -114,7 +115,7 @@ internal fun NickActionSheet(
         Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
             ListItem(
-                headlineContent = { Text(dickordNickLabel(nick, relayIdentity)) },
+                headlineContent = { Text(botDisplayName(dickordNickLabel(nick, relayIdentity), whois?.isBot == true)) },
                 supportingContent = {
                     if (relayIdentity) {
                         Text(stringResource(R.string.dickord_relay_identity))

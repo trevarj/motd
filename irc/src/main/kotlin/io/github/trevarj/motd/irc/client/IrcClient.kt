@@ -675,7 +675,7 @@ class IrcClient(
             if (nick != null && current != null && nick != current.nick) {
                 selfNick.set(nick)
                 _state.value = current.copy(nick = nick)
-                publish(criticalEvents, IrcEvent.Registered(nick, current.caps, current.isupport, current.removedIsupport))
+                publish(criticalEvents, IrcEvent.Registered(nick, current.caps, current.isupport, current.removedIsupport, startsSession = false))
             }
         }
 
@@ -1145,7 +1145,7 @@ class IrcClient(
         val current = _state.value as? IrcClientState.Ready ?: return
         val snapshot = isupportToMap(isupport)
         _state.value = current.copy(isupport = snapshot, removedIsupport = removedIsupport)
-        publish(criticalEvents, IrcEvent.Registered(current.nick, current.caps, snapshot, removedIsupport))
+        publish(criticalEvents, IrcEvent.Registered(current.nick, current.caps, snapshot, removedIsupport, startsSession = false))
     }
 
     private suspend fun emitDisconnected(

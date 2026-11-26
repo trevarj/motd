@@ -40,7 +40,6 @@ import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import io.github.trevarj.motd.ui.chat.NickIgnoreState
 import io.github.trevarj.motd.ui.chat.NickSheetController
 import io.github.trevarj.motd.ui.chat.NickSheetState
-import io.github.trevarj.motd.ui.chat.WhoisInfo
 import io.github.trevarj.motd.ui.chat.parseWhois
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
 import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentation
@@ -595,6 +594,7 @@ class ChannelInfoViewModel
             val normalized = client?.isupport?.normalize(nick) ?: state.value.identityRules.normalize(nick)
             nickDetailsJob =
                 viewModelScope.launch {
+                    if (client != null) launch { sheet.loadWhois(client) { connectionManager.clientFor(networkId) === client } }
                     combine(
                         userDao.observeByNick(networkId, normalized),
                         connectionManager.presenceStates,
@@ -608,17 +608,6 @@ class ChannelInfoViewModel
                         sheet.update { it.copy(cached = cached, presence = presence) }
                     }
                 }
-            if (client == null) return
-            val whoisMsg = IrcMessage(command = "WHOIS", params = listOf(nick))
-            if (client.hasCap("labeled-response")) {
-                viewModelScope.launch {
-                    val lines = runCatching { client.sendLabeled(whoisMsg) }.getOrNull().orEmpty()
-                    val info: WhoisInfo? = parseWhois(lines)
-                    if (info != null) sheet.update { it.copy(whois = info) }
-                }
-            } else {
-                viewModelScope.launch { client.send(whoisMsg) }
-            }
         }
 
         fun dismissNickSheet() {

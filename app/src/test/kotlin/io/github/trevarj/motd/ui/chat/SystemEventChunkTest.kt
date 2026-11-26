@@ -106,6 +106,15 @@ class SystemEventChunkTest {
         assertEquals((1L..6L).map { "line $it" }, topToBottomLines)
     }
 
+    @Test fun `bot JOIN uses the existing marker in single and expanded pills without changing stored text`() {
+        val bot = systemMessage(1, MessageKind.JOIN).copy(sender = "Helper", text = "Helper joined", isBot = true)
+        val human = systemMessage(2, MessageKind.JOIN).copy(sender = "Alice", text = "Alice joined")
+
+        assertEquals("Helper 🤖 joined", systemEventDisplayText(bot))
+        assertEquals(listOf("Helper 🤖 joined", "Alice joined"), systemRunPresentationLines(listOf(human, bot)))
+        assertEquals("Helper joined", bot.text)
+    }
+
     @Test fun `command responses group only within their own session`() {
         val join = systemMessage(1, MessageKind.JOIN)
         val first = systemMessage(2, MessageKind.SERVER_INFO, "${COMMAND_RESPONSE_PAYLOAD_PREFIX}first")

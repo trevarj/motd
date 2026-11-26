@@ -330,11 +330,12 @@ internal class UnlabeledWhoisCorrelator {
         normalize: (String) -> String,
     ): Boolean {
         val current = pending ?: return false
-        if (msg.command.length != 3 || !msg.command.all(Char::isDigit)) return false
+        val terminalError = msg.command in WHOIS_ERRORS
+        if (!terminalError && msg.command !in WHOIS_REPLIES) return false
         val target = msg.params.getOrNull(1) ?: return false
         if (normalize(target) != normalize(current.nick)) return false
 
-        if (msg.command.first() == '4' || msg.command.first() == '5') {
+        if (terminalError) {
             pending = null
             current.deferred.completeExceptionally(
                 IrcCommandException("WHOIS", msg.command, msg.params.lastOrNull().orEmpty()),
@@ -358,6 +359,12 @@ internal class UnlabeledWhoisCorrelator {
 
     @Synchronized
     fun failAllDisconnected(reason: String?) = failAll(IrcDisconnectedException("WHOIS", reason))
+
+    private companion object {
+        val WHOIS_REPLIES =
+            setOf("275", "276", "301", "307", "310", "311", "312", "313", "317", "318", "319", "320", "330", "335", "338", "378", "379", "671")
+        val WHOIS_ERRORS = setOf("401", "402")
+    }
 }
 
 /**

@@ -55,6 +55,7 @@ sealed interface IrcEvent {
         val isupport: Map<String, String>,
         /** Uppercase keys explicitly removed by 005, not merely awaiting advertisement. */
         val removedIsupport: Set<String> = emptySet(),
+        val startsSession: Boolean = true,
     ) : IrcEvent
 
     data class CapsChanged(
@@ -168,6 +169,7 @@ sealed interface IrcEvent {
         val account: String?,
         val realname: String?,
         val isSelf: Boolean,
+        val isBot: Boolean = false,
     ) : IrcEvent
 
     data class Parted(
@@ -248,6 +250,15 @@ sealed interface IrcEvent {
     data class RealnameChanged(
         val nick: String,
         val realname: String,
+    ) : IrcEvent
+
+    data class WhoRow(
+        val nick: String,
+        val username: String,
+        val host: String,
+        val flags: String,
+        val realname: String?,
+        val response: IrcMessage,
     ) : IrcEvent
 
     data class WhoxRow(

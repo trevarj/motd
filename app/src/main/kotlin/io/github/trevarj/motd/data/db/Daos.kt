@@ -1944,6 +1944,17 @@ interface ComposerDraftDao {
     )
 }
 
+private const val NORMALIZED_MEMBER_NICK =
+    """CASE :caseMapping
+        WHEN 'rfc1459' THEN lower(replace(replace(replace(replace(members.nick, '[', '{'), ']', '}'), '\', '|'), '^', '~'))
+        WHEN 'rfc1459-strict' THEN lower(replace(replace(replace(members.nick, '[', '{'), ']', '}'), '\', '|'))
+        ELSE lower(members.nick)
+       END"""
+
+private const val VISIBLE_BOT_MEMBERSHIP =
+    """SELECT 1 FROM members JOIN buffers ON buffers.id = members.bufferId
+       WHERE buffers.networkId = :networkId AND members.isBot = 1 AND $NORMALIZED_MEMBER_NICK = :nick"""
+
 @Dao
 interface MemberDao {
     @Query("SELECT * FROM members WHERE bufferId = :bufferId")
@@ -2020,15 +2031,28 @@ interface MemberDao {
     suspend fun upsert(m: MemberEntity)
 
     @Query(
-        """UPDATE members SET isBot = :isBot WHERE nick = :nick AND bufferId IN (
-           SELECT id FROM buffers WHERE networkId = :networkId
-        )""",
+        """UPDATE members SET isBot = :isBot WHERE isBot != :isBot AND
+           $NORMALIZED_MEMBER_NICK = :nick AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)""",
     )
     suspend fun setBot(
         networkId: Long,
         nick: String,
+        caseMapping: String,
         isBot: Boolean,
     )
+
+    @Query("UPDATE members SET isBot = 0 WHERE isBot = 1 AND bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)")
+    suspend fun clearBots(networkId: Long)
+
+    @Query("SELECT nick FROM members WHERE bufferId = :bufferId AND isBot = 1")
+    suspend fun botNicks(bufferId: Long): List<String>
+
+    @Query("SELECT EXISTS($VISIBLE_BOT_MEMBERSHIP)")
+    suspend fun hasVisibleBot(
+        networkId: Long,
+        nick: String,
+        caseMapping: String,
+    ): Boolean
 
     @Query("DELETE FROM members WHERE bufferId = :bufferId AND nick = :nick")
     suspend fun remove(
@@ -2122,6 +2146,31 @@ interface UserDao {
         nick: String,
     ): Flow<UserEntity?>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM users WHERE networkId = :nid AND nick = :nick AND isBot = 1)")
+    suspend fun isBot(
+        nid: Long,
+        nick: String,
+    ): Boolean
+
+    @Query("UPDATE users SET isBot = 0 WHERE networkId = :nid AND nick = :nick AND isBot = 1")
+    suspend fun clearBot(
+        nid: Long,
+        nick: String,
+    )
+
+    @Query(
+        """UPDATE users SET isBot = 0 WHERE networkId = :networkId AND nick = :nick AND isBot = 1
+           AND NOT EXISTS ($VISIBLE_BOT_MEMBERSHIP)""",
+    )
+    suspend fun clearBotIfUnshared(
+        networkId: Long,
+        nick: String,
+        caseMapping: String,
+    )
+
+    @Query("UPDATE users SET isBot = 0 WHERE networkId = :nid AND isBot = 1")
+    suspend fun clearBots(nid: Long)
+
     @Query("DELETE FROM users WHERE networkId = :nid AND nick = :nick")
     suspend fun delete(
         nid: Long,
@@ -2136,7 +2185,11 @@ interface UserDao {
         to: String,
     ) {
         if (from == to) return
-        val source = byNick(nid, from) ?: return
+        val source = byNick(nid, from)
+        if (source == null) {
+            clearBot(nid, to)
+            return
+        }
         val destination = byNick(nid, to)
         upsert(
             source.copy(
@@ -2145,7 +2198,6 @@ interface UserDao {
                 account = source.account ?: destination?.account,
                 hostmask = source.hostmask ?: destination?.hostmask,
                 realname = source.realname ?: destination?.realname,
-                isBot = source.isBot || destination?.isBot == true,
             ),
         )
         delete(nid, from)

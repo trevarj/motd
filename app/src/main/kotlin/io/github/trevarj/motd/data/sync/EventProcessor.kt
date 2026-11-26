@@ -332,8 +332,15 @@ class EventProcessor
             nick: String,
             isupport: Map<String, String>,
             removedIsupport: Set<String> = emptySet(),
+            startsSession: Boolean = true,
         ) {
             connectionGenerations[networkId] = db.connectionGenerationDao().next(networkId)
+            if (startsSession) {
+                db.withTransaction {
+                    userDao.clearBots(networkId)
+                    memberDao.clearBots(networkId)
+                }
+            }
             networkDao.setServerIconUrl(networkId, isupport["draft/ICON"]?.let(::validateAvatarUrl))
             val previous = networkIdentityDao.byNetwork(networkId)
             // 001 completes registration before any 005, and 005 can span several lines, so an absent
@@ -481,7 +488,7 @@ class EventProcessor
             when (event) {
                 is IrcEvent.Registered -> {
                     if (origin.mutatesSessionState) {
-                        applyRegistered(networkId, event.nick, event.isupport, event.removedIsupport)
+                        applyRegistered(networkId, event.nick, event.isupport, event.removedIsupport, event.startsSession)
                     }
                 }
 
@@ -590,6 +597,15 @@ class EventProcessor
 
                 is IrcEvent.RealnameChanged -> {
                     if (origin.mutatesSessionState) upsertUser(networkId, event.nick) { it.copy(realname = event.realname) }
+                }
+
+                is IrcEvent.WhoRow -> {
+                    if (origin.mutatesSessionState) {
+                        onWhoIdentity(networkId, event.nick, event.username, event.host, event.flags, event.realname)
+                        if (commandResponse(networkId, event.response.tags["label"])?.command == "WHO") {
+                            onRaw(networkId, IrcEvent.Raw(event.response), origin, historyTarget)
+                        }
+                    }
                 }
 
                 is IrcEvent.WhoxRow -> {
@@ -2411,6 +2427,7 @@ class EventProcessor
                     IrcEvent.NetworkBatchKind.NETSPLIT -> {
                         batch.events.forEach { child ->
                             val quit = child as IrcEvent.Quit
+                            userDao.clearBot(networkId, st.normalize(quit.nick))
                             val targetBufferId =
                                 batch.target?.let { target ->
                                     existingChannelBuffer(networkId, target, st)?.id
@@ -2429,14 +2446,8 @@ class EventProcessor
                             val buffer =
                                 existingChannelBuffer(networkId, join.channel, st)
                                     ?: return@forEach
-                            memberDao.upsert(MemberEntity(buffer.id, join.nick))
+                            upsertJoinedMember(networkId, buffer.id, join)
                             journal(networkId, buffer.id, RosterDelta.Upsert(join.nick))
-                            upsertUser(networkId, join.nick) {
-                                it.copy(
-                                    account = join.account ?: it.account,
-                                    realname = join.realname ?: it.realname,
-                                )
-                            }
                             affected.getOrPut(buffer.id) { mutableListOf() } += join.nick to join.ctx
                         }
                     }
@@ -2920,9 +2931,8 @@ class EventProcessor
                 val st = stateFor(networkId)
                 val bufferId = ensureBuffer(networkId, e.channel, BufferType.CHANNEL, st)
                 if (e.isSelf) markJoined(bufferId, true)
-                memberDao.upsert(MemberEntity(bufferId, e.nick))
+                val isBot = upsertJoinedMember(networkId, bufferId, e)
                 if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Upsert(e.nick))
-                upsertUser(networkId, e.nick) { it.copy(account = e.account ?: it.account, realname = e.realname ?: it.realname) }
                 if (e.isSelf) {
                     if (e.ctx.batchId == null) {
                         resolvedInviteIds = messageDao.actionableInviteIds(bufferId)
@@ -2937,14 +2947,36 @@ class EventProcessor
                         "${e.nick} joined",
                         dedupKey = "selfjoin:$bufferId:$cycle",
                         isSelf = true,
+                        isBot = isBot,
                     )
                 } else {
-                    insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", isSelf = e.isSelf)
+                    insertSystem(bufferId, e.ctx, MessageKind.JOIN, e.nick, "${e.nick} joined", isBot = isBot)
                 }
             }
             // Announced only after the commit: the notifier is an app-level side effect, and firing it
             // from inside the transaction would resolve an invitation a rollback could still restore.
             resolvedInviteIds.forEach { notifier.onInvitationResolved(it) }
+        }
+
+        private suspend fun upsertJoinedMember(
+            networkId: Long,
+            bufferId: Long,
+            event: IrcEvent.Joined,
+        ): Boolean {
+            val previous = loadUser(networkId, event.nick)
+            val isBot =
+                event.isBot ||
+                    previous.isBot && memberDao.hasVisibleBot(networkId, previous.nick, stateFor(networkId).identityRules.caseMapping.rawName)
+            userDao.upsert(
+                previous.copy(
+                    account = event.account ?: previous.account,
+                    realname = event.realname ?: previous.realname,
+                    isBot = isBot,
+                ),
+            )
+            memberDao.upsert(MemberEntity(bufferId, event.nick, isBot = isBot))
+            if (isBot != previous.isBot) setMemberBot(networkId, event.nick, isBot)
+            return isBot
         }
 
         private suspend fun onParted(
@@ -2956,15 +2988,16 @@ class EventProcessor
             if (e.isSelf && buffer.pendingCloseAt != null) {
                 // A self-PART is the direct/ZNC server acknowledgement for a queued close. Only now is
                 // it safe to cascade-delete local history; the row stayed hidden while awaiting this.
-                bufferDao.deleteBuffer(buffer.id)
+                db.withTransaction {
+                    clearVisibleRoster(networkId, buffer.id, st)
+                    bufferDao.deleteBuffer(buffer.id)
+                }
                 return
             }
             val bufferId = buffer.id
             db.withTransaction {
-                memberDao.remove(bufferId, e.nick)
+                removeVisibleMembers(networkId, bufferId, e.nick, e.isSelf, st)
                 if (e.isSelf) {
-                    rosterSnapshots.remove(RosterKey(networkId, bufferId))
-                    memberDao.clear(bufferId)
                     markJoined(bufferId, false)
                 } else if (e.ctx.batchId == null) {
                     journal(networkId, bufferId, RosterDelta.Remove(e.nick))
@@ -2972,6 +3005,32 @@ class EventProcessor
                 insertSystem(bufferId, e.ctx, MessageKind.PART, e.nick, "${e.nick} left" + (e.reason?.let { " ($it)" } ?: ""), isSelf = e.isSelf)
                 if (e.isSelf) bufferDao.advanceMembershipCycle(bufferId)
             }
+        }
+
+        private suspend fun removeVisibleMembers(
+            networkId: Long,
+            bufferId: Long,
+            nick: String,
+            self: Boolean,
+            st: NetworkState,
+        ) {
+            if (self) {
+                clearVisibleRoster(networkId, bufferId, st)
+            } else {
+                memberDao.remove(bufferId, nick)
+                userDao.clearBotIfUnshared(networkId, st.normalize(nick), st.identityRules.caseMapping.rawName)
+            }
+        }
+
+        private suspend fun clearVisibleRoster(
+            networkId: Long,
+            bufferId: Long,
+            st: NetworkState,
+        ) {
+            rosterSnapshots.remove(RosterKey(networkId, bufferId))
+            val bots = memberDao.botNicks(bufferId)
+            memberDao.clear(bufferId)
+            for (bot in bots) userDao.clearBotIfUnshared(networkId, st.normalize(bot), st.identityRules.caseMapping.rawName)
         }
 
         private suspend fun onQuit(
@@ -2982,13 +3041,12 @@ class EventProcessor
             // wire event; committing per buffer released one PagingSource invalidation per shared
             // channel, which is the largest per-line multiplier the timeline sees during a storm.
             val buffers = buffersOfNick(networkId, e.nick)
-            if (buffers.isNotEmpty()) {
-                db.withTransaction {
-                    for (bufferId in buffers) {
-                        memberDao.remove(bufferId, e.nick)
-                        if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Remove(e.nick))
-                        insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
-                    }
+            db.withTransaction {
+                userDao.clearBot(networkId, stateFor(networkId).normalize(e.nick))
+                for (bufferId in buffers) {
+                    memberDao.remove(bufferId, e.nick)
+                    if (e.ctx.batchId == null) journal(networkId, bufferId, RosterDelta.Remove(e.nick))
+                    insertSystem(bufferId, e.ctx, MessageKind.QUIT, e.nick, "${e.nick} quit" + (e.reason?.let { " ($it)" } ?: ""))
                 }
             }
             if (e.ctx.batchId == null) {
@@ -3022,10 +3080,8 @@ class EventProcessor
             val st = stateFor(networkId)
             val bufferId = existingChannelBuffer(networkId, e.channel, st)?.id ?: return
             db.withTransaction {
-                memberDao.remove(bufferId, e.nick)
+                removeVisibleMembers(networkId, bufferId, e.nick, e.isSelf, st)
                 if (e.isSelf) {
-                    rosterSnapshots.remove(RosterKey(networkId, bufferId))
-                    memberDao.clear(bufferId)
                     markJoined(bufferId, false)
                 } else if (e.ctx.batchId == null) {
                     journal(networkId, bufferId, RosterDelta.Remove(e.nick))
@@ -3131,12 +3187,16 @@ class EventProcessor
                         bufferId,
                         member.nick,
                         member.prefixes,
-                        isBot = userDao.byNick(networkId, st.normalize(member.nick))?.isBot == true,
                     )
                 }
             val replay = replayRosterDeltas(bufferId, snapshot, deltas, st)
             db.withTransaction {
-                memberDao.replaceAll(bufferId, replay.members)
+                memberDao.replaceAll(
+                    bufferId,
+                    replay.members.map { member ->
+                        if (userDao.isBot(networkId, st.normalize(member.nick))) member.copy(isBot = true) else member
+                    },
+                )
                 e.members.forEach { member ->
                     val username = member.username
                     val host = member.host
@@ -3162,26 +3222,44 @@ class EventProcessor
             networkId: Long,
             row: IrcEvent.WhoxRow,
         ) {
+            onWhoIdentity(networkId, row.nick, row.username, row.host, row.flags, row.realname, row.account, hasAccount = true)
+        }
+
+        private suspend fun onWhoIdentity(
+            networkId: Long,
+            nick: String,
+            username: String?,
+            host: String?,
+            flags: String?,
+            realname: String?,
+            account: String? = null,
+            hasAccount: Boolean = false,
+        ) {
             val botMode = stateFor(networkId).botMode
-            upsertUser(networkId, row.nick) { existing ->
-                val hostmask =
-                    if (row.username != null && row.host != null) {
-                        "${row.username}@${row.host}"
-                    } else {
-                        existing.hostmask
-                    }
-                existing.copy(
-                    username = row.username ?: existing.username,
-                    hostmask = hostmask,
-                    account = row.account,
-                    away = row.flags?.let { 'G' in it } ?: existing.away,
-                    realname = row.realname?.takeIf(String::isNotBlank) ?: existing.realname,
-                    isBot = botMode?.let { whoxFlagsIndicateBot(row.flags, it) } ?: existing.isBot,
-                )
+            val isBot = if (botMode != null && !flags.isNullOrBlank()) whoxFlagsIndicateBot(flags, botMode) else null
+            db.withTransaction {
+                val existing = loadUser(networkId, nick)
+                val updated =
+                    existing.copy(
+                        username = username ?: existing.username,
+                        hostmask = if (username != null && host != null) "$username@$host" else existing.hostmask,
+                        account = if (hasAccount) account else existing.account,
+                        away = flags?.let { it.startsWith('G') } ?: existing.away,
+                        realname = realname?.takeIf(String::isNotBlank) ?: existing.realname,
+                        isBot = isBot ?: existing.isBot,
+                    )
+                if (updated != existing) userDao.upsert(updated)
+                if (updated.isBot != existing.isBot) setMemberBot(networkId, nick, updated.isBot)
             }
-            botMode?.let { mode ->
-                memberDao.setBot(networkId, row.nick, whoxFlagsIndicateBot(row.flags, mode))
-            }
+        }
+
+        private suspend fun setMemberBot(
+            networkId: Long,
+            nick: String,
+            isBot: Boolean,
+        ) {
+            val st = stateFor(networkId)
+            memberDao.setBot(networkId, st.normalize(nick), st.identityRules.caseMapping.rawName, isBot)
         }
 
         private suspend fun onMonitorOnline(
@@ -3702,7 +3780,10 @@ class EventProcessor
                 if (buffer?.pendingCloseAt != null) {
                     // 403/442 confirms the server has no membership to leave. Treat that as the same
                     // terminal acknowledgement as our echoed PART.
-                    bufferDao.deleteBuffer(buffer.id)
+                    db.withTransaction {
+                        clearVisibleRoster(networkId, buffer.id, st)
+                        bufferDao.deleteBuffer(buffer.id)
+                    }
                     return
                 }
             }
@@ -3746,7 +3827,12 @@ class EventProcessor
                     if (failedRow != null) {
                         traceMessageWrite("room_pending_failed", failedRow, fromHistory = false)
                     }
-                    if (e.code in NOT_IN_CHANNEL_NUMERICS) markJoined(bufferId, false)
+                    if (e.code in NOT_IN_CHANNEL_NUMERICS) {
+                        db.withTransaction {
+                            clearVisibleRoster(networkId, bufferId, st)
+                            markJoined(bufferId, false)
+                        }
+                    }
                     return
                 }
             }
@@ -4491,6 +4577,7 @@ class EventProcessor
             eventPayload: String? = null,
             isSelf: Boolean = false,
             origin: EventOrigin = if (ctx.batchId == null) EventOrigin.LIVE else EventOrigin.HISTORY,
+            isBot: Boolean = false,
         ) {
             val networkId = bufferDao.observeById(bufferId)?.networkId ?: return
             val normalizedSender = stateFor(networkId).normalize(sender)
@@ -4504,6 +4591,7 @@ class EventProcessor
                     kind = kind,
                     text = text,
                     isSelf = isSelf,
+                    isBot = isBot,
                     dedupKey = dedupKey ?: SemanticIdentity.keyFor(ctx.msgid, ctx.serverTime, sender, text),
                     eventKey = dedupKey,
                     eventPayload = eventPayload,
@@ -4604,11 +4692,15 @@ class EventProcessor
             nick: String,
             mutate: (UserEntity) -> UserEntity,
         ) {
+            userDao.upsert(mutate(loadUser(networkId, nick)))
+        }
+
+        private suspend fun loadUser(
+            networkId: Long,
+            nick: String,
+        ): UserEntity {
             val normalized = stateFor(networkId).normalize(nick)
-            val existing =
-                userDao.byNick(networkId, normalized)
-                    ?: UserEntity(networkId = networkId, nick = normalized)
-            userDao.upsert(mutate(existing))
+            return userDao.byNick(networkId, normalized) ?: UserEntity(networkId = networkId, nick = normalized)
         }
 
         private suspend fun maybeNotify(
