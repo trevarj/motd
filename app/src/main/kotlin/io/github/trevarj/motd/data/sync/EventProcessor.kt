@@ -272,6 +272,7 @@ class EventProcessor
         private class NetworkState(
             @Volatile var selfNick: String,
             val identityRules: IrcIdentityRules,
+            val statusMsgPrefixes: String = "",
             @Volatile var prefixModes: Map<Char, Char> = emptyMap(),
             @Volatile var chanModes: List<Set<Char>> = emptyList(),
             @Volatile var botMode: Char? = null,
@@ -285,6 +286,15 @@ class EventProcessor
             fun normalize(name: String): String = identityRules.normalize(name)
 
             fun isChannel(target: String): Boolean = identityRules.isChannel(target)
+
+            fun statusChannelTarget(target: String): String? {
+                if (statusMsgPrefixes.isEmpty() || isChannel(target)) return null
+                for (index in 1..<target.lastIndex) {
+                    if (target[index - 1] !in statusMsgPrefixes) return null
+                    if (target[index] in identityRules.chanTypes) return target.substring(index)
+                }
+                return null
+            }
 
             fun actorKey(
                 nick: String,
@@ -347,6 +357,7 @@ class EventProcessor
                 NetworkState(
                     selfNick = nick,
                     identityRules = identityRules,
+                    statusMsgPrefixes = isupport["STATUSMSG"].orEmpty(),
                     prefixModes = parsePrefixModes(isupport["PREFIX"]),
                     chanModes = isupport["CHANMODES"]?.split(',')?.map(String::toSet).orEmpty(),
                     botMode = isupport["BOT"]?.singleOrNull(),
@@ -4256,18 +4267,14 @@ class EventProcessor
             historyTarget: String?,
             origin: EventOrigin,
         ): ChatRoute {
-            val channelContext = validChannelContext(event.ctx.clientTags, event.target, st::isChannel)
-            val active = historyTarget?.let { activeHistoryTargets[networkId] }.takeIf { channelContext == null }
-            val type =
-                if (channelContext != null) {
-                    BufferType.CHANNEL
-                } else if (active != null) {
-                    active.type
-                } else if (isChannel(networkId, event.target, st)) {
-                    BufferType.CHANNEL
-                } else {
-                    BufferType.QUERY
+            val statusTarget = st.statusChannelTarget(event.target)
+            val active =
+                historyTarget?.let { activeHistoryTargets[networkId] }?.takeIf {
+                    statusTarget == null ||
+                        (it.type == BufferType.CHANNEL && st.normalize(it.target) == st.normalize(statusTarget))
                 }
+            val targetIsChannel = statusTarget != null || isChannel(networkId, event.target, st)
+            val type = active?.type ?: if (targetIsChannel) BufferType.CHANNEL else BufferType.QUERY
             val isDm = type == BufferType.QUERY
             // Server-sourced NOTICEs never create query rooms.
             if (isDm && event.kind == IrcEvent.ChatKind.NOTICE && isServerSource(event.source.nick)) {
@@ -4321,10 +4328,10 @@ class EventProcessor
                     }
                 }
             val bufferName =
-                channelContext ?: active?.target ?: if (isDm) {
+                active?.target ?: if (isDm) {
                     historyPeer ?: if (sourceIsSelf) event.target else event.source.nick
                 } else {
-                    event.target
+                    statusTarget ?: event.target
                 }
             // Only a replayed query carries a peer strong enough to overrule the wire's own self flag.
             val selfAttributionAuthoritative =
@@ -4346,6 +4353,25 @@ class EventProcessor
                     sourceIsSelf = sourceIsSelf,
                     selfAttributionAuthoritative = selfAttributionAuthoritative,
                     bouncerConsole = true,
+                )
+            }
+            val contextRoom =
+                if (targetIsChannel) {
+                    null
+                } else {
+                    validChannelContext(event, st::isChannel) { prefix ->
+                        prefix in st.statusMsgPrefixes || prefix in st.prefixModes.values
+                    }?.let { existingChannelBuffer(networkId, it, st) }
+                }
+            if (contextRoom != null) {
+                return ChatRoute(
+                    contextRoom.id,
+                    contextRoom.displayName,
+                    BufferType.CHANNEL,
+                    event.text,
+                    serverNotice = false,
+                    sourceIsSelf = sourceIsSelf,
+                    selfAttributionAuthoritative = selfAttributionAuthoritative,
                 )
             }
             val normalizedName = active?.normalizedName ?: st.normalize(bufferName)

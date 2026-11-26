@@ -1,5 +1,9 @@
 package io.github.trevarj.motd.irc.client
 
+import io.github.trevarj.motd.irc.event.IrcEvent
+import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.irc.proto.Prefix
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -29,13 +33,29 @@ class ClientTagPolicyTest {
     }
 
     @Test
-    fun `channel context accepts private standard and draft tags only for channels`() {
-        val isChannel: (String) -> Boolean = { it.startsWith('#') }
+    fun `channel context accepts only valid channel names and prefers the standard tag`() {
+        val rules = IrcIdentityRules(advertisedChanTypes = "#&")
 
-        assertEquals("#help", validChannelContext(mapOf("+channel-context" to "#help"), "me", isChannel))
-        assertEquals("#old", validChannelContext(mapOf("+draft/channel-context" to "#old"), "me", isChannel))
-        assertNull(validChannelContext(mapOf("+channel-context" to "alice"), "me", isChannel))
-        assertNull(validChannelContext(mapOf("+channel-context" to "#help"), "#public", isChannel))
+        fun context(vararg tags: Pair<String, String>): String? =
+            validChannelContext(
+                IrcEvent.ChatMessage(
+                    ctx = MessageContext(null, 0, null, null, null, clientTags = tags.toMap()),
+                    kind = IrcEvent.ChatKind.NOTICE,
+                    source = Prefix("helperbot"),
+                    target = "me",
+                    text = "private help",
+                    isSelf = false,
+                    replyToMsgid = null,
+                ),
+                rules::isChannel,
+            )
+
+        val draft = "+draft/channel-context" to "#old"
+        assertEquals("&help", context("+channel-context" to "&help", draft))
+        assertEquals("#old", context(draft))
+        for (invalid in listOf("", "#", "alice", "@#help", "+help", " #help", "#two rooms", "#a,#b", "#a\u0007b", "#a\tb", "#a\nb")) {
+            assertNull(invalid, context("+channel-context" to invalid, draft))
+        }
     }
 
     @Test

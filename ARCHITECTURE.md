@@ -65,6 +65,9 @@ flowchart TD
   ISUPPORT tracks explicit `-KEY` removals separately and carries immutable removal snapshots on
   Ready/Registered until re-advertisement. Removing CASEMAPPING/CHANTYPES clears their persisted
   fallback and restores protocol defaults; the ViewModel resolves the same immutable Ready snapshot.
+- A `+channel-context` hint can redirect a private user message only into an
+  existing channel on the owning network. Status-targeted channel traffic keeps
+  its original destination.
 - UI observes repositories and ViewModel state. Connection and protocol actions
   go through `ConnectionManager` instead of constructing IRC clients in screens.
 - Channel discovery stays scoped to one saved IRC network, excluding unbound bouncer roots.

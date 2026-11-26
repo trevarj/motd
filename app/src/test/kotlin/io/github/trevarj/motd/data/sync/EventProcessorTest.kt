@@ -1022,25 +1022,118 @@ class EventProcessorTest {
         }
 
     @Test
-    fun privateMessageWithChannelContextRoutesIntoTheChannel() =
+    fun privateMessageWithChannelContextRoutesIntoAnExistingChannelAcrossDeliveries() =
         runTest {
+            processor.onRegistered(networkId, "7me", emptyMap())
+            processor.process(networkId, IrcEvent.TopicSnapshot("#[Help]", "Help"))
+            val notice =
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "context-live").copy(clientTags = mapOf("+channel-context" to "#{HELP}")),
+                    kind = IrcEvent.ChatKind.NOTICE,
+                    source = Prefix("7héłper"),
+                    target = "7me",
+                    text = "private help",
+                    isSelf = false,
+                    replyToMsgid = null,
+                )
+            processor.process(networkId, notice)
             processor.process(
                 networkId,
+                IrcEvent.HistoryBatch(
+                    "7héłper",
+                    listOf(
+                        notice.copy(
+                            ctx = ctx(msgid = "context-history", time = 900).copy(clientTags = mapOf("+draft/channel-context" to "#{help}")),
+                            kind = IrcEvent.ChatKind.PRIVMSG,
+                            source = Prefix("OldMe"),
+                            target = "7héłper",
+                        ),
+                    ),
+                ),
+            )
+            processor.processPush(
+                networkId,
+                checkNotNull(
+                    PushEventHandler.mapToEvent(
+                        IrcMessage.parse("@msgid=context-push;+channel-context=#{help} :7héłper!bot@libera.chat NOTICE 7me :push help"),
+                    ),
+                ),
+            )
+
+            val channel = db.bufferDao().byName(networkId, "#{help}")!!
+            val rows = pagingList(channel.id).associateBy { it.msgid }
+            assertEquals(mapOf("context-live" to false, "context-history" to true, "context-push" to false), rows.mapValues { it.value.isSelf })
+            assertNull(db.bufferDao().byName(networkId, "7héłper"))
+        }
+
+    @Test
+    fun channelContextDoesNotOverrideNonPrivateMessagesOrCreateChannels() =
+        runTest {
+            processor.onRegistered(networkId, "me", mapOf("PREFIX" to "(ov)@+", "STATUSMSG" to "@+"))
+            processor.process(networkId, IrcEvent.TopicSnapshot("#help", "Help"))
+            val notice =
                 IrcEvent.ChatMessage(
-                    ctx = ctx(msgid = "context").copy(clientTags = mapOf("+channel-context" to "#help")),
+                    ctx = ctx(msgid = "private-fallback").copy(clientTags = mapOf("+channel-context" to "#missing")),
                     kind = IrcEvent.ChatKind.NOTICE,
                     source = Prefix("helperbot"),
                     target = "me",
                     text = "private help",
                     isSelf = false,
                     replyToMsgid = null,
+                )
+            processor.process(networkId, notice)
+            val query = db.bufferDao().byName(networkId, "helperbot")!!
+            assertEquals("private-fallback", pagingList(query.id).single().msgid)
+            assertNull(db.bufferDao().byName(networkId, "#missing"))
+
+            for (target in listOf("#public", "@+#public", "me,someone", "me@libera.chat", "\$*.example", "")) {
+                processor.process(
+                    networkId,
+                    notice.copy(
+                        ctx = ctx(msgid = "target-$target").copy(clientTags = mapOf("+channel-context" to "#help")),
+                        target = target,
+                        text = target,
+                    ),
+                )
+            }
+            processor.process(
+                networkId,
+                notice.copy(
+                    ctx = ctx(msgid = "server-notice").copy(clientTags = mapOf("+channel-context" to "#help")),
+                    source = Prefix("irc.libera.chat"),
                 ),
             )
 
-            val channel = db.bufferDao().byName(networkId, "#help")
-            assertEquals(BufferType.CHANNEL, channel?.type)
-            assertEquals("private help", pagingList(channel!!.id).single().text)
-            assertNull(db.bufferDao().byName(networkId, "helperbot"))
+            val channel = db.bufferDao().byName(networkId, "#help")!!
+            assertTrue(pagingList(channel.id).isEmpty())
+            val publicChannel = db.bufferDao().byName(networkId, "#public")!!
+            assertEquals(setOf("target-#public", "target-@+#public"), pagingList(publicChannel.id).map { it.msgid }.toSet())
+            assertTrue(pagingList(query.id).none { it.msgid == "target-@+#public" })
+            assertEquals("server-notice", pagingList(db.bufferDao().byName(networkId, "*")!!.id).single().msgid)
+        }
+
+    @Test
+    fun outgoingPrivateChannelContextEchoRetainsPendingLabelAlias() =
+        runTest {
+            processor.process(networkId, IrcEvent.TopicSnapshot("#help", "Help"))
+            val queryId = selfBuffer("helperbot")
+            processor.insertPending(queryId, "context-label", "me", "request", null, MessageKind.PRIVMSG)
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "context-echo", label = "context-label").copy(clientTags = mapOf("+channel-context" to "#help")),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("me"),
+                    target = "helperbot",
+                    text = "request",
+                    isSelf = true,
+                    replyToMsgid = null,
+                ),
+            )
+            val row = pagingList(queryId).single { it.text == "request" }
+            assertEquals("context-echo", row.msgid)
+            assertNull(row.pendingLabel)
+            assertTrue(pagingList(db.bufferDao().byName(networkId, "#help")!!.id).isEmpty())
         }
 
     @Test

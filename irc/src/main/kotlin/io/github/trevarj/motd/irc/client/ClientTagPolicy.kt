@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.irc.client
 
+import io.github.trevarj.motd.irc.event.IrcEvent
+
 /**
  * Whether a client-only message tag may be sent under IRCv3 `CLIENTTAGDENY`.
  *
@@ -28,13 +30,21 @@ fun canSendClientTag(
 
 /** Valid private-message channel context; accepts the deployed draft alias on ingress. */
 fun validChannelContext(
-    clientTags: Map<String, String>,
-    target: String,
+    event: IrcEvent.ChatMessage,
     isChannel: (String) -> Boolean,
+    isMembershipPrefix: (Char) -> Boolean = { false },
 ): String? {
-    if (isChannel(target)) return null
-    return (clientTags["+channel-context"] ?: clientTags["+draft/channel-context"])
-        ?.takeIf(isChannel)
+    val tags = event.ctx.clientTags
+    val context = tags["+channel-context"] ?: tags["+draft/channel-context"] ?: return null
+    if (context.length < 2 || !isChannel(context) || context.any { it == ',' || it.isWhitespace() || it.isISOControl() }) {
+        return null
+    }
+    fun isPrivateNick(nick: String): Boolean =
+        nick.isNotEmpty() && !isChannel(nick) &&
+            nick.first() !in "$:" && !isMembershipPrefix(nick.first()) &&
+            nick.none { it in ".,*!?@" || it.isWhitespace() || it.isISOControl() }
+
+    return context.takeIf { isPrivateNick(event.target) && isPrivateNick(event.source.nick) }
 }
 
 fun preferredReplyTag(
