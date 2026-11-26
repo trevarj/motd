@@ -305,6 +305,7 @@ class IrcClient(
     private val selfNick = AtomicReference(config.nick)
     private val _isupport = AtomicReference(Isupport())
     private val ackedCaps = AtomicReference<Set<String>>(emptySet())
+    private var negotiatedCaps: Set<String> = emptySet()
     private val runtimeAdvertisedCaps = java.util.concurrent.ConcurrentHashMap<String, String>()
 
     private val labels = LabelCorrelator()
@@ -519,8 +520,13 @@ class IrcClient(
                 } else {
                     // First post-registration line: release any deferred feature CAP REQs waiting
                     // on proof the stream survived the registration fallback (see SendDeferred).
-                    postRegistrationActivity.complete(Unit)
-                    dispatch(msg, t, criticalEvents)
+                    if (msg.command == "CAP") {
+                        dispatch(msg, t, criticalEvents)
+                        postRegistrationActivity.complete(Unit)
+                    } else {
+                        postRegistrationActivity.complete(Unit)
+                        dispatch(msg, t, criticalEvents)
+                    }
                 }
             }
             // Clean EOF.
@@ -585,7 +591,18 @@ class IrcClient(
                     // Send as soon as the post-Complete stream proves live, or at the fallback
                     // ceiling — never earlier than the CAP-mutation window the ceiling protects.
                     withTimeoutOrNull(a.delayMs) { activity.await() }
-                    if (transport === t) runCatching { sendSerialized(t, a.line) }
+                    runCatching {
+                        outboundLock.withLock {
+                            if (transport !== t) return@withLock
+                            val cap = a.line.substringAfter("CAP REQ :")
+                            if (cap !in _pendingFeatureCaps.value) return@withLock
+                            if (cap == "labeled-response" && !hasCap("batch")) {
+                                _pendingFeatureCaps.update { it - cap }
+                                return@withLock
+                            }
+                            t.send(a.line)
+                        }
+                    }
                 }
             }
 
@@ -604,6 +621,7 @@ class IrcClient(
                 _targetClassificationReady.value =
                     a.isupport["CHANTYPES"] != null || "CHANTYPES" in removedIsupport || a.assumeDefaultTargetClassification
                 ackedCaps.set(a.caps)
+                negotiatedCaps = a.ackedCaps
                 _pendingFeatureCaps.value = a.deferredCaps
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
@@ -1005,18 +1023,13 @@ class IrcClient(
         when (sub) {
             "NEW" -> {
                 // REQ any tier cap newly advertised that we want.
-                val alreadyAcked = ackedCaps.get().map { it.substringBefore('=') }.toSet()
-                val want = CapNegotiator.runtimeRequestSet(caps, alreadyAcked, config.extraCaps)
-                if (want.isNotEmpty()) {
-                    _pendingFeatureCaps.value += want
-                    for (b in CapNegotiator.batches(want)) runCatching { sendSerialized(t, "CAP REQ :$b") }
-                }
+                val newlyAvailable = caps - _pendingFeatureCaps.value
+                requestRuntimeCaps(t, CapNegotiator.runtimeRequestSet(newlyAvailable, negotiatedCaps, config.extraCaps))
             }
 
             "DEL" -> {
-                ackedCaps.set(ackedCaps.get().filterNot { it.substringBefore('=') in caps }.toSet())
-                updateReadyCaps(ackedCaps.get())
-                publish(criticalEvents, IrcEvent.CapsChanged(emptySet(), caps))
+                negotiatedCaps = negotiatedCaps.filterNotTo(linkedSetOf()) { it.substringBefore('=') in caps }
+                publishRuntimeCaps(criticalEvents, emptySet(), caps, caps)
             }
 
             "ACK" -> {
@@ -1037,24 +1050,54 @@ class IrcClient(
                                 )
                             if (value.isEmpty()) name else "$name=$value"
                         }.toSet()
-                val updated =
-                    ackedCaps
-                        .get()
-                        .filterNot { it.substringBefore('=') in removed }
-                        .toSet() + added
-                ackedCaps.set(updated)
-                updateReadyCaps(ackedCaps.get())
-                publish(
-                    criticalEvents,
-                    IrcEvent.CapsChanged(added.map { it.substringBefore('=') }.toSet(), removed),
-                )
+                negotiatedCaps = negotiatedCaps.filterNotTo(linkedSetOf()) { it.substringBefore('=') in removed } + added
+                publishRuntimeCaps(criticalEvents, added.mapTo(linkedSetOf()) { it.substringBefore('=') }, removed, caps)
             }
 
-            "NAK" -> {}
+            "NAK" -> {
+                _pendingFeatureCaps.value -= caps
+            }
         }
-        if (sub == "ACK" || sub == "NAK" || sub == "DEL") {
-            _pendingFeatureCaps.value -= caps
+        if (sub == "ACK" && tokens.any { it.substringBefore('=') == "batch" } &&
+            CapNegotiator.wantsLabeledResponse(runtimeAdvertisedCaps.keys, negotiatedCaps)
+        ) {
+            requestRuntimeCaps(t, setOf("labeled-response"))
         }
+    }
+
+    private suspend fun requestRuntimeCaps(
+        t: IrcTransport,
+        caps: Set<String>,
+    ) {
+        val want = caps - _pendingFeatureCaps.value
+        if (want.isEmpty()) return
+        _pendingFeatureCaps.value += want
+        for (b in CapNegotiator.batches(want)) runCatching { sendSerialized(t, "CAP REQ :$b") }
+    }
+
+    private suspend fun publishRuntimeCaps(
+        criticalEvents: Channel<IrcEvent>,
+        added: Set<String>,
+        removed: Set<String>,
+        settled: Set<String> = emptySet(),
+    ) {
+        val usable = CapNegotiator.usableCaps(negotiatedCaps)
+        val previouslyUsable = ackedCaps.getAndSet(usable)
+        updateReadyCaps(usable)
+        val labeled = "labeled-response"
+        _pendingFeatureCaps.update { pending ->
+            val remaining = pending - settled
+            if ("batch" in removed) remaining - labeled else remaining
+        }
+        val hadLabels = previouslyUsable.any { it.substringBefore('=') == labeled }
+        val hasLabels = usable.any { it.substringBefore('=') == labeled }
+        publish(
+            criticalEvents,
+            IrcEvent.CapsChanged(
+                if (hasLabels && !hadLabels) added + labeled else added - labeled,
+                if (hadLabels && !hasLabels) removed + labeled else removed - labeled,
+            ),
+        )
     }
 
     private fun rememberAdvertisedCaps(msg: IrcMessage) {

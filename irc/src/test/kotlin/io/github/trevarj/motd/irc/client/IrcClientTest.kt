@@ -2200,6 +2200,169 @@ class IrcClientTest {
         }
 
     @Test
+    fun `labeled-response advertised before welcome is requested after registration`() =
+        runTest {
+            for ((batchNegotiated, labelsAfterWelcome) in listOf(true to false, false to false, false to true)) {
+                val ft = FakeTransport()
+                val client = IrcClient(config(), ft.factory(), clientScope())
+                client.start()
+                runCurrent()
+                if (batchNegotiated) {
+                    ft.feed(":srv CAP * LS :batch")
+                    ft.feed(":srv CAP motd ACK :batch")
+                    ft.feed(":srv CAP motd NEW :labeled-response")
+                } else {
+                    if (labelsAfterWelcome) {
+                        ft.feed(":srv CAP * LS :echo-message")
+                        ft.feed(":srv CAP motd ACK :echo-message")
+                    } else {
+                        ft.feed(":srv CAP * LS :labeled-response")
+                    }
+                    ft.feed(":srv CAP motd NEW :batch")
+                }
+                runCurrent()
+                assertEquals("CAP END", ft.sent.last())
+
+                ft.feed(":srv 001 motd :Welcome")
+                runCurrent()
+                if (!batchNegotiated) {
+                    assertEquals("CAP REQ :batch", ft.sent.last())
+                    ft.feed(":srv CAP motd ACK :batch")
+                    runCurrent()
+                    if (labelsAfterWelcome) {
+                        ft.feed(":srv CAP motd NEW :labeled-response")
+                        runCurrent()
+                    }
+                }
+                assertEquals("CAP REQ :labeled-response", ft.sent.last())
+                assertFalse(client.hasCap("labeled-response"))
+                ft.feed(":srv CAP motd ACK :labeled-response")
+                runCurrent()
+                assertTrue(client.hasCap("labeled-response"))
+                client.stop()
+            }
+        }
+
+    @Test
+    fun `runtime labeled-response waits for batch regardless of advertisement order`() =
+        runTest {
+            for (batchFirst in listOf(false, true)) {
+                val ft = FakeTransport()
+                val client = registered(ft, caps = "echo-message")
+                val first = if (batchFirst) "batch" else "labeled-response"
+                val second = if (batchFirst) "labeled-response" else "batch"
+
+                ft.feed(":srv CAP motd NEW :$first")
+                runCurrent()
+                assertEquals(if (batchFirst) "CAP REQ :batch" else "CAP END", ft.sent.last())
+                ft.feed(":srv CAP motd NEW :$second")
+                runCurrent()
+                assertFalse(client.hasCap("labeled-response"))
+                assertEquals("CAP REQ :batch", ft.sent.last())
+                if (!batchFirst) ft.feed(":srv CAP motd DEL :labeled-response")
+                ft.feed(":srv CAP motd ACK :batch")
+                runCurrent()
+                assertTrue(client.hasCap("batch"))
+                if (!batchFirst) {
+                    assertEquals("CAP REQ :batch", ft.sent.last())
+                    ft.feed(":srv CAP motd NEW :labeled-response")
+                    runCurrent()
+                }
+                assertEquals("CAP REQ :labeled-response", ft.sent.last())
+                ft.feed(":srv CAP motd ACK :labeled-response")
+                runCurrent()
+                assertTrue(client.hasCap("labeled-response"))
+                assertTrue(client.pendingFeatureCaps.value.isEmpty())
+                client.stop()
+            }
+        }
+
+    @Test
+    fun `runtime labeled-response drops on batch removal and resumes only after batch ACK`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registered(ft, caps = "echo-message batch labeled-response")
+            val changes = mutableListOf<IrcEvent.CapsChanged>()
+            val job = launch { client.broadcastEvents.filterIsInstance<IrcEvent.CapsChanged>().toList(changes) }
+            runCurrent()
+
+            for (loss in listOf("DEL :batch", "ACK :-batch")) {
+                ft.feed(":srv CAP motd $loss")
+                runCurrent()
+                assertFalse(client.hasCap("labeled-response"))
+                assertFalse("labeled-response" in (client.state.value as IrcClientState.Ready).caps)
+                assertEquals(setOf("batch", "labeled-response"), changes.last().removed)
+                assertTrue(client.sendMessage("#chan", "hello", null, "motd-unlabeled"))
+                assertEquals(emptyMap<String, String>(), IrcMessage.parse(ft.sent.last()).tags)
+
+                ft.feed(":srv CAP motd NEW :batch")
+                runCurrent()
+                assertEquals("CAP REQ :batch", ft.sent.last())
+                assertFalse(client.hasCap("labeled-response"))
+                ft.feed(":srv CAP motd ACK :batch")
+                runCurrent()
+                assertTrue(client.hasCap("labeled-response"))
+                assertEquals(setOf("batch", "labeled-response"), changes.last().added)
+                assertTrue(client.sendMessage("#chan", "hello", null, "motd-labeled"))
+                assertEquals(mapOf("label" to "motd-labeled"), IrcMessage.parse(ft.sent.last()).tags)
+            }
+            job.cancel()
+        }
+
+    @Test
+    fun `bouncer fallback does not request deferred labeled-response after batch DEL`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = IrcClient(config(bouncerNetId = "42"), ft.factory(), clientScope())
+            client.start()
+            runCurrent()
+            ft.feed(":srv CAP * LS :batch labeled-response")
+            runCurrent()
+            assertEquals("CAP REQ :batch", ft.sent.last())
+            ft.feed(":srv CAP motd ACK :batch")
+            ft.feed(":srv CAP motd NEW :vendor/post-bind")
+            runCurrent()
+            assertTrue("labeled-response" in client.pendingFeatureCaps.value)
+
+            ft.feed(":srv CAP motd DEL :batch")
+            runCurrent()
+            assertFalse("labeled-response" in client.pendingFeatureCaps.value)
+            assertFalse(ft.sent.contains("CAP REQ :labeled-response"))
+        }
+
+    @Test
+    fun `bouncer fallback drops deferred labeled-response dequeued after CAP DEL`() =
+        runTest {
+            for (removed in listOf("batch", "labeled-response")) {
+                val ft = FakeTransport()
+                val client = IrcClient(config(bouncerNetId = "42"), ft.factory(), clientScope())
+                client.start()
+                runCurrent()
+                ft.feed(":srv CAP * LS :batch labeled-response")
+                ft.feed(":srv CAP motd ACK :batch")
+                ft.feed(":srv CAP motd NEW :vendor/post-bind")
+                runCurrent()
+                assertTrue("labeled-response" in client.pendingFeatureCaps.value)
+
+                val releaseWrite = CompletableDeferred<Unit>()
+                ft.beforeSend = { if (it.startsWith("NOTICE ")) releaseWrite.await() }
+                val writer = async { client.send(IrcMessage(command = "NOTICE", params = listOf("motd", "hello"))) }
+                runCurrent()
+                ft.feed(":srv NOTICE motd :Ready")
+                runCurrent()
+                ft.feed(":srv CAP motd DEL :$removed")
+                runCurrent()
+                releaseWrite.complete(Unit)
+                writer.await()
+                runCurrent()
+
+                assertFalse("labeled-response" in client.pendingFeatureCaps.value)
+                assertFalse(ft.sent.contains("CAP REQ :labeled-response"))
+                client.stop()
+            }
+        }
+
+    @Test
     fun `CAP NEW preserves advertised values after value-less ACK`() =
         runTest {
             val ft = FakeTransport()

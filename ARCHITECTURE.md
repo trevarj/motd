@@ -51,6 +51,8 @@ flowchart TD
   preserves the confirmed playback order and canonical message IDs.
 - A labelled server rejection marks the corresponding send failed. Server feedback is
   a separate timeline event, not an echo that can replace the original message.
+  `labeled-response` is usable only while `batch` is negotiated. Losing `batch`
+  makes new requests use their unlabeled fallback until the dependency returns.
 - History and reconnect playback consume each precomputed chat route even when
   a network ignore drops its message, keeping subsequent authors, bodies and
   self-attribution aligned.

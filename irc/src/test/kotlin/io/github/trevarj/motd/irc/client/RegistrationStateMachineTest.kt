@@ -8,6 +8,35 @@ import org.junit.Test
 
 class RegistrationStateMachineTest {
     @Test
+    fun `labeled-response is requested only alongside batch during registration`() {
+        val config = IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd", extraCaps = setOf("labeled-response"))
+        val withoutBatch = RegistrationStateMachine(config)
+        withoutBatch.start()
+        assertEquals(listOf("CAP END"), withoutBatch.onMessage(cap("LS", "labeled-response")).sentLines())
+
+        val withBatch = RegistrationStateMachine(config)
+        withBatch.start()
+        assertEquals(listOf("CAP REQ :batch labeled-response"), withBatch.onMessage(cap("LS", "labeled-response batch")).sentLines())
+        assertEquals(listOf("CAP END"), withBatch.onMessage(cap("ACK", "labeled-response batch")).sentLines())
+        val ready = withBatch.onMessage(IrcMessage(command = "001", params = listOf("motd", "Welcome")))
+        assertEquals(setOf("batch", "labeled-response"), ready.filterIsInstance<RegistrationStateMachine.Action.Complete>().single().caps)
+    }
+
+    @Test
+    fun `labeled-response is unavailable if batch is missing or withdrawn before welcome`() {
+        val config = IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd")
+        for (batchLoss in listOf(null, cap("ACK", "-batch"), cap("DEL", "batch"))) {
+            val machine = RegistrationStateMachine(config)
+            machine.start()
+            machine.onMessage(cap("LS", "batch labeled-response"))
+            machine.onMessage(cap("ACK", if (batchLoss == null) "labeled-response" else "batch labeled-response"))
+            if (batchLoss != null) machine.onMessage(batchLoss)
+            val welcome = machine.onMessage(IrcMessage(command = "001", params = listOf("motd", "Welcome")))
+            assertEquals(emptySet<String>(), welcome.filterIsInstance<RegistrationStateMachine.Action.Complete>().single().caps)
+        }
+    }
+
+    @Test
     fun `server password is sent before CAP NICK and USER`() {
         val machine =
             RegistrationStateMachine(

@@ -46,13 +46,15 @@ internal class RegistrationStateMachine(
         /** Registration succeeded. */
         data class Complete(
             val nick: String,
-            val caps: Set<String>,
+            val ackedCaps: Set<String>,
             val isupport: Isupport,
             /** Soju child fallback: the stalled welcome burst requires protocol-default CHANTYPES. */
             val assumeDefaultTargetClassification: Boolean = false,
             /** Capabilities requested after Ready whose ACK/NAK decision is still outstanding. */
             val deferredCaps: Set<String> = emptySet(),
-        ) : Action
+        ) : Action {
+            val caps = CapNegotiator.usableCaps(ackedCaps)
+        }
 
         /** Registration failed terminally. */
         data class Fail(
@@ -75,6 +77,8 @@ internal class RegistrationStateMachine(
     private var requestedBatches = 0
     private var ackedBatches = 0
     private val postWelcomeCapReqs = ArrayList<String>()
+    private var batchNew = false
+    private var labeledResponseNew = false
 
     private val isupport = Isupport()
     private var sasl: SaslAuthenticator? = null
@@ -177,6 +181,8 @@ internal class RegistrationStateMachine(
 
         // Full LS received: compute request set and send REQs.
         phase = Phase.CAP_REQ
+        batchNew = false
+        labeledResponseNew = false
         val desired = CapNegotiator.requestSet(advertised.keys, config.extraCaps)
         val req =
             if (isBouncerChildRegistration()) {
@@ -291,18 +297,19 @@ internal class RegistrationStateMachine(
                 actions += nickServRecoveryLines(config).map(Action::Send)
             }
         }
+        val deferredCaps = deferredCaps()
         actions +=
             Action.Complete(
                 nick,
                 acked.toSet(),
                 isupport,
-                deferredCaps = postWelcomeCapReqs.toSet(),
+                deferredCaps = deferredCaps,
             )
         val fallbackAwayLine = initialAwayLine()
         if (fallbackAwayLine != null && (!preAwayAttempted || preAwayRejected)) {
             actions.add(Action.Send(fallbackAwayLine))
         }
-        for (cap in postWelcomeCapReqs.distinct().sorted()) {
+        for (cap in deferredCaps.sorted()) {
             actions.add(Action.Send("CAP REQ :$cap"))
         }
         return actions
@@ -357,8 +364,6 @@ internal class RegistrationStateMachine(
      * app can use the live socket. Ordinary IRC connections still require 001.
      */
     private fun onCapChangedBeforeWelcome(msg: IrcMessage): List<Action> {
-        if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
-
         val subcommand = msg.params.getOrNull(1)
         val tokens =
             msg.params
@@ -377,6 +382,9 @@ internal class RegistrationStateMachine(
         when (subcommand) {
             "NEW" -> {
                 parseAdvertised(tokens.joinToString(" "))
+                if ("batch" in names) batchNew = true
+                if ("labeled-response" in names) labeledResponseNew = true
+                if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
                 val newlyDesired =
                     CapNegotiator.runtimeRequestSet(
                         names,
@@ -392,8 +400,10 @@ internal class RegistrationStateMachine(
                 postWelcomeCapReqs.removeAll { it in names }
             }
         }
+        if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
 
         phase = Phase.DONE
+        val deferredCaps = deferredCaps()
         val actions =
             mutableListOf<Action>(
                 Action.SetNick(nick),
@@ -402,13 +412,13 @@ internal class RegistrationStateMachine(
                     acked.toSet(),
                     isupport,
                     assumeDefaultTargetClassification = true,
-                    deferredCaps = postWelcomeCapReqs.toSet(),
+                    deferredCaps = deferredCaps,
                 ),
             )
         // Soju can remove capabilities while BOUNCER BIND selects the upstream network. Request
         // each deferred capability separately so one stale capability can be NAKed without also
         // rejecting unrelated features such as draft/read-marker.
-        for (cap in postWelcomeCapReqs.distinct().sorted()) {
+        for (cap in deferredCaps.sorted()) {
             actions.add(Action.SendDeferred("CAP REQ :$cap", FALLBACK_FEATURE_CAP_DELAY_MS))
         }
         return actions
@@ -440,8 +450,11 @@ internal class RegistrationStateMachine(
 
     /** Record an ACKed cap, encoding its LS value as `name=value` when present. */
     private fun recordAcked(cap: String) {
-        // ACK may prefix with '-' to drop; ignore those here (unusual during registration).
         val name = cap.removePrefix("-").removePrefix("=").removePrefix("~")
+        if (cap.startsWith('-')) {
+            acked.removeAll { it.substringBefore('=') == name }
+            return
+        }
         val value = advertised[name]
         if (!value.isNullOrEmpty()) acked.add("$name=$value") else acked.add(name)
     }
@@ -450,10 +463,23 @@ internal class RegistrationStateMachine(
 
     private fun isBouncerChildRegistration(): Boolean = config.bouncerNetId != null || config.saslUser?.contains('/') == true
 
+    private fun deferredCaps(): Set<String> =
+        buildSet {
+            addAll(postWelcomeCapReqs)
+            if ((isBouncerChildRegistration() || labeledResponseNew) &&
+                CapNegotiator.wantsLabeledResponse(advertised.keys, acked)
+            ) {
+                add("labeled-response")
+            } else if (batchNew && "batch" in advertised && !hasAcked("batch")) {
+                add("batch")
+            }
+        }
+
     private fun deferredFeatureCaps(caps: Set<String>): Set<String> =
         caps -
             buildSet {
                 add("cap-notify")
+                add("labeled-response")
                 // Slash-auth children are already bound by their SASL authcid and must not BOUNCER BIND.
                 if (config.bouncerNetId == null) add("soju.im/bouncer-networks")
             }

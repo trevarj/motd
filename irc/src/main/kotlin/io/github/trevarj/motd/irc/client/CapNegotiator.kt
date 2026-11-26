@@ -81,6 +81,7 @@ internal object CapNegotiator {
         if ("draft/metadata-2" in req && "batch" !in advertised) {
             req.remove("draft/metadata-2")
         }
+        if ("batch" !in advertised) req.remove("labeled-response")
         if (MULTILINE_CAP in req && "batch" !in advertised) {
             req.remove(MULTILINE_CAP)
         }
@@ -122,6 +123,22 @@ internal object CapNegotiator {
         val advertised = (newCaps - heldAliases) + ackedNames
         return requestSet(advertised, extraCaps) - ackedNames
     }
+
+    fun wantsLabeledResponse(
+        advertised: Set<String>,
+        acked: Set<String>,
+    ): Boolean = "labeled-response" in advertised && hasBatch(acked) && !hasLabeledResponse(acked)
+
+    fun usableCaps(acked: Set<String>): Set<String> =
+        if (hasLabeledResponse(acked) && !hasBatch(acked)) {
+            acked.filterNotTo(linkedSetOf()) { it.substringBefore('=') == "labeled-response" }
+        } else {
+            acked
+        }
+
+    private fun hasBatch(caps: Set<String>): Boolean = caps.any { it.substringBefore('=') == "batch" }
+
+    private fun hasLabeledResponse(caps: Set<String>): Boolean = caps.any { it.substringBefore('=') == "labeled-response" }
 
     /** Split caps into space-joined batches whose payload stays within [limit] bytes. */
     fun batches(
