@@ -4541,6 +4541,42 @@ class EventProcessorTest {
         }
 
     @Test
+    fun unlabeledMetadataQueriesConsumeOnlyTheirOwnSnapshotAndClose() =
+        runTest {
+            val origin =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "#origin", displayName = "#origin", type = BufferType.CHANNEL),
+                )
+            val automatic = EventProcessor.MetadataSnapshotRouting.AUTOMATIC
+            val positiveOnly = EventProcessor.MetadataSnapshotRouting.POSITIVE_ONLY
+            val now = System.currentTimeMillis()
+            processor.beginCommandResponse(networkId, origin, "METADATA", null, now, listOf("#chat", "get", "status"))
+            val status = IrcMessage.parse(":srv 761 me #CHAT status * :busy")
+            val avatar = IrcMessage.parse(":srv 761 me #chat avatar * :https://example.com/avatar.png")
+
+            suspend fun route(
+                target: String,
+                vararg messages: IrcMessage,
+                at: Long = now,
+            ) = processor.routeMetadataSnapshot(networkId, IrcEvent.MetadataSnapshot(target, messages.toList()), at)
+            assertEquals(automatic, route("#elsewhere", status))
+            assertEquals(positiveOnly, route("#chat", avatar))
+            assertEquals(positiveOnly, route("#chat"))
+            processor.process(networkId, IrcEvent.Raw(IrcMessage(command = "372", params = listOf("me", "server"))))
+            assertEquals(positiveOnly, route("#CHAT", status))
+            assertEquals(positiveOnly, route("#chat", status))
+            assertEquals(positiveOnly, route("#chat"))
+            assertEquals(automatic, route("#chat", status, at = now + 30_001))
+            assertEquals("#CHAT status * busy", pagingList(origin).single().text)
+            assertEquals("server", pagingList(serverBuffer()!!.id).single().text)
+
+            processor.beginCommandResponse(networkId, origin, "METADATA", null, now, listOf("#chat", "LIST"))
+            assertEquals(positiveOnly, route("#chat"))
+            assertEquals(positiveOnly, route("#chat", status))
+            assertEquals(1, pagingList(origin).size)
+        }
+
+    @Test
     fun commandErrorRoutesToOriginInsteadOfProtocolTarget() =
         runTest {
             val origin =

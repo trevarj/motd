@@ -8,6 +8,7 @@ internal data class BatchTree(
     val params: List<String>,
     val opening: IrcMessage,
     val children: List<BatchChild>,
+    val openedAtNanos: Long = 0L,
 )
 
 internal sealed interface BatchChild {
@@ -50,6 +51,7 @@ internal class BatchAssembler(
         val params: List<String>,
         val opening: IrcMessage,
         val parent: String?,
+        val openedAtNanos: Long,
     ) {
         val children = mutableListOf<MutableChild>()
     }
@@ -84,7 +86,9 @@ internal class BatchAssembler(
             if (ref.isEmpty() || ref in open) return Outcome.PassThrough
             if (open.size >= maxOpenBatches) return overflow("more than $maxOpenBatches batches are open")
             val parent = msg.tags["batch"]?.takeIf { it in open }
-            open[ref] = OpenBatch(ref, msg.params.getOrNull(1).orEmpty(), msg.params.drop(2), msg, parent)
+            val type = msg.params.getOrNull(1).orEmpty()
+            val openedAtNanos = if (type == "metadata") System.nanoTime() else 0L
+            open[ref] = OpenBatch(ref, type, msg.params.drop(2), msg, parent, openedAtNanos)
             parent?.let { open[it]?.children?.add(MutableChild.Pending(ref)) }
             return Outcome.Buffered
         }
@@ -123,6 +127,7 @@ internal class BatchAssembler(
             type = type,
             params = params.toList(),
             opening = opening,
+            openedAtNanos = openedAtNanos,
             children =
                 children.mapNotNull { child ->
                     when (child) {

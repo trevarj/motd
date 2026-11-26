@@ -816,6 +816,7 @@ class NotificationReplyReadinessTest {
                 AvatarStoreImpl(avatars.avatarDao()),
                 db.userDao(),
                 db.bufferDao(),
+                db.memberDao(),
                 LocalAvatarStore(context),
                 Lazy { manager },
                 scope,

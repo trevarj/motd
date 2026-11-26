@@ -492,14 +492,28 @@ class IrcClient(
         lagMonitor = lm
         lm.start()
 
+        var metadataWireSequence = 0L
         try {
             t.incoming.collect { line ->
                 wd.onInbound()
-                val msg =
+                val parsed =
                     try {
                         IrcMessage.parse(line)
                     } catch (_: IrcParseException) {
                         return@collect
+                    }
+                val isMetadataFrame =
+                    when (parsed.command) {
+                        "761", "766", "NICK" -> true
+                        "BATCH" -> parsed.params.getOrNull(1) == "metadata" && parsed.params[0].startsWith("+")
+                        "WARN" -> parsed.params.firstOrNull() == "METADATA"
+                        else -> false
+                    }
+                val msg =
+                    if (isMetadataFrame && hasCap(METADATA_V3_CAP) && hasCap("batch")) {
+                        parsed.copy(wireSequence = ++metadataWireSequence)
+                    } else {
+                        parsed
                     }
                 // Answer server PING immediately, before any mapping.
                 if (msg.command == "PING") {
@@ -599,6 +613,17 @@ class IrcClient(
                             if (cap == "labeled-response" && !hasCap("batch")) {
                                 _pendingFeatureCaps.update { it - cap }
                                 return@withLock
+                            }
+                            if (cap in METADATA_CAP_ALIASES) {
+                                val selected =
+                                    CapNegotiator
+                                        .runtimeRequestSet(runtimeAdvertisedCaps.keys, caps, config.extraCaps)
+                                        .firstOrNull { it in METADATA_CAP_ALIASES }
+                                if (selected != cap) {
+                                    _pendingFeatureCaps.update { pending -> if (selected == null) pending - cap else pending - cap + selected }
+                                    if (selected != null) t.send("CAP REQ :$selected")
+                                    return@withLock
+                                }
                             }
                             t.send(a.line)
                         }
@@ -818,6 +843,12 @@ class IrcClient(
         inheritedLabel: String?,
     ): List<IrcEvent> {
         val responseLabel = tree.opening.tags["label"] ?: inheritedLabel
+        if (tree.type == "metadata" && responseLabel == null && !historical && hasCap(METADATA_V3_CAP) && hasCap("batch")) {
+            val target = tree.params.firstOrNull() ?: return emptyList()
+            val messages = tree.children.mapNotNull { (it as? BatchChild.Message)?.message }
+            return listOf(IrcEvent.MetadataSnapshot(target, messages, tree.opening.wireSequence, tree.openedAtNanos))
+        }
+
         val responseWrapper = tree.type.equals("labeled-response", ignoreCase = true)
         val eventBatchId = tree.ref.takeUnless { responseWrapper }
 
@@ -875,7 +906,8 @@ class IrcClient(
                     }
 
                     is BatchChild.Nested -> {
-                        mapBatchTree(child.batch, historical, responseLabel)
+                        val nestedHistory = historical || child.batch.type == "chathistory" || child.batch.type == "znc.in/playback"
+                        mapBatchTree(child.batch, nestedHistory, responseLabel)
                     }
                 }
             }
@@ -1023,8 +1055,21 @@ class IrcClient(
         when (sub) {
             "NEW" -> {
                 // REQ any tier cap newly advertised that we want.
+                val activeMetadata =
+                    METADATA_CAP_ALIASES.firstOrNull { alias ->
+                        alias in caps && negotiatedCaps.any { it.substringBefore('=') == alias }
+                    }
+                if (activeMetadata != null) {
+                    val value = runtimeAdvertisedCaps[activeMetadata].orEmpty()
+                    val token = if (value.isEmpty()) activeMetadata else "$activeMetadata=$value"
+                    if (token !in negotiatedCaps) {
+                        negotiatedCaps = negotiatedCaps.filterNotTo(linkedSetOf()) { it.substringBefore('=') == activeMetadata } + token
+                        publishRuntimeCaps(criticalEvents, setOf(activeMetadata), emptySet())
+                    }
+                }
                 val newlyAvailable = caps - _pendingFeatureCaps.value
-                requestRuntimeCaps(t, CapNegotiator.runtimeRequestSet(newlyAvailable, negotiatedCaps, config.extraCaps))
+                val candidates = if (hasCap("batch")) newlyAvailable else newlyAvailable - METADATA_VERSIONED_CAPS
+                requestRuntimeCaps(t, CapNegotiator.runtimeRequestSet(candidates, negotiatedAndPendingMetadataCaps(), config.extraCaps))
             }
 
             "DEL" -> {
@@ -1063,7 +1108,23 @@ class IrcClient(
         ) {
             requestRuntimeCaps(t, setOf("labeled-response"))
         }
+        if ((sub == "DEL" && METADATA_CAP_ALIASES.any { it in caps }) || (sub == "ACK" && "batch" in caps && hasCap("batch"))) {
+            val advertisedMetadata = METADATA_CAP_ALIASES.filterTo(linkedSetOf(), runtimeAdvertisedCaps::containsKey)
+            if (advertisedMetadata.isNotEmpty()) {
+                requestRuntimeCaps(
+                    t,
+                    CapNegotiator.runtimeRequestSet(advertisedMetadata, negotiatedAndPendingMetadataCaps(), config.extraCaps),
+                )
+            }
+        }
     }
+
+    private fun negotiatedAndPendingMetadataCaps(): Set<String> =
+        if (METADATA_CAP_ALIASES.any { it in _pendingFeatureCaps.value }) {
+            negotiatedCaps + METADATA_CAP_ALIASES.filter { it in _pendingFeatureCaps.value }
+        } else {
+            negotiatedCaps
+        }
 
     private suspend fun requestRuntimeCaps(
         t: IrcTransport,

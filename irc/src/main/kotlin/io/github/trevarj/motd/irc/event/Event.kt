@@ -67,6 +67,13 @@ sealed interface IrcEvent {
         val reason: String?,
     ) : IrcEvent
 
+    data class MetadataSnapshot(
+        val target: String,
+        val messages: List<IrcMessage>,
+        val openingSequence: Long = 0L,
+        val openedAtNanos: Long = 0L,
+    ) : IrcEvent
+
     // -- chat
     enum class ChatKind { PRIVMSG, NOTICE, ACTION }
 
@@ -200,6 +207,7 @@ sealed interface IrcEvent {
         val from: String,
         val to: String,
         val isSelf: Boolean,
+        val wireSequence: Long = 0L,
     ) : IrcEvent
 
     data class Names(

@@ -79,6 +79,7 @@ internal class RegistrationStateMachine(
     private val postWelcomeCapReqs = ArrayList<String>()
     private var batchNew = false
     private var labeledResponseNew = false
+    private var metadataNew = false
 
     private val isupport = Isupport()
     private var sasl: SaslAuthenticator? = null
@@ -384,6 +385,14 @@ internal class RegistrationStateMachine(
                 parseAdvertised(tokens.joinToString(" "))
                 if ("batch" in names) batchNew = true
                 if ("labeled-response" in names) labeledResponseNew = true
+                for (alias in METADATA_CAP_ALIASES) {
+                    if (alias !in names) continue
+                    metadataNew = true
+                    if (hasAcked(alias)) {
+                        acked.removeAll { it.substringBefore('=') == alias }
+                        recordAcked(alias)
+                    }
+                }
                 if (phase != Phase.WELCOME || !isBouncerChildRegistration()) return emptyList()
                 val newlyDesired =
                     CapNegotiator.runtimeRequestSet(
@@ -473,6 +482,13 @@ internal class RegistrationStateMachine(
             } else if (batchNew && "batch" in advertised && !hasAcked("batch")) {
                 add("batch")
             }
+            if (isBouncerChildRegistration() || metadataNew || batchNew) {
+                val metadata =
+                    CapNegotiator.runtimeRequestSet(advertised.keys, acked, config.extraCaps).firstOrNull { it in METADATA_CAP_ALIASES }
+                if (metadata != null) {
+                    add(if (metadata == "metadata-notify" || hasAcked("batch")) metadata else "batch")
+                }
+            }
         }
 
     private fun deferredFeatureCaps(caps: Set<String>): Set<String> =
@@ -480,6 +496,7 @@ internal class RegistrationStateMachine(
             buildSet {
                 add("cap-notify")
                 add("labeled-response")
+                addAll(METADATA_CAP_ALIASES)
                 // Slash-auth children are already bound by their SASL authcid and must not BOUNCER BIND.
                 if (config.bouncerNetId == null) add("soju.im/bouncer-networks")
             }

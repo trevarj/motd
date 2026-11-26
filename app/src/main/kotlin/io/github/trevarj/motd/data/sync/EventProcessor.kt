@@ -165,6 +165,7 @@ class EventProcessor
         private val commandResponsesById = ConcurrentHashMap<String, CommandResponseSession>()
         private val commandResponsesByLabel = ConcurrentHashMap<String, CommandResponseSession>()
         private val latestUnlabeledCommand = ConcurrentHashMap<Long, CommandResponseSession>()
+        private val metadataCommandWindows = ConcurrentHashMap<Long, Map<MetadataQuery, Long>>()
 
         private data class RosterKey(
             val networkId: Long,
@@ -178,8 +179,32 @@ class EventProcessor
             val command: String,
             val label: String?,
             val expiresAt: Long,
+            val metadataQuery: MetadataQuery?,
             var nextOrdinal: Int = 0,
         )
+
+        private data class MetadataQuery(
+            val target: String,
+            val operation: String,
+            val keys: List<String>,
+        ) {
+            fun matchesTarget(
+                state: NetworkState,
+                replyTarget: String?,
+            ): Boolean {
+                if (replyTarget == null) return false
+                val requested = if (target == "*") state.selfNick else target
+                val reply = if (replyTarget == "*") state.selfNick else replyTarget
+                return state.normalize(requested) == state.normalize(reply)
+            }
+
+            fun matchesKey(
+                key: String?,
+                index: Int,
+            ): Boolean = key != null && (operation == "LIST" || key == keys.getOrNull(index))
+        }
+
+        internal enum class MetadataSnapshotRouting { AUTOMATIC, POSITIVE_ONLY }
 
         private data class CanonicalBatchKey(
             val roomId: Long,
@@ -390,6 +415,7 @@ class EventProcessor
             command: String,
             label: String?,
             now: Long = System.currentTimeMillis(),
+            metadataQueryParams: List<String> = emptyList(),
         ): String {
             commandResponsesById.values.removeAll { it.expiresAt <= now }
             commandResponsesByLabel.values.removeAll { it.expiresAt <= now }
@@ -402,8 +428,22 @@ class EventProcessor
                     command = command.uppercase().filter { it.isLetterOrDigit() || it == '_' }.ifEmpty { "COMMAND" },
                     label = label,
                     expiresAt = now + COMMAND_RESPONSE_TIMEOUT_MS,
+                    metadataQuery =
+                        metadataQueryParams.takeIf { label == null && command.equals("METADATA", ignoreCase = true) }?.let { params ->
+                            val operation = params.getOrNull(1)?.uppercase() ?: return@let null
+                            if ((operation == "GET" && params.size >= 3) || (operation == "LIST" && params.size == 2)) {
+                                MetadataQuery(params[0], operation, params.drop(2))
+                            } else {
+                                null
+                            }
+                        },
                 )
             commandResponsesById[session.id] = session
+            session.metadataQuery?.let { query ->
+                metadataCommandWindows.compute(networkId) { _, windows ->
+                    windows.orEmpty().filterValues { it > now } + (query to session.expiresAt)
+                }
+            }
             if (label == null) {
                 latestUnlabeledCommand.put(networkId, session)?.let(::finishCommandResponse)
             } else {
@@ -415,6 +455,61 @@ class EventProcessor
         fun cancelCommandResponse(sessionId: String) {
             commandResponsesById[sessionId]?.let(::finishCommandResponse)
         }
+
+        internal suspend fun routeMetadataSnapshot(
+            networkId: Long,
+            event: IrcEvent.MetadataSnapshot,
+            now: Long = System.currentTimeMillis(),
+        ): MetadataSnapshotRouting =
+            sequencer.withNetwork(networkId) {
+                val windows = metadataCommandWindows[networkId] ?: return@withNetwork MetadataSnapshotRouting.AUTOMATIC
+                val state = stateFor(networkId)
+                val session = commandResponse(networkId, label = null, now = now, includeMetadataQuery = true)
+                if (session?.metadataQuery?.matchesSnapshot(state, event) == true) {
+                    finishCommandResponse(session)
+                    for (message in event.messages) {
+                        insertCommandResponse(session, serverCtx(), MessageKind.SERVER_INFO, rawCommandResponseText(message))
+                    }
+                    return@withNetwork MetadataSnapshotRouting.POSITIVE_ONLY
+                }
+                if (windows.any { (query, expiresAt) -> expiresAt > now && query.matchesTarget(state, event.target) }) {
+                    MetadataSnapshotRouting.POSITIVE_ONLY
+                } else {
+                    MetadataSnapshotRouting.AUTOMATIC
+                }
+            }
+
+        private fun MetadataQuery.matchesSnapshot(
+            state: NetworkState,
+            event: IrcEvent.MetadataSnapshot,
+        ): Boolean =
+            matchesTarget(state, event.target) &&
+                (operation != "GET" || event.messages.size == keys.size) &&
+                event.messages.withIndex().all { (index, message) ->
+                    val params = message.params
+                    when (message.command) {
+                        "761" -> {
+                            matchesTarget(state, params.getOrNull(1)) && matchesKey(params.getOrNull(2), index)
+                        }
+
+                        "766" -> {
+                            operation == "GET" && matchesTarget(state, params.getOrNull(1)) && matchesKey(params.getOrNull(2), index)
+                        }
+
+                        "WARN", "NOTE" -> {
+                            params.firstOrNull() == "METADATA" &&
+                                when (params.getOrNull(1)) {
+                                    "INVALID_KEY" -> operation == "GET" && matchesKey(params.getOrNull(2), index)
+                                    "KEY_NO_PERMISSION" -> matchesTarget(state, params.getOrNull(2)) && matchesKey(params.getOrNull(3), index)
+                                    else -> false
+                                }
+                        }
+
+                        else -> {
+                            false
+                        }
+                    }
+                }
 
         override suspend fun process(
             networkId: Long,
@@ -674,6 +769,7 @@ class EventProcessor
                 }
 
                 is IrcEvent.CapsChanged,
+                is IrcEvent.MetadataSnapshot,
                 -> {} // not persisted
             }
             return emptyList()
@@ -3611,6 +3707,7 @@ class EventProcessor
             networkId: Long,
             label: String?,
             now: Long = System.currentTimeMillis(),
+            includeMetadataQuery: Boolean = false,
         ): CommandResponseSession? {
             val session =
                 if (label != null) {
@@ -3622,7 +3719,7 @@ class EventProcessor
                 finishCommandResponse(session)
                 return null
             }
-            return session
+            return session.takeIf { includeMetadataQuery || it.metadataQuery == null }
         }
 
         private fun finishCommandResponse(session: CommandResponseSession) {
@@ -3632,6 +3729,7 @@ class EventProcessor
         }
 
         private fun clearCommandResponses(networkId: Long) {
+            metadataCommandWindows.remove(networkId)
             commandResponsesById.values.filter { it.networkId == networkId }.forEach(::finishCommandResponse)
         }
 
@@ -3726,7 +3824,20 @@ class EventProcessor
                     }
                 }
             val protocolBufferId = routed?.id ?: ensureServerBuffer(networkId, st)
-            val response = if (origin == EventOrigin.LIVE) commandResponse(networkId, e.ctx.label) else null
+            val response =
+                if (origin == EventOrigin.LIVE) {
+                    commandResponse(networkId, e.ctx.label, includeMetadataQuery = true)?.takeIf { session ->
+                        val query = session.metadataQuery ?: return@takeIf true
+                        e.commandName.equals("METADATA", ignoreCase = true) &&
+                            when (e.code) {
+                                "INVALID_TARGET" -> query.matchesTarget(st, e.context.firstOrNull())
+                                "INVALID_PARAMS" -> query.operation == e.context.firstOrNull()
+                                else -> false
+                            }
+                    }
+                } else {
+                    null
+                }
             if (e.severity == IrcEvent.StandardReplySeverity.FAIL) {
                 e.ctx.label?.let { label ->
                     messageDao.failIfStillPending(protocolBufferId, label)
@@ -3855,14 +3966,20 @@ class EventProcessor
         ) {
             if (removeReaction(networkId, e.message, origin, historyTarget)) return
             if (origin != EventOrigin.LIVE) return
-            val response = commandResponse(networkId, e.message.tags["label"])
+            val response =
+                commandResponse(networkId, e.message.tags["label"], includeMetadataQuery = true)?.takeIf { session ->
+                    val query = session.metadataQuery ?: return@takeIf true
+                    val params = e.message.params
+                    e.message.command == "775" && query.operation == params.getOrNull(3) &&
+                        query.matchesTarget(stateFor(networkId), params.getOrNull(2)) && params.drop(4) == query.keys
+                }
             if (response != null) {
                 if (e.message.command == "ACK") {
                     finishCommandResponse(response)
                     return
                 }
                 insertCommandResponse(response, serverCtx(), MessageKind.SERVER_INFO, rawCommandResponseText(e.message))
-                if (commandResponseEnds(response.command, e.message.command)) finishCommandResponse(response)
+                if (response.metadataQuery != null || commandResponseEnds(response.command, e.message.command)) finishCommandResponse(response)
                 return
             }
             if (e.message.command !in SERVER_INFO_NUMERICS) return

@@ -168,7 +168,7 @@ class EventMapper(
             "NICK" -> {
                 val from = msg.source?.nick ?: return IrcEvent.Raw(msg)
                 val to = msg.params.getOrNull(0) ?: return IrcEvent.Raw(msg)
-                IrcEvent.NickChanged(c(), from, to, isSelf(msg.source))
+                IrcEvent.NickChanged(c(), from, to, isSelf(msg.source), msg.wireSequence)
             }
 
             "TOPIC" -> {

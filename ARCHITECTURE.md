@@ -731,6 +731,9 @@ flowchart TD
   A network's self-avatar editor saves HTTPS URLs locally regardless of connection
   support. Eligible connections try to apply the saved choice; local confirmation
   does not claim the server accepted it.
+  Avatar metadata prefers `draft/metadata-3` when advertised with `batch`, and
+  falls back to `draft/metadata-2`. Version 3 snapshots preserve wire ordering
+  against interleaved updates; local avatar overrides and sharing consent still apply.
   YouTube video links use the public, bounded JSON oEmbed endpoint through that
   same unauthenticated route, preserving the original clickable URL. Missing
   videos are negative-cached; denied or transient endpoint failures remain

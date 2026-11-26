@@ -781,6 +781,18 @@ interface BufferDao {
         model: String?,
     ): Int
 
+    @Query(
+        """UPDATE buffers SET avatarOverrideModel = :model
+           WHERE id = (
+               SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :requestedId
+           ) AND type = 'CHANNEL' AND avatarOverrideModel = :expected""",
+    )
+    suspend fun replaceChannelAvatarOverride(
+        requestedId: RoomId,
+        expected: String,
+        model: String,
+    ): Int
+
     @Query("UPDATE buffers SET dickordChannelJson = :json WHERE id = :id AND type = 'CHANNEL'")
     suspend fun setDickordChannelJson(
         id: RoomId,

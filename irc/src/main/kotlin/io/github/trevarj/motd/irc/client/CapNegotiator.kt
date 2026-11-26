@@ -1,5 +1,10 @@
 package io.github.trevarj.motd.irc.client
 
+internal const val METADATA_V3_CAP = "draft/metadata-3"
+private const val METADATA_V2_CAP = "draft/metadata-2"
+internal val METADATA_VERSIONED_CAPS = setOf(METADATA_V3_CAP, METADATA_V2_CAP)
+internal val METADATA_CAP_ALIASES = METADATA_VERSIONED_CAPS + "metadata-notify"
+
 /**
  * IRCv3 capability tiers. Policy: request every advertised cap from all tiers plus
  * any config extras; the tier only governs degradation when a cap is absent, which the client
@@ -43,7 +48,8 @@ internal object CapTiers {
             "draft/event-playback",
             "draft/read-marker",
             "soju.im/read",
-            "draft/metadata-2",
+            METADATA_V3_CAP,
+            METADATA_V2_CAP,
             "standard-replies",
             "draft/relaymsg",
             "draft/pre-away",
@@ -77,10 +83,10 @@ internal object CapNegotiator {
         if ("draft/event-playback" in req && "draft/chathistory" !in advertised) {
             req.remove("draft/event-playback")
         }
-        // metadata-2 uses metadata batches for snapshots and therefore requires batch.
-        if ("draft/metadata-2" in req && "batch" !in advertised) {
-            req.remove("draft/metadata-2")
-        }
+        val selectedMetadata =
+            METADATA_CAP_ALIASES.firstOrNull { it in req && (it == "metadata-notify" || "batch" in advertised) }
+        METADATA_CAP_ALIASES.forEach { req.remove(it) }
+        if (selectedMetadata != null) req.add(selectedMetadata)
         if ("batch" !in advertised) req.remove("labeled-response")
         if (MULTILINE_CAP in req && "batch" !in advertised) {
             req.remove(MULTILINE_CAP)
@@ -119,6 +125,7 @@ internal object CapNegotiator {
                 if (preferredExtendedMonitor(ackedNames) != null) addAll(EXTENDED_MONITOR_ALIASES)
                 if (preferredReadMarker(ackedNames) != null) addAll(READ_MARKER_ALIASES)
                 if (preferredServerTime(ackedNames) != null) addAll(SERVER_TIME_ALIASES)
+                if (METADATA_CAP_ALIASES.any { it in ackedNames }) addAll(METADATA_CAP_ALIASES)
             }
         val advertised = (newCaps - heldAliases) + ackedNames
         return requestSet(advertised, extraCaps) - ackedNames

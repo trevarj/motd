@@ -13,6 +13,7 @@ data class IrcMessage(
     val source: Prefix? = null,
     val command: String,
     val params: List<String> = emptyList(),
+    val wireSequence: Long = 0L,
 ) {
     companion object {
         /** Max bytes for the non-tag portion including CRLF. */

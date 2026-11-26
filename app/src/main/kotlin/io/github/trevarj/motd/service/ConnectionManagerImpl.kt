@@ -12,6 +12,8 @@ import io.github.trevarj.motd.audio.AUDIO_MESSAGE_TAG
 import io.github.trevarj.motd.audio.AUDIO_MESSAGE_TAG_VERSION
 import io.github.trevarj.motd.audio.isCanonicalVoiceFallback
 import io.github.trevarj.motd.avatar.AvatarCoordinator
+import io.github.trevarj.motd.avatar.METADATA_V3_CAP
+import io.github.trevarj.motd.avatar.metadataVersion
 import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.bouncer.redactBouncerServCommand
 import io.github.trevarj.motd.data.db.BufferEntity
@@ -1647,7 +1649,13 @@ class ConnectionManagerImpl
             networkId: Long,
             event: IrcEvent,
         ) {
-            avatarCoordinator.onEvent(networkId, event)
+            val metadataRouting =
+                (event as? IrcEvent.MetadataSnapshot)?.let { eventProcessor.routeMetadataSnapshot(networkId, it) }
+            avatarCoordinator.onEvent(
+                networkId,
+                event,
+                positiveMetadataOnly = metadataRouting == EventProcessor.MetadataSnapshotRouting.POSITIVE_ONLY,
+            )
             eventProcessor.process(networkId, event)
             if (clientFor(networkId)?.latestSelfMembershipEvent === event) {
                 processedMembershipEvents[networkId] = event
@@ -2683,6 +2691,8 @@ class ConnectionManagerImpl
                     bufferId = buffer.id,
                     command = message.command,
                     label = label,
+                    metadataQueryParams =
+                        if (metadataVersion(ready?.caps.orEmpty()) == METADATA_V3_CAP) message.params else emptyList(),
                 )
             val tags =
                 message.tags +
