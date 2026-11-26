@@ -1,8 +1,13 @@
 package io.github.trevarj.motd.ui.imageviewer
 
+import android.content.ComponentName
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.view.View
 import android.view.ViewGroup
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.ui.platform.LocalView
@@ -34,11 +39,14 @@ import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.SocketPolicy
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
@@ -156,6 +164,100 @@ class VideoViewerScreenTest {
                 owner.lifecycle.currentState = Lifecycle.State.CREATED
                 assertTrue(restored.isReleased)
             }
+        }
+    }
+
+    @Test
+    @Config(sdk = [28], qualifiers = "w411dp-h240dp")
+    @Suppress("DEPRECATION")
+    fun fullscreenHidesSystemBarsAndBackRestoresThemWithoutRestartingPlayback() {
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            lateinit var activity: ComponentActivity
+            var backPressed = false
+            compose.setContent {
+                activity = LocalActivity.current as ComponentActivity
+                MotdTheme(dynamicColor = false) {
+                    CompositionLocalProvider(LocalNetworkMediaHttp provides fixture.http) {
+                        VideoViewerScreen(VIDEO_URL, fixture.networkId, onBack = { backPressed = true })
+                    }
+                }
+            }
+            awaitTag("video_viewer_player")
+            val decor = activity.window.decorView
+            val hiddenBars = View.SYSTEM_UI_FLAG_FULLSCREEN or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+            lateinit var player: ExoPlayer
+            val seekBarLocation = IntArray(2)
+            compose.runOnIdle {
+                val first = requireNotNull(decor.findPlayerView())
+                player = first.player as ExoPlayer
+                player.pause()
+                player.seekTo(2_000L)
+                assertEquals(0, decor.systemUiVisibility and hiddenBars)
+                val timeline = first.findViewById<View>(androidx.media3.ui.R.id.exo_progress)
+                assertTrue(timeline.isShown)
+                timeline.getLocationInWindow(seekBarLocation)
+            }
+            val expand = compose.onNodeWithContentDescription(label(R.string.video_viewer_fullscreen))
+            expand.assertIsDisplayed()
+            assertTrue(expand.fetchSemanticsNode().boundsInWindow.bottom <= seekBarLocation[1])
+            expand.performClick()
+            compose.onNodeWithContentDescription(label(R.string.video_viewer_exit_fullscreen)).assertIsDisplayed()
+            val viewerBack = compose.onNodeWithContentDescription(label(R.string.image_viewer_back))
+            viewerBack.assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(hiddenBars, decor.systemUiVisibility and hiddenBars)
+                assertSame(player, decor.findPlayerView()?.player)
+                assertFalse(player.playWhenReady)
+                assertEquals(2_000L, player.currentPosition)
+                activity.onBackPressedDispatcher.onBackPressed()
+            }
+            viewerBack.assertIsDisplayed()
+            compose.runOnIdle {
+                assertEquals(0, decor.systemUiVisibility and hiddenBars)
+                assertFalse(backPressed)
+                assertSame(player, decor.findPlayerView()?.player)
+            }
+            viewerBack.performClick()
+            compose.runOnIdle { assertTrue(backPressed) }
+        }
+    }
+
+    @Test
+    fun playerMenuOpensTheOriginalUrlInABrowser() {
+        val app = RuntimeEnvironment.getApplication()
+        val browser = ComponentName("test.browser", "test.browser.OpenLink")
+        val packageShadow = shadowOf(app.packageManager)
+        packageShadow.addActivityIfNotPresent(browser)
+        packageShadow.addIntentFilterForActivity(
+            browser,
+            IntentFilter(Intent.ACTION_VIEW).apply {
+                addCategory(Intent.CATEGORY_DEFAULT)
+                addCategory(Intent.CATEGORY_BROWSABLE)
+                addDataScheme("http")
+            },
+        )
+        val url = "$VIDEO_URL?quality=720%2Fp#t=1"
+        RoutedInlineMediaFixture().use { fixture ->
+            fixture.server.enqueue(MockResponse().setSocketPolicy(SocketPolicy.NO_RESPONSE))
+            compose.setContent {
+                MotdTheme(dynamicColor = false) {
+                    CompositionLocalProvider(LocalNetworkMediaHttp provides fixture.http) {
+                        VideoViewerScreen(url, fixture.networkId, onBack = {})
+                    }
+                }
+            }
+            awaitTag("video_viewer_player")
+            compose.onNodeWithContentDescription(label(R.string.action_more)).performClick()
+            compose.onNodeWithText(label(R.string.video_viewer_browser_warning)).assertIsDisplayed()
+            compose.onNodeWithText(label(R.string.chat_link_open_browser)).performClick()
+            compose.runOnIdle {
+                val intent = requireNotNull(shadowOf(app).nextStartedActivity)
+                assertEquals(Intent.ACTION_VIEW, intent.action)
+                assertEquals(browser, intent.component)
+                assertEquals(url, intent.dataString)
+            }
+            compose.onNodeWithTag("video_viewer_player").assertIsDisplayed()
         }
     }
 

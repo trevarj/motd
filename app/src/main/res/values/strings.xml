@@ -1095,6 +1095,8 @@
     <string name="image_viewer_load_failed">Couldn\'t load image</string>
     <string name="video_viewer_loading">Loading video</string>
     <string name="video_viewer_failed">Couldn\'t play video</string>
+    <string name="video_viewer_fullscreen">Fullscreen</string>
+    <string name="video_viewer_exit_fullscreen">Exit fullscreen</string>
     <string name="video_viewer_browser_warning">Your browser won’t use this chat’s network route.</string>
 
     <!-- Round 4: customizable UI settings. Consumers land in WP-U1/U2/U3; each entry is

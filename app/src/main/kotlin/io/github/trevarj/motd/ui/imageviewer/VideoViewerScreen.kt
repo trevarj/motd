@@ -1,10 +1,13 @@
 package io.github.trevarj.motd.ui.imageviewer
 
+import android.view.View
+import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.annotation.OptIn
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -15,10 +18,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -44,8 +53,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
@@ -77,7 +89,10 @@ internal fun VideoViewerScreen(
     var position by rememberSaveable(url, networkId) { mutableLongStateOf(0L) }
     var resumePlayback by rememberSaveable(url, networkId) { mutableStateOf(true) }
     var failed by rememberSaveable(url, networkId) { mutableStateOf(false) }
+    var fullscreen by rememberSaveable(url, networkId) { mutableStateOf(false) }
+    val immersive = fullscreen && canPlay && !failed
     var buffering by remember(url, networkId, http) { mutableStateOf(true) }
+    var controlsVisible by remember(url, networkId) { mutableStateOf(true) }
     var player by remember(context, url, networkId, http) { mutableStateOf<ExoPlayer?>(null) }
     var playerView by remember { mutableStateOf<PlayerView?>(null) }
 
@@ -90,6 +105,7 @@ internal fun VideoViewerScreen(
                     }
 
                     override fun onPlayerError(error: PlaybackException) {
+                        fullscreen = false
                         failed = true
                     }
                 }
@@ -178,6 +194,20 @@ internal fun VideoViewerScreen(
             }
         }
     }
+    if (immersive && window != null) {
+        LifecycleResumeEffect(window, view) {
+            val controller = WindowCompat.getInsetsController(window, view)
+            val previousBehavior = controller.systemBarsBehavior
+            val bars = WindowInsetsCompat.Type.systemBars()
+            controller.systemBarsBehavior = WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+            controller.hide(bars)
+            onPauseOrDispose {
+                controller.show(bars)
+                controller.systemBarsBehavior = previousBehavior
+            }
+        }
+    }
+    BackHandler(immersive) { fullscreen = false }
 
     val backSize = 48.dp
     val backPadding = 8.dp
@@ -229,17 +259,18 @@ internal fun VideoViewerScreen(
                     factory = {
                         PlayerView(it).apply {
                             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
-                            controllerShowTimeoutMs = 0
-                            controllerHideOnTouch = false
                             setControllerAnimationEnabled(false)
                             setEnableComposeSurfaceSyncWorkaround(true)
                             setShowPreviousButton(false)
                             setShowNextButton(false)
+                            setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { controlsVisible = it == View.VISIBLE })
                             playerView = this
                         }
                     },
                     update = {
                         it.player = activePlayer
+                        it.controllerHideOnTouch = immersive
+                        it.controllerShowTimeoutMs = if (immersive) 5_000 else 0
                         it.useController = lifecycle.currentState == Lifecycle.State.RESUMED
                         if (it.useController) it.showController()
                     },
@@ -256,24 +287,64 @@ internal fun VideoViewerScreen(
                 CircularProgressIndicator(color = Color.White, modifier = Modifier.semantics { contentDescription = loading })
             }
         }
-        IconButton(
-            onClick = {
-                playerView?.useController = false
-                player?.pause()
-                onBack()
-            },
-            modifier =
-                Modifier
-                    .align(Alignment.TopStart)
-                    .padding(backPadding)
-                    .size(backSize)
-                    .background(Color.Black.copy(alpha = 0.72f), CircleShape),
-        ) {
-            Icon(
-                Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = stringResource(R.string.image_viewer_back),
-                tint = Color.White,
-            )
+        if (!immersive) {
+            IconButton(
+                onClick = {
+                    playerView?.useController = false
+                    player?.pause()
+                    onBack()
+                },
+                modifier =
+                    Modifier
+                        .align(Alignment.TopStart)
+                        .padding(backPadding)
+                        .size(backSize)
+                        .background(Color.Black.copy(alpha = 0.72f), CircleShape),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.ArrowBack,
+                    contentDescription = stringResource(R.string.image_viewer_back),
+                    tint = Color.White,
+                )
+            }
+        }
+        if (canPlay && !failed && (!immersive || controlsVisible)) {
+            Row(Modifier.align(Alignment.TopEnd).padding(backPadding)) {
+                val buttonModifier = Modifier.size(backSize).background(Color.Black.copy(alpha = 0.72f), CircleShape)
+                IconButton(onClick = { fullscreen = !immersive }, modifier = buttonModifier) {
+                    Icon(
+                        if (immersive) Icons.Filled.FullscreenExit else Icons.Filled.Fullscreen,
+                        contentDescription =
+                            stringResource(if (immersive) R.string.video_viewer_exit_fullscreen else R.string.video_viewer_fullscreen),
+                        tint = Color.White,
+                    )
+                }
+                if (!immersive) {
+                    Box {
+                        var showMenu by remember { mutableStateOf(false) }
+                        IconButton(onClick = { showMenu = true }, modifier = buttonModifier) {
+                            Icon(Icons.Filled.MoreVert, contentDescription = stringResource(R.string.action_more), tint = Color.White)
+                        }
+                        DropdownMenu(expanded = showMenu, onDismissRequest = { showMenu = false }) {
+                            DropdownMenuItem(
+                                text = {
+                                    Column {
+                                        Text(stringResource(R.string.chat_link_open_browser))
+                                        Text(
+                                            stringResource(R.string.video_viewer_browser_warning),
+                                            style = MaterialTheme.typography.bodySmall,
+                                        )
+                                    }
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    context.openChatLinkInBrowser(url)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
