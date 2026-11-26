@@ -747,6 +747,7 @@ private fun exifOrientation(data: ByteArray): Int? {
         if (short(entry) == 0x112) {
             valid(short(entry + 2) == 3 && long(entry + 4) == 1L)
             val value = short(entry + 8)
+            if (value == 0) return@repeat
             valid(value in 1..8 && (orientation == null || orientation == value))
             orientation = value
         }

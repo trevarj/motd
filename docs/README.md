@@ -68,6 +68,8 @@ orientation and animation. Supported MP4/M4A/3GP and WebM audio/video is remuxed
 not re-encoded; single-stream Ogg Opus/Vorbis comments are removed. Presentation
 data such as orientation, color parameters and playback timing is retained.
 Extended Adobe JPEG headers are accepted, with their extra metadata bytes removed.
+Camera JPEGs that use EXIF orientation `0` (undefined) retain their encoded pixels
+without an orientation tag.
 
 While stripping is enabled, unsupported files require **Send original** confirmation for that attempt only.
 This includes PDFs, Office documents, archives, images with embedded ICC profiles

@@ -51,6 +51,17 @@ class ImageMetadataSanitizerTest {
             assertTrue(contains(result.second, exif(6)))
         }
 
+    @Test fun cameraJpegWithUndefinedOrientationKeepsPixelsAndDropsExif() =
+        runBlocking {
+            val jpeg = encode("jpeg")
+            val dirty = jpeg.copyOfRange(0, 2) + jpegSegment(0xe1, exif(0) + secret) + jpeg.copyOfRange(2, jpeg.size)
+            val (media, clean) = sanitize(dirty)
+            assertEquals("image/jpeg", media.mimeType)
+            assertFalse(contains(clean, "Exif\u0000\u0000".toByteArray()))
+            assertPrivateDataGone(clean)
+            assertPixelsEqual(jpeg, clean)
+        }
+
     @Test fun extendedAdobeJpegHeaderPreservesPixelsWithoutPrivateTail() =
         runBlocking {
             val jpeg = encode("jpeg")
