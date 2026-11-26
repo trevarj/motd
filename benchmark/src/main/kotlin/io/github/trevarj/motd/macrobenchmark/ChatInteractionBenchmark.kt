@@ -95,16 +95,11 @@ class ChatInteractionBenchmark {
         }
 
     @Test
-    fun typeNickAutocomplete() {
-        lateinit var pick: Point
+    fun typeNickAutocomplete() =
         profile(setup = {
             device.prepareEditor()
             device.setText(editor, "@")
             device.key(KeyEvent.KEYCODE_MOVE_END)
-            val field = device.await(editor).visibleBounds
-            val context = InstrumentationRegistry.getInstrumentation().context
-            val rowCenterOffset = ceil(28 * context.resources.displayMetrics.density).toInt()
-            pick = Point(field.centerX(), field.top - rowCenterOffset)
         }) { timings ->
             timings.observe("nickKeysToEditorText") {
                 for (key in listOf(KeyEvent.KEYCODE_B, KeyEvent.KEYCODE_E, KeyEvent.KEYCODE_N, KeyEvent.KEYCODE_C, KeyEvent.KEYCODE_H, KeyEvent.KEYCODE_A)) {
@@ -112,13 +107,20 @@ class ChatInteractionBenchmark {
                 }
                 device.await(By.res(EDITOR).text("@bencha"))
             }
-            SystemClock.sleep(450)
+            val suggestionRow = By.res("autocomplete_item_\\d+".toPattern()).clickable(true).enabled(true)
+            val nick = By.text("benchalice")
+            val pick =
+                awaitValue("visible benchalice autocomplete suggestion") {
+                    device
+                        .findObjects(suggestionRow)
+                        .firstOrNull { it.text == "benchalice" || it.hasObject(nick) }
+                        ?.visibleCenter
+                }
             timings.observe("nickPickToCompletedText") {
                 device.tap(pick)
                 device.await(By.res(EDITOR).text("benchalice: "))
             }
         }
-    }
 
     @Test
     fun replaceMultilineThenEdit() =
@@ -405,6 +407,16 @@ private fun UiDevice.joinChat(
                 ?: findObjects(By.text("Join channel").enabled(true)).maxByOrNull { it.visibleCenter.y }
         }
     tap(submit.visibleCenter)
+    val needsJump =
+        awaitValue("$own or the return-to-newest action after entry") {
+            when {
+                hasObject(By.res("chat_entry_veil")) -> null
+                hasObject(timelineText(own)) -> false
+                hasObject(newestFab) -> true
+                else -> null
+            }
+        }
+    if (needsJump) jumpToNewestIfNeeded()
     awaitAnchor(own, other)
     backToList()
 }

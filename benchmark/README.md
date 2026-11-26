@@ -145,14 +145,18 @@ rejected immediately the first time; its next send gets a labelled self echo aft
 so the app can expose pending retry separately from confirmation. `bench burst…` echoes
 normally and adds six incoming rows, ending with `incoming burst ready`.
 
+On first join, setup uses the return-to-newest action if the initial unread viewport hides the
+ready marker, then waits for the marker before leaving the room.
+
 The class covers warm switching between the two loaded rooms, incremental key input, nick
 autocomplete, a long multiline accessibility replacement and edit, jumping from an embedded reply
 to its source, and failed-send controls, retry, and local deletion. Deletion reports opening
 the confirmation separately from applying it. Failure journeys keep earlier rows: run the same
 iteration count when comparing builds. The replacement journey does not use the system
 clipboard or measure a paste.
-The nick journey waits through the suggestion debounce and verifies a real popup pick by the
-completed editor text. Its timings do not identify the first frame containing the suggestion.
+Before timing the pick, the nick journey waits for the clickable `benchalice` suggestion and
+reads its visible center. It verifies the pick by the completed editor text; its timings do not
+identify the first frame containing the suggestion.
 
 For fully compiled comparisons, pass `-Pandroid.testInstrumentationRunnerArguments.compilationMode=aot`.
 The default is `baseline` (use the app's Baseline Profile if present). `iterations` defaults to 10.
