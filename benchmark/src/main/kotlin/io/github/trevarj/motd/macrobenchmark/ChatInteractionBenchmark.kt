@@ -107,14 +107,22 @@ class ChatInteractionBenchmark {
                 }
                 device.await(By.res(EDITOR).text("@bencha"))
             }
-            val suggestionRow = By.res("autocomplete_item_\\d+".toPattern()).clickable(true).enabled(true)
+            val popup = By.Window.pkg(TARGET_PACKAGE).focused(false)
             val nick = By.text("benchalice")
+            val labeledRow = By.text("benchalice").clickable(true).enabled(true)
+            val rowWithLabel = By.clickable(true).enabled(true).hasDescendant(nick)
             val pick =
                 awaitValue("visible benchalice autocomplete suggestion") {
-                    device
-                        .findObjects(suggestionRow)
-                        .firstOrNull { it.text == "benchalice" || it.hasObject(nick) }
-                        ?.visibleCenter
+                    // The non-focusable Compose popup has a separate root and does not inherit activity test tags.
+                    device.findWindows(popup).firstNotNullOfOrNull { window ->
+                        val row =
+                            if (window.hasObject(editor)) {
+                                null
+                            } else {
+                                window.findObject(labeledRow) ?: window.findObject(rowWithLabel)
+                            }
+                        row?.visibleBounds?.takeUnless { it.isEmpty }?.let { Point(it.centerX(), it.centerY()) }
+                    }
                 }
             timings.observe("nickPickToCompletedText") {
                 device.tap(pick)
