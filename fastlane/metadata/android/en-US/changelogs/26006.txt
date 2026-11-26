@@ -1,0 +1,3 @@
+- Animate typing indicators in the chat header and above the composer.
+- Keep sent messages from jumping when you scroll or close the keyboard.
+- Preserve the order of NickServ notices received by push.
