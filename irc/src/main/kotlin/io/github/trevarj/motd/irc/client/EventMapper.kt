@@ -292,6 +292,7 @@ class EventMapper(
             "730" -> {
                 IrcEvent.MonitorOnline(
                     monitorTargets(msg).mapNotNull(::parseIrcPrefix),
+                    wireSequence = msg.wireSequence,
                 )
             }
 
@@ -450,7 +451,8 @@ class EventMapper(
         // extended-join: JOIN <channel> <account> :<realname>
         val account = msg.params.getOrNull(1)?.let { if (it == "*") null else it }
         val realname = msg.params.getOrNull(2)
-        return IrcEvent.Joined(ctx, nick, channel, account, realname, isSelf(msg.source), isBot = "bot" in msg.tags)
+        val self = msg.selfNickAtRead?.let { isupport().normalize(it) == isupport().normalize(nick) } ?: isSelf(msg.source)
+        return IrcEvent.Joined(ctx, nick, channel, account, realname, self, isBot = "bot" in msg.tags, wireSequence = msg.wireSequence)
     }
 
     private fun mapMarkRead(msg: IrcMessage): IrcEvent {
@@ -562,7 +564,7 @@ class EventMapper(
         val members = namesBuffers.remove(key) ?: mutableListOf()
         pendingNamesMembers -= members.size
         val display = namesDisplay.remove(key) ?: channel
-        return IrcEvent.Names(display, members)
+        return IrcEvent.Names(display, members, wireSequence = msg.wireSequence)
     }
 
     private fun mapWho(msg: IrcMessage): IrcEvent {

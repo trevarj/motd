@@ -2010,6 +2010,81 @@ class IrcClientTest {
         }
 
     @Test
+    fun `unlabeled manual whois owns replies when a same nick lookup overlaps`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val replies = mutableListOf<IrcEvent.Raw>()
+            clientScope().launch { client.broadcastEvents.filterIsInstance<IrcEvent.Raw>().toList(replies) }
+            ft.beforeSend = { line ->
+                if (line == "WHOIS alice") ft.feed(":srv 335 motd Alice :is a bot")
+            }
+
+            val manual = IrcMessage(command = "WHOIS", params = listOf("alice"))
+            assertTrue(client.sendIfConnected(manual, unlabeledWhoisLabel = "manual-lookup"))
+            runCurrent()
+            assertEquals("manual-lookup", replies.single { it.message.command == "335" }.message.tags["label"])
+            val overlap = runCatching { client.whois("ALICE") }.exceptionOrNull()
+            assertEquals("BUSY", (overlap as? IrcCommandException)?.code)
+            assertEquals(listOf("WHOIS alice"), ft.sent.filter { "WHOIS " in it })
+
+            ft.feed(":srv 344 motd alice :is in United States")
+            ft.feed(":srv 350 motd alice :connected via a gateway")
+            ft.feed(":srv 799 motd alice :private WHOIS detail")
+            ft.feed(":srv 799 motd bob :unrelated private reply")
+            ft.feed(":srv 341 motd alice #room")
+            ft.feed(":srv 303 motd :alice")
+            ft.feed(":srv 318 motd alice :End of WHOIS")
+            runCurrent()
+            assertEquals("manual-lookup", replies.single { it.message.command == "318" }.message.tags["label"])
+            assertEquals(
+                listOf("335", "344", "350", "799", "318"),
+                replies.filter { it.message.tags["label"] == "manual-lookup" }.map { it.message.command },
+            )
+            assertEquals(listOf("799", "341", "303"), replies.filter { "label" !in it.message.tags }.map { it.message.command })
+
+            val lookup = clientScope().async { client.whois("ALICE") }
+            runCurrent()
+            assertFalse(client.sendIfConnected(manual, unlabeledWhoisLabel = "other-manual-lookup"))
+            ft.feed(":srv 318 motd alice :End of WHOIS")
+            runCurrent()
+            assertEquals(listOf("318"), lookup.await().map { it.command })
+            assertEquals(1, replies.count { it.message.command == "318" })
+        }
+
+    @Test
+    fun `timed out unlabeled whois reserves its nick until the late terminal reply`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val replies = mutableListOf<IrcEvent.Raw>()
+            clientScope().launch { client.broadcastEvents.filterIsInstance<IrcEvent.Raw>().toList(replies) }
+            val request = clientScope().async { runCatching { client.whois("slow") }.exceptionOrNull() }
+            runCurrent()
+            ft.feed(":srv 311 motd slow user host * :Old reply")
+            advanceTimeBy(30_001)
+            runCurrent()
+            assertTrue(request.await() is IrcTimeoutException)
+
+            val overlap = runCatching { client.whois("SLOW") }.exceptionOrNull()
+            assertEquals("BUSY", (overlap as? IrcCommandException)?.code)
+            ft.feed(":srv 335 motd slow :old bot flag")
+            runCurrent()
+            assertFalse(client.sendIfConnected(IrcMessage(command = "WHOIS", params = listOf("SLOW"))))
+            assertEquals(listOf("WHOIS slow"), ft.sent.filter { "WHOIS " in it })
+            ft.feed(":srv 318 motd slow :End of old WHOIS")
+            runCurrent()
+            assertFalse(replies.any { it.message.command in setOf("311", "335", "318") })
+
+            val fresh = clientScope().async { client.whois("SLOW") }
+            runCurrent()
+            assertEquals(listOf("WHOIS slow", "WHOIS SLOW"), ft.sent.filter { "WHOIS " in it })
+            ft.feed(":srv 318 motd slow :End of fresh WHOIS")
+            runCurrent()
+            assertEquals(listOf("318"), fresh.await().map { it.command })
+        }
+
+    @Test
     fun `unlabeled whois does not consume same target ISON reply`() =
         runTest {
             val ft = FakeTransport()
@@ -2033,10 +2108,13 @@ class IrcClientTest {
         }
 
     @Test
-    fun `unlabeled whois ends on error and timeout`() =
+    fun `unlabeled whois ends on error and timeout and reconnect clears unfinished replies`() =
         runTest {
             val ft = FakeTransport()
-            val client = registeredNoCaps(ft)
+            val reconnected = FakeTransport()
+            val caps = "message-tags server-time batch"
+            val factory = TransportFactory { _, _, _, _, _ -> if (ft.connected) reconnected else ft }
+            val client = registered(ft, caps = caps, factory = factory)
             val rejected = clientScope().async { runCatching { client.whois("missing") }.exceptionOrNull() }
             runCurrent()
             ft.feed(":srv 401 motd missing :No such nick")
@@ -2048,6 +2126,21 @@ class IrcClientTest {
             advanceTimeBy(30_001)
             runCurrent()
             assertTrue(timedOut.await() is IrcTimeoutException)
+
+            client.start()
+            runCurrent()
+            reconnected.feed(":srv CAP * LS :$caps")
+            runCurrent()
+            reconnected.feed(":srv CAP motd ACK :$caps")
+            runCurrent()
+            reconnected.feed(":srv 001 motd :Welcome")
+            runCurrent()
+            val fresh = clientScope().async { client.whois("slow") }
+            runCurrent()
+            assertEquals("WHOIS slow", reconnected.sent.last())
+            reconnected.feed(":srv 318 motd slow :End of WHOIS")
+            runCurrent()
+            assertEquals(listOf("318"), fresh.await().map { it.command })
         }
 
     @Test

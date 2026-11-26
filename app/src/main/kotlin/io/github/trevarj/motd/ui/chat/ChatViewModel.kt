@@ -3002,11 +3002,11 @@ class ChatViewModel
                 uiEventQueue.enqueue(ChatUiEvent.InvalidCommand)
                 return
             }
-            if (connectionManager.clientFor(nid) == null) return
             val submission = reserveDraftForSend(raw) ?: return
             try {
-                sendCommand(nid, msg)
-                clearDraftSubmission(submission)
+                if (sendCommand(nid, msg)) {
+                    clearDraftSubmission(submission)
+                }
             } finally {
                 releaseDraftSubmission(submission.snapshot)
             }
@@ -3016,8 +3016,10 @@ class ChatViewModel
             networkId: Long,
             message: IrcMessage,
             channelContext: String? = null,
-        ) {
-            connectionManager.sendCommand(networkId, operationalBufferId.value, message, channelContext)
+        ): Boolean {
+            val sent = connectionManager.sendCommand(networkId, operationalBufferId.value, message, channelContext)
+            if (!sent) uiEventQueue.enqueue(ChatUiEvent.SendDropped)
+            return sent
         }
 
         // --- nick sheet + whois ---

@@ -39,6 +39,7 @@ fun validChannelContext(
     if (context.length < 2 || !isChannel(context) || context.any { it == ',' || it.isWhitespace() || it.isISOControl() }) {
         return null
     }
+
     fun isPrivateNick(nick: String): Boolean =
         nick.isNotEmpty() && !isChannel(nick) &&
             nick.first() !in "$:" && !isMembershipPrefix(nick.first()) &&

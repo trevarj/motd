@@ -1,6 +1,8 @@
 package io.github.trevarj.motd.irc.client
 
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.irc.proto.Isupport
+import io.github.trevarj.motd.irc.transport.IrcTransport
 import kotlinx.coroutines.CompletableDeferred
 import java.util.concurrent.atomic.AtomicLong
 
@@ -300,70 +302,176 @@ internal class LabelCorrelator(
     }
 }
 
-/** Correlates one serialized WHOIS response when `labeled-response` is unavailable. */
-internal class UnlabeledWhoisCorrelator {
-    private data class Pending(
-        val nick: String,
+/** Owns each target's unlabeled WHOIS on one transport, through the last wire reply. */
+internal class UnlabeledWhoisCorrelator(
+    val transport: IrcTransport,
+) {
+    private class Collector(
         val deferred: CompletableDeferred<List<IrcMessage>>,
         val messages: MutableList<IrcMessage> = mutableListOf(),
     )
 
-    private var pending: Pending? = null
+    private class Pending(
+        val nicks: MutableList<String>,
+        val server: String?,
+        val rawLabel: String?,
+        var collector: Collector?,
+    ) {
+        val consume = collector != null
+    }
+
+    // ponytail: scan outstanding targets using today's case mapping, even if 005 changes it.
+    private val pending = mutableListOf<Pending>()
+    private var closed = false
 
     @Synchronized
     fun register(
-        nick: String,
-        deferred: CompletableDeferred<List<IrcMessage>>,
-    ) {
-        check(pending == null) { "an unlabelled WHOIS request is already pending" }
-        pending = Pending(nick, deferred)
-    }
-
-    @Synchronized
-    fun clear(deferred: CompletableDeferred<List<IrcMessage>>) {
-        if (pending?.deferred === deferred) pending = null
-    }
-
-    @Synchronized
-    fun route(
         msg: IrcMessage,
-        normalize: (String) -> String,
+        isupport: Isupport,
+        rawLabel: String?,
+        deferred: CompletableDeferred<List<IrcMessage>>?,
     ): Boolean {
-        val current = pending ?: return false
-        val terminalError = msg.command in WHOIS_ERRORS
-        if (!terminalError && msg.command !in WHOIS_REPLIES) return false
-        val target = msg.params.getOrNull(1) ?: return false
-        if (normalize(target) != normalize(current.nick)) return false
-
-        if (terminalError) {
-            pending = null
-            current.deferred.completeExceptionally(
-                IrcCommandException("WHOIS", msg.command, msg.params.lastOrNull().orEmpty()),
-            )
-            return true
+        if (closed) return false
+        val nicks =
+            msg.params
+                .getOrNull(if (msg.params.size == 1) 0 else 1)
+                ?.split(',')
+                ?.toMutableList() ?: return true
+        val targets = nicks.mapTo(hashSetOf(), isupport::normalize)
+        val server = msg.params.firstOrNull().takeIf { msg.params.size > 1 }
+        // With a server parameter, 402 names the server rather than the nick.
+        if (pending.any { request ->
+                (server != null && request.server.equals(server, ignoreCase = true)) ||
+                    request.nicks.any { isupport.normalize(it) in targets }
+            }
+        ) {
+            return false
         }
-
-        current.messages += msg
-        if (msg.command == "318") {
-            pending = null
-            current.deferred.complete(current.messages.toList())
-        }
+        pending += Pending(nicks, server, rawLabel, deferred?.let { Collector(it) })
         return true
     }
 
     @Synchronized
-    fun failAll(cause: Throwable) {
-        pending?.deferred?.takeUnless { it.isCompleted }?.completeExceptionally(cause)
-        pending = null
+    fun abandon(deferred: CompletableDeferred<List<IrcMessage>>) {
+        // Cancellation or timeout only ends local collection. Keep draining until 318 or disconnect.
+        pending.firstOrNull { it.collector?.deferred === deferred }?.collector = null
+    }
+
+    /** Returns null for a sheet-owned reply; raw replies keep their normal event mapping. */
+    @Synchronized
+    fun route(
+        msg: IrcMessage,
+        isupport: Isupport,
+    ): IrcMessage? {
+        if (pending.isEmpty() || "label" in msg.tags || "batch" in msg.tags) return msg
+        val command = msg.command
+        val knownWhois = command in WHOIS_REPLIES || command == "401" || command == "402"
+        // Private WHOIS numerics are not standardized. Only forward plausible nick-scoped
+        // informational replies for manual owners, leaving known independent commands alone.
+        val numeric = if (knownWhois) null else command.takeIf { it.length == 3 }?.toIntOrNull()
+        if (!knownWhois &&
+            (
+                msg.params.size < 3 || numeric == null || numeric !in 300..399 && numeric !in 600..999 ||
+                    command in OTHER_INFORMATIONAL_REPLIES || numeric in 730..734 || numeric in 770..779
+            )
+        ) {
+            return msg
+        }
+        val target = msg.params.getOrNull(1) ?: return msg
+        val folded = isupport.normalize(target)
+        val endTargets = if (command == "318" && ',' in folded) folded.split(',') else null
+        val request =
+            pending.firstOrNull {
+                if (!knownWhois && it.rawLabel == null) return@firstOrNull false
+                if (command == "402") {
+                    it.server?.let(isupport::normalize) == folded
+                } else {
+                    it.nicks.any { nick ->
+                        val normalized = isupport.normalize(nick)
+                        normalized == folded || endTargets?.contains(normalized) == true
+                    }
+                }
+            } ?: return msg
+
+        // ERR_NOSUCHNICK can precede RPL_ENDOFWHOIS; release the collector, not the wire slot.
+        if (command == "402") request.nicks.clear()
+        if (command == "318") {
+            request.nicks.removeAll {
+                val normalized = isupport.normalize(it)
+                normalized == folded || endTargets?.contains(normalized) == true
+            }
+        }
+        if (request.nicks.isEmpty()) pending.remove(request)
+        request.collector?.let { collector ->
+            if (command == "401" || command == "402") {
+                request.collector = null
+                collector.deferred.completeExceptionally(IrcCommandException("WHOIS", command, msg.params.lastOrNull().orEmpty()))
+            } else {
+                collector.messages += msg
+                if (request.nicks.isEmpty()) collector.deferred.complete(collector.messages)
+            }
+        }
+        if (request.consume) return null
+        return request.rawLabel?.let { msg.copy(tags = msg.tags + ("label" to it)) } ?: msg
     }
 
     @Synchronized
+    fun failAll(cause: Throwable) {
+        closed = true
+        for (request in pending) request.collector?.deferred?.completeExceptionally(cause)
+        pending.clear()
+    }
+
     fun failAllDisconnected(reason: String?) = failAll(IrcDisconnectedException("WHOIS", reason))
 
     private companion object {
         val WHOIS_REPLIES =
-            setOf("275", "276", "301", "307", "310", "311", "312", "313", "317", "318", "319", "320", "330", "335", "338", "378", "379", "671")
-        val WHOIS_ERRORS = setOf("401", "402")
+            setOf("275", "276", "301", "307", "310", "311", "312", "313", "317", "318", "319", "320", "330", "335", "338", "344", "350", "378", "379", "671")
+        val OTHER_INFORMATIONAL_REPLIES =
+            setOf(
+                "302",
+                "303",
+                "305",
+                "306",
+                "314",
+                "315",
+                "321",
+                "322",
+                "323",
+                "324",
+                "329",
+                "331",
+                "332",
+                "333",
+                "341",
+                "342",
+                "346",
+                "347",
+                "348",
+                "349",
+                "351",
+                "352",
+                "353",
+                "354",
+                "364",
+                "365",
+                "366",
+                "367",
+                "368",
+                "369",
+                "371",
+                "372",
+                "374",
+                "375",
+                "376",
+                "381",
+                "382",
+                "391",
+                "392",
+                "393",
+                "394",
+                "395",
+            )
     }
 }
 

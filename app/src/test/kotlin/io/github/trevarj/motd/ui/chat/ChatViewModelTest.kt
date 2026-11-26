@@ -3926,6 +3926,52 @@ class ChatViewModelTest {
             assertTrue(manager.sentLines.isEmpty())
         }
 
+    @Test
+    fun `server buffer keeps refused raw WHOIS draft and clears it after retry`() =
+        runTest {
+            val server =
+                BufferEntity(
+                    networkId = network.id,
+                    name = "*",
+                    displayName = "test",
+                    type = BufferType.SERVER,
+                ).let { it.copy(id = db.bufferDao().insert(it)) }
+            val transport = RecordingTransport()
+            val client = testClient(transport)
+            client.start()
+            try {
+                runCurrent()
+                transport.feed(":srv CAP * LS :")
+                transport.feed(":srv 001 me :Welcome")
+                client.state.first { it is IrcClientState.Ready }
+                val vm = viewModel(server, FakeConnectionManager(network.id, client = client))
+                vm.state.first { it.buffer != null }
+                vm.composerDraft.first { it.hydrated }
+                val command = "WHOIS alice"
+                assertTrue(client.sendIfConnected(IrcMessage.parse(command)))
+                vm.saveDraft(command)
+
+                vm.submit(command, {}, {}).join()
+                assertEquals(command, vm.composerDraft.value.text)
+                assertEquals(
+                    ChatUiEvent.SendDropped,
+                    vm.uiEvents.value
+                        .single()
+                        .value,
+                )
+                assertEquals(1, transport.sent.count { it == command })
+
+                transport.feed(":srv 318 me alice :End of WHOIS")
+                runCurrent()
+                vm.submit(command, {}, {}).join()
+                assertEquals("", vm.composerDraft.value.text)
+                assertEquals(2, transport.sent.count { it == command })
+            } finally {
+                client.stop()
+                runCurrent()
+            }
+        }
+
     /**
      * Search can open the console, and the SERVER raw-send branch put its text on the wire as an IRC
      * command — `sasl set-plain ... <secret>` unredacted. It is a PRIVMSG surface like any chat.
@@ -7902,12 +7948,21 @@ class ChatViewModelTest {
             originBufferId: Long,
             message: IrcMessage,
             channelContext: String?,
-        ) {
+        ): Boolean {
             commandOrigins += originBufferId to message
-            when (message.command) {
-                "JOIN" -> joinChannel(networkId, message.params.firstOrNull().orEmpty(), message.params.getOrNull(1))
-                "PART" -> partChannel(originBufferId, message.params.getOrNull(1))
-                else -> currentClient?.send(message)
+            return when (message.command) {
+                "JOIN" -> {
+                    joinChannel(networkId, message.params.firstOrNull().orEmpty(), message.params.getOrNull(1))
+                }
+
+                "PART" -> {
+                    partChannel(originBufferId, message.params.getOrNull(1))
+                    true
+                }
+
+                else -> {
+                    currentClient?.sendIfConnected(message) ?: true
+                }
             }
         }
 

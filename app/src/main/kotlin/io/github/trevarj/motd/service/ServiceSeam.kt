@@ -268,15 +268,13 @@ interface ConnectionManager {
         msgid: String,
     ): Boolean = false
 
-    /** Send a composer command while retaining the chat that owns its server feedback. */
+    /** Send a composer command, returning whether the wire accepted it. */
     suspend fun sendCommand(
         networkId: Long,
         originBufferId: Long,
         message: IrcMessage,
         channelContext: String? = null,
-    ) {
-        clientFor(networkId)?.send(message)
-    }
+    ): Boolean = clientFor(networkId)?.sendIfConnected(message) == true
 
     /**
      * JOIN [channel], optionally with [key]. Both stay in their comma-joined wire form so a

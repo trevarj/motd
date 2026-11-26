@@ -2071,6 +2071,13 @@ interface MemberDao {
         bufferId: Long,
         nick: String,
     )
+
+    @Query("DELETE FROM members WHERE bufferId = :bufferId AND $NORMALIZED_MEMBER_NICK = :nick")
+    suspend fun removeFolded(
+        bufferId: Long,
+        nick: String,
+        caseMapping: String,
+    )
 }
 
 @Dao

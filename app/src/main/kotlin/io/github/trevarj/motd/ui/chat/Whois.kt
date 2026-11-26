@@ -123,6 +123,8 @@ internal class NickSheetController(
         ) {
             val generation = client.criticalEvents
 
+            fun connectionIsCurrent() = isCurrent() && client.criticalEvents === generation && client.state.value is IrcClientState.Ready
+
             if (!connectionIsCurrent()) return
             coroutineScope {
                 launch(start = CoroutineStart.UNDISPATCHED) {

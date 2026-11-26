@@ -165,7 +165,7 @@ class EventProcessor
         private val commandResponsesById = ConcurrentHashMap<String, CommandResponseSession>()
         private val commandResponsesByLabel = ConcurrentHashMap<String, CommandResponseSession>()
         private val latestUnlabeledCommand = ConcurrentHashMap<Long, CommandResponseSession>()
-        private val metadataCommandWindows = ConcurrentHashMap<Long, Map<MetadataQuery, Long>>()
+        private val metadataCommandWindows = ConcurrentHashMap<Long, Map<MetadataQuery, MetadataCommandWindow>>()
 
         private data class RosterKey(
             val networkId: Long,
@@ -180,8 +180,19 @@ class EventProcessor
             val label: String?,
             val expiresAt: Long,
             val metadataQuery: MetadataQuery?,
+            val metadataWindow: MetadataCommandWindow?,
             var nextOrdinal: Int = 0,
         )
+
+        private class MetadataCommandWindow(
+            @Volatile var issuedAt: Long?,
+            val expiresAt: Long,
+        ) {
+            fun includes(event: IrcEvent.MetadataSnapshot): Boolean {
+                val writtenAt = issuedAt ?: return false
+                return event.openedAtNanos == 0L || event.openedAtNanos - writtenAt >= 0L
+            }
+        }
 
         private data class MetadataQuery(
             val target: String,
@@ -191,20 +202,21 @@ class EventProcessor
             fun matchesTarget(
                 state: NetworkState,
                 replyTarget: String?,
+                selfNick: String = state.selfNick,
             ): Boolean {
                 if (replyTarget == null) return false
-                val requested = if (target == "*") state.selfNick else target
-                val reply = if (replyTarget == "*") state.selfNick else replyTarget
+                val requested = if (target == "*") selfNick else target
+                val reply = if (replyTarget == "*") selfNick else replyTarget
                 return state.normalize(requested) == state.normalize(reply)
             }
 
             fun matchesKey(
                 key: String?,
                 index: Int,
-            ): Boolean = key != null && (operation == "LIST" || key == keys.getOrNull(index))
+            ): Boolean = key != null && (operation != "GET" || key == keys.getOrNull(index))
         }
 
-        internal enum class MetadataSnapshotRouting { AUTOMATIC, POSITIVE_ONLY }
+        internal enum class MetadataSnapshotRouting { AUTOMATIC, POSITIVE_ONLY, EXPLICIT_VALUES }
 
         private data class CanonicalBatchKey(
             val roomId: Long,
@@ -416,10 +428,28 @@ class EventProcessor
             label: String?,
             now: Long = System.currentTimeMillis(),
             metadataQueryParams: List<String> = emptyList(),
+            deferMetadataWindowUntilWrite: Boolean = false,
         ): String {
             commandResponsesById.values.removeAll { it.expiresAt <= now }
             commandResponsesByLabel.values.removeAll { it.expiresAt <= now }
             latestUnlabeledCommand.entries.removeAll { it.value.expiresAt <= now }
+            val metadataQuery =
+                metadataQueryParams.takeIf { label == null && command.equals("METADATA", ignoreCase = true) }?.let { params ->
+                    val operation = params.getOrNull(1)?.uppercase() ?: return@let null
+                    val valid =
+                        when (operation) {
+                            "GET" -> params.size >= 3
+                            "LIST", "CLEAR" -> params.size == 2
+                            "SYNC" -> params.size in 2..3
+                            else -> false
+                        }
+                    if (valid) MetadataQuery(params[0], operation, if (operation == "GET") params.drop(2) else emptyList()) else null
+                }
+            val expiresAt = now + COMMAND_RESPONSE_TIMEOUT_MS
+            val metadataWindow =
+                metadataQuery?.let {
+                    MetadataCommandWindow(if (deferMetadataWindowUntilWrite) null else System.nanoTime(), expiresAt)
+                }
             val session =
                 CommandResponseSession(
                     id = UUID.randomUUID().toString(),
@@ -427,21 +457,14 @@ class EventProcessor
                     bufferId = bufferId,
                     command = command.uppercase().filter { it.isLetterOrDigit() || it == '_' }.ifEmpty { "COMMAND" },
                     label = label,
-                    expiresAt = now + COMMAND_RESPONSE_TIMEOUT_MS,
-                    metadataQuery =
-                        metadataQueryParams.takeIf { label == null && command.equals("METADATA", ignoreCase = true) }?.let { params ->
-                            val operation = params.getOrNull(1)?.uppercase() ?: return@let null
-                            if ((operation == "GET" && params.size >= 3) || (operation == "LIST" && params.size == 2)) {
-                                MetadataQuery(params[0], operation, params.drop(2))
-                            } else {
-                                null
-                            }
-                        },
+                    expiresAt = expiresAt,
+                    metadataQuery = metadataQuery,
+                    metadataWindow = metadataWindow,
                 )
             commandResponsesById[session.id] = session
-            session.metadataQuery?.let { query ->
+            if (metadataQuery != null && metadataWindow != null) {
                 metadataCommandWindows.compute(networkId) { _, windows ->
-                    windows.orEmpty().filterValues { it > now } + (query to session.expiresAt)
+                    windows.orEmpty().filterValues { it.expiresAt > now } + (metadataQuery to metadataWindow)
                 }
             }
             if (label == null) {
@@ -450,6 +473,10 @@ class EventProcessor
                 commandResponsesByLabel[label] = session
             }
             return session.id
+        }
+
+        internal fun markMetadataCommandWritten(sessionId: String) {
+            commandResponsesById[sessionId]?.metadataWindow?.issuedAt = System.nanoTime()
         }
 
         fun cancelCommandResponse(sessionId: String) {
@@ -462,17 +489,34 @@ class EventProcessor
             now: Long = System.currentTimeMillis(),
         ): MetadataSnapshotRouting =
             sequencer.withNetwork(networkId) {
+                if (event.joinResponseLabel != null) return@withNetwork MetadataSnapshotRouting.AUTOMATIC
                 val windows = metadataCommandWindows[networkId] ?: return@withNetwork MetadataSnapshotRouting.AUTOMATIC
                 val state = stateFor(networkId)
                 val session = commandResponse(networkId, label = null, now = now, includeMetadataQuery = true)
-                if (session?.metadataQuery?.matchesSnapshot(state, event) == true) {
+                val query = session?.metadataQuery
+                if (session != null && query != null && query.matchesSnapshot(state, event) && session.metadataWindow?.includes(event) == true) {
                     finishCommandResponse(session)
                     for (message in event.messages) {
                         insertCommandResponse(session, serverCtx(), MessageKind.SERVER_INFO, rawCommandResponseText(message))
                     }
-                    return@withNetwork MetadataSnapshotRouting.POSITIVE_ONLY
+                    return@withNetwork when (query.operation) {
+                        "SYNC", "CLEAR" -> {
+                            metadataCommandWindows.computeIfPresent(networkId) { _, current ->
+                                if (current[query] == session.metadataWindow) (current - query).takeIf { it.isNotEmpty() } else current
+                            }
+                            MetadataSnapshotRouting.EXPLICIT_VALUES
+                        }
+
+                        else -> {
+                            MetadataSnapshotRouting.POSITIVE_ONLY
+                        }
+                    }
                 }
-                if (windows.any { (query, expiresAt) -> expiresAt > now && query.matchesTarget(state, event.target) }) {
+                val selfNick = event.selfNickAtOpen ?: state.selfNick
+                if (windows.any { (query, window) ->
+                        window.expiresAt > now && window.includes(event) && query.matchesTarget(state, event.target, selfNick)
+                    }
+                ) {
                     MetadataSnapshotRouting.POSITIVE_ONLY
                 } else {
                     MetadataSnapshotRouting.AUTOMATIC
@@ -482,34 +526,50 @@ class EventProcessor
         private fun MetadataQuery.matchesSnapshot(
             state: NetworkState,
             event: IrcEvent.MetadataSnapshot,
-        ): Boolean =
-            matchesTarget(state, event.target) &&
-                (operation != "GET" || event.messages.size == keys.size) &&
-                event.messages.withIndex().all { (index, message) ->
-                    val params = message.params
-                    when (message.command) {
-                        "761" -> {
-                            matchesTarget(state, params.getOrNull(1)) && matchesKey(params.getOrNull(2), index)
-                        }
+        ): Boolean {
+            val selfNick = event.selfNickAtOpen ?: state.selfNick
+            if (!matchesTarget(state, event.target, selfNick) || (operation == "GET" && event.messages.size != keys.size)) {
+                return false
+            }
+            return event.messages.withIndex().all { (index, message) ->
+                val params = message.params
+                val wireNick = message.selfNickAtRead ?: selfNick
+                when (message.command) {
+                    "761", "766" -> {
+                        val allowed =
+                            when (operation) {
+                                "CLEAR" -> message.command == "766"
+                                "LIST" -> message.command == "761"
+                                else -> true
+                            }
+                        allowed && matchesKey(params.getOrNull(2), index) &&
+                            (operation == "SYNC" || matchesTarget(state, params.getOrNull(1), wireNick))
+                    }
 
-                        "766" -> {
-                            operation == "GET" && matchesTarget(state, params.getOrNull(1)) && matchesKey(params.getOrNull(2), index)
-                        }
-
-                        "WARN", "NOTE" -> {
-                            params.firstOrNull() == "METADATA" &&
-                                when (params.getOrNull(1)) {
-                                    "INVALID_KEY" -> operation == "GET" && matchesKey(params.getOrNull(2), index)
-                                    "KEY_NO_PERMISSION" -> matchesTarget(state, params.getOrNull(2)) && matchesKey(params.getOrNull(3), index)
-                                    else -> false
+                    "WARN", "NOTE" -> {
+                        params.firstOrNull() == "METADATA" &&
+                            when (params.getOrNull(1)) {
+                                "INVALID_KEY" -> {
+                                    operation == "GET" && matchesKey(params.getOrNull(2), index)
                                 }
-                        }
 
-                        else -> {
-                            false
-                        }
+                                "KEY_NO_PERMISSION" -> {
+                                    matchesKey(params.getOrNull(3), index) &&
+                                        (operation == "SYNC" || matchesTarget(state, params.getOrNull(2), wireNick))
+                                }
+
+                                else -> {
+                                    false
+                                }
+                            }
+                    }
+
+                    else -> {
+                        false
                     }
                 }
+            }
+        }
 
         override suspend fun process(
             networkId: Long,
@@ -3113,8 +3173,10 @@ class EventProcessor
             if (self) {
                 clearVisibleRoster(networkId, bufferId, st)
             } else {
-                memberDao.remove(bufferId, nick)
-                userDao.clearBotIfUnshared(networkId, st.normalize(nick), st.identityRules.caseMapping.rawName)
+                val normalizedNick = st.normalize(nick)
+                val caseMapping = st.identityRules.caseMapping.rawName
+                memberDao.removeFolded(bufferId, normalizedNick, caseMapping)
+                userDao.clearBotIfUnshared(networkId, normalizedNick, caseMapping)
             }
         }
 
@@ -3345,7 +3407,7 @@ class EventProcessor
                         isBot = isBot ?: existing.isBot,
                     )
                 if (updated != existing) userDao.upsert(updated)
-                if (updated.isBot != existing.isBot) setMemberBot(networkId, nick, updated.isBot)
+                if (isBot != null) setMemberBot(networkId, nick, isBot)
             }
         }
 

@@ -10,6 +10,7 @@ import io.github.trevarj.motd.avatar.AvatarDatabase
 import io.github.trevarj.motd.avatar.AvatarPrefsImpl
 import io.github.trevarj.motd.avatar.AvatarStoreImpl
 import io.github.trevarj.motd.avatar.LocalAvatarStore
+import io.github.trevarj.motd.avatar.METADATA_V3_CAP
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
@@ -58,6 +59,7 @@ import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runCurrent
@@ -78,6 +80,7 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executor
 import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.coroutines.CoroutineContext
 
 @OptIn(ExperimentalCoroutinesApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -590,6 +593,50 @@ class NotificationReplyReadinessTest {
         }
 
     @Test
+    fun unlabeledMetadataSyncAndClearRouteToTheOriginAndApplyOnlyExplicitValues() =
+        runTest {
+            val fixture = managerFixture(roomContext = StandardTestDispatcher(testScheduler))
+            try {
+                // This fixture uses a real socket; Room still runs on the test scheduler.
+                withContext(Dispatchers.Default) {
+                    val origin = fixture.room(BufferType.QUERY, "origin")
+                    val (_, connection) = startNetwork(fixture, "batch $METADATA_V3_CAP")
+                    val networkId = fixture.networkId
+                    val avatars = fixture.avatars.avatarDao().observeAll()
+                    val cached = "https://example.com/cached.png"
+                    val fresh = "https://example.com/fresh.png"
+                    connection.feed(":srv 761 me #chat avatar * :$cached")
+                    connection.feed(":srv 761 me me avatar * :$cached")
+                    withTimeout(10_000) { avatars.first { it.map { avatar -> avatar.nick }.toSet() == setOf("#chat", "me") } }
+
+                    connection.feed(":srv BATCH +old metadata #chat")
+                    connection.feed("@batch=old :srv 761 me Eve avatar * :$cached")
+                    connection.barrier()
+                    fixture.manager.sendCommand(networkId, origin.id, IrcMessage.parse("METADATA #chat SYNC"), channelContext = null)
+                    connection.awaitLine { it == "METADATA #chat SYNC" }
+                    connection.feed(":srv BATCH -old")
+                    connection.feed(":srv BATCH +sync metadata #chat")
+                    connection.feed("@batch=sync :srv 761 me Alice avatar * :$fresh")
+                    connection.feed(":srv BATCH -sync")
+                    awaitStoredText(fixture, origin.id, "Alice avatar * $fresh")
+                    val synced = withTimeout(10_000) { avatars.first { list -> list.any { it.url == fresh } } }
+                    assertEquals(mapOf("#chat" to cached, "alice" to fresh, "me" to cached), synced.associate { it.nick to it.url })
+
+                    fixture.manager.sendCommand(networkId, origin.id, IrcMessage.parse("METADATA * CLEAR"), channelContext = null)
+                    connection.awaitLine { it == "METADATA * CLEAR" }
+                    connection.feed(":srv BATCH +clear metadata me")
+                    connection.feed("@batch=clear :srv 766 me me avatar :Key not set")
+                    connection.feed(":srv BATCH -clear")
+                    awaitStoredText(fixture, origin.id, "me avatar Key not set")
+                    val cleared = withTimeout(10_000) { avatars.first { list -> list.none { it.nick == "me" } } }
+                    assertEquals(setOf("#chat", "alice"), cleared.map { it.nick }.toSet())
+                }
+            } finally {
+                fixture.close()
+            }
+        }
+
+    @Test
     fun startedManagerStillWaitsForTheReplacementSocketToBecomeReadyBeforePersistence() =
         runBlocking {
             val fixture = managerFixture()
@@ -731,13 +778,16 @@ class NotificationReplyReadinessTest {
         return SendAcceptance.Accepted(emptyList())
     }
 
-    private suspend fun startNetwork(fixture: ManagerFixture): Pair<IrcClient, RecordingPeerConnection> =
+    private suspend fun startNetwork(
+        fixture: ManagerFixture,
+        caps: String = "batch message-tags server-time",
+    ): Pair<IrcClient, RecordingPeerConnection> =
         withTimeout(10_000) {
             fixture.manager.startAll()
             val connection = fixture.peer.accept()
             fixture.manager.connectionStates.first { it[fixture.networkId] is IrcClientState.Registering }
             val client = checkNotNull(fixture.manager.clientFor(fixture.networkId))
-            ready(client, connection)
+            ready(client, connection, caps)
             fixture.manager.connectionStates.first { it[fixture.networkId] is IrcClientState.Ready }
             client to connection
         }
@@ -745,8 +795,8 @@ class NotificationReplyReadinessTest {
     private suspend fun ready(
         client: IrcClient,
         connection: RecordingPeerConnection,
+        caps: String = "batch message-tags server-time",
     ) {
-        val caps = "batch message-tags server-time"
         connection.feed(":srv CAP * LS :$caps")
         connection.awaitLine { it.startsWith("CAP REQ ") }
         connection.feed(":srv CAP me ACK :$caps")
@@ -770,6 +820,7 @@ class NotificationReplyReadinessTest {
 
     private suspend fun managerFixture(
         notifier: MessageNotifier = MessageNotifier.Noop,
+        roomContext: CoroutineContext? = null,
         onQuery: (String, List<Any?>) -> Unit = { _, _ -> },
     ): ManagerFixture {
         val context: Context = ApplicationProvider.getApplicationContext()
@@ -780,17 +831,27 @@ class NotificationReplyReadinessTest {
             Room
                 .inMemoryDatabaseBuilder(context, MotdDatabase::class.java)
                 .allowMainThreadQueries()
-                .setQueryExecutor { it.run() }
-                .setTransactionExecutor { it.run() }
-                .setQueryCallback(onQuery, Executor(Runnable::run))
+                .apply {
+                    if (roomContext != null) {
+                        setQueryCoroutineContext(roomContext)
+                    } else {
+                        setQueryExecutor { it.run() }
+                        setTransactionExecutor { it.run() }
+                    }
+                }.setQueryCallback(onQuery, Executor(Runnable::run))
                 .build()
         val avatars =
             Room
                 .inMemoryDatabaseBuilder(context, AvatarDatabase::class.java)
                 .allowMainThreadQueries()
-                .setQueryExecutor { it.run() }
-                .setTransactionExecutor { it.run() }
-                .build()
+                .apply {
+                    if (roomContext != null) {
+                        setQueryCoroutineContext(roomContext)
+                    } else {
+                        setQueryExecutor { it.run() }
+                        setTransactionExecutor { it.run() }
+                    }
+                }.build()
         val networkId =
             db.networkDao().insert(
                 NetworkEntity(
@@ -862,7 +923,7 @@ class NotificationReplyReadinessTest {
 
     private class ManagerFixture(
         val db: MotdDatabase,
-        private val avatars: AvatarDatabase,
+        val avatars: AvatarDatabase,
         val manager: ConnectionManagerImpl,
         val networkId: Long,
         val peer: LocalIrcPeer,

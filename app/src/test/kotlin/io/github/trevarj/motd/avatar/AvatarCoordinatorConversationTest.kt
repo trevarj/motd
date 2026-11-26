@@ -30,6 +30,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runCurrent
@@ -292,7 +293,7 @@ class AvatarCoordinatorConversationTest {
             val previous = "https://example.com/old.png"
             val current = "https://example.com/new.png"
             store.records.value =
-                listOf("#chat", "Alice", "Bob", "Dave", "Elsewhere", "me").map {
+                listOf("#chat", "Alice", "Bob", "Dave", "Elsewhere", "Late", "me").map {
                     AvatarRecord(networkId, avatarIdentity(it, null), it, null, previous, 0)
                 }
 
@@ -311,6 +312,10 @@ class AvatarCoordinatorConversationTest {
             coordinator.onEvent(networkId, raw(":srv 761 newme dave avatar * :$current", sequence = 21))
             coordinator.onEvent(
                 networkId,
+                IrcEvent.Joined(dickordMessage(null).ctx, "Late", "#chat", null, null, isSelf = false, wireSequence = 22),
+            )
+            coordinator.onEvent(
+                networkId,
                 IrcEvent.NickChanged(dickordMessage(null).ctx, "Eve", "Frank", isSelf = false, wireSequence = 23),
             )
             coordinator.onEvent(
@@ -324,6 +329,7 @@ class AvatarCoordinatorConversationTest {
                     "me",
                     listOf(IrcMessage.parse(":srv 761 me me avatar * :$current").copy(wireSequence = 17)),
                     openingSequence = 11,
+                    selfNickAtOpen = "me",
                 ),
             )
             coordinator.onEvent(networkId, raw(":srv 766 newme newme avatar :Key not set", sequence = 26))
@@ -354,6 +360,7 @@ class AvatarCoordinatorConversationTest {
                         IrcMessage.parse(":srv 761 me Eve avatar * :$current").copy(wireSequence = 16),
                     ),
                     openingSequence = 10,
+                    selfNickAtOpen = "me",
                 ),
             )
             assertEquals(listOf("alice", "dave", "eve", "newme", "fresh", "Frank"), store.upserts.map { it.nick })
@@ -362,11 +369,198 @@ class AvatarCoordinatorConversationTest {
             assertEquals(listOf("newme", "#chat"), store.removals.map { it.nick })
             coordinator.onEvent(
                 networkId,
-                IrcEvent.Names("#chat", listOf("Alice", "Bob", "Dave").map { IrcEvent.Names.Member(it, "", null, null) }),
+                IrcEvent.Names("#chat", listOf("Alice", "Bob", "Dave", "Late").map { IrcEvent.Names.Member(it, "", null, null) }),
             )
             coordinator.onEvent(networkId, raw(":srv 766 newme alice avatar :Key not set"))
             assertEquals(listOf("newme", "#chat", "Bob", "alice"), store.removals.map { it.nick })
             assertEquals(listOf("METADATA * SUB avatar"), transport.sent.filter { it.startsWith("METADATA ") })
+        }
+
+    @Test fun metadata_replies_use_the_self_nick_at_read_even_when_the_consumer_lags() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val store = FakeStore()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, connections = connections)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch $METADATA_V3_CAP")
+            connections.clients[networkId] = client
+            coordinator.onReady(networkId, client)
+            val url = "https://example.com/avatar.png"
+            coordinator.setSelfAvatar(networkId, url)
+            val paused = CompletableDeferred<Unit>()
+            val release = CompletableDeferred<Unit>()
+            collectAvatarEvents(networkId, coordinator, client) { event ->
+                if (event is IrcEvent.Raw && event.message.command == "770") {
+                    paused.complete(Unit)
+                    release.await()
+                }
+            }
+
+            transport.feed(":srv 770 me avatar")
+            paused.await()
+            transport.feed(":srv 761 me Alice avatar * :$url")
+            transport.feed(":srv 775 me 1 * SET avatar :$url")
+            transport.feed(":me!u@host NICK :newme")
+            transport.feed(":srv BATCH +sync metadata *ALL")
+            transport.feed("@batch=sync :srv 761 newme Bob avatar * :$url")
+            transport.feed(":srv BATCH -sync")
+            runCurrent()
+            assertEquals("newme", (client.state.value as IrcClientState.Ready).nick)
+            assertTrue(store.upserts.isEmpty())
+            release.complete(Unit)
+            runCurrent()
+            assertEquals(listOf("Alice", "Bob"), store.upserts.map { it.nick })
+            testScheduler.advanceTimeBy(1_000)
+            runCurrent()
+            assertEquals(2, transport.avatarWrites.size)
+        }
+
+    @Test fun an_old_open_metadata_batch_cannot_claim_a_fresh_monitor_snapshot() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val old = "https://example.com/old.png"
+            val store = FakeStore()
+            store.records.value = listOf(AvatarRecord(networkId, avatarIdentity("Alice", null), "Alice", null, old, 0))
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, connections = connections)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch $METADATA_V3_CAP")
+            connections.clients[networkId] = client
+            coordinator.onReady(networkId, client)
+            collectAvatarEvents(networkId, coordinator, client)
+
+            transport.feed(":srv 770 me avatar")
+            transport.feed(":srv BATCH +old metadata Alice")
+            transport.feed("@batch=old :srv 761 me Alice avatar * :https://example.com/stale.png")
+            transport.feed(":srv 730 me :Alice!u@host")
+            transport.feed(":srv BATCH -old")
+            runCurrent()
+            assertTrue(store.upserts.isEmpty())
+            assertTrue(store.removals.isEmpty())
+
+            transport.feed(":srv BATCH +fresh metadata Alice")
+            transport.feed(":srv BATCH -fresh")
+            runCurrent()
+            assertEquals(listOf(RemovedAvatar(networkId, "Alice", null)), store.removals)
+        }
+
+    @Test fun labeled_join_metadata_does_not_consume_a_pending_sync_response() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val store = FakeStore()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, connections = connections)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch labeled-response $METADATA_V3_CAP")
+            connections.clients[networkId] = client
+            coordinator.onReady(networkId, client)
+            coordinator.onEvent(networkId, raw(":srv 770 me avatar", sequence = 1L))
+            coordinator.onEvent(networkId, raw(":srv 774 me #chat 0 :Please retry", sequence = 2L))
+            testScheduler.advanceTimeBy(250)
+            runCurrent()
+            assertTrue("METADATA #chat SYNC" in transport.sent)
+
+            coordinator.onEvent(
+                networkId,
+                IrcEvent.Joined(dickordMessage(null).ctx, "me", "#chat", null, null, isSelf = true, wireSequence = 10L),
+            )
+            coordinator.onEvent(
+                networkId,
+                IrcEvent.MetadataSnapshot("#chat", emptyList(), openingSequence = 11L, joinResponseLabel = "join"),
+            )
+            val url = "https://example.com/avatar.png"
+            coordinator.onEvent(
+                networkId,
+                IrcEvent.MetadataSnapshot("#chat", listOf(IrcMessage.parse(":srv 761 me #chat avatar * :$url")), openingSequence = 13L),
+            )
+            assertEquals(listOf(StoredAvatar(networkId, "#chat", null, url)), store.upserts)
+        }
+
+    @Test fun channel_snapshot_does_not_defer_omissions_to_a_lazy_roster() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val url = "https://example.com/avatar.png"
+            val store = FakeStore()
+            store.records.value = listOf(AvatarRecord(networkId, avatarIdentity("Alice", null), "Alice", null, url, 0))
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, connections = connections)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch $METADATA_V3_CAP no-implicit-names")
+            connections.clients[networkId] = client
+            coordinator.onReady(networkId, client)
+            collectAvatarEvents(networkId, coordinator, client)
+
+            transport.feed(":srv 770 me avatar")
+            transport.feed(":me!u@host JOIN #chat")
+            transport.feed(":srv BATCH +joined metadata #chat")
+            transport.feed(":srv BATCH -joined")
+            transport.feed(":Alice!u@host JOIN #chat")
+            runCurrent()
+            coordinator.onEvent(networkId, IrcEvent.Names("#chat", listOf(IrcEvent.Names.Member("Alice", "", null, null))))
+            assertTrue(store.removals.isEmpty())
+        }
+
+    @Test fun dialect_loss_discards_omissions_waiting_for_implicit_names() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val url = "https://example.com/avatar.png"
+            val store = FakeStore()
+            store.records.value = listOf(AvatarRecord(networkId, avatarIdentity("Alice", null), "Alice", null, url, 0))
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, connections = connections)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch $METADATA_V3_CAP $METADATA_CAP")
+            connections.clients[networkId] = client
+            coordinator.onReady(networkId, client)
+            collectAvatarEvents(networkId, coordinator, client)
+
+            transport.feed(":srv 770 me avatar")
+            transport.feed(":me!u@host JOIN #chat")
+            transport.feed(":srv BATCH +joined metadata #chat")
+            transport.feed(":srv BATCH -joined")
+            runCurrent()
+            transport.feed(":srv CAP me DEL :$METADATA_V3_CAP")
+            runCurrent()
+            transport.feed(":srv CAP me ACK :$METADATA_CAP")
+            runCurrent()
+            coordinator.onEvent(networkId, raw(":srv METADATA Alice avatar * :$url"))
+            coordinator.onEvent(networkId, IrcEvent.Names("#chat", listOf(IrcEvent.Names.Member("Alice", "", null, null))))
+            assertEquals(listOf(StoredAvatar(networkId, "Alice", null, url)), store.upserts)
+            assertTrue(store.removals.isEmpty())
+        }
+
+    @Test fun terminal_metadata_limits_retire_requests_and_allow_self_replay_after_new_limits() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, FakeStore(), connections = connections)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch $METADATA_V3_CAP=max-keys=1,max-subs=1")
+            connections.clients[networkId] = client
+            coordinator.onReady(networkId, client)
+            val url = "https://example.com/avatar.png"
+            coordinator.setSelfAvatar(networkId, url)
+            collectAvatarEvents(networkId, coordinator, client)
+            transport.feed(":srv FAIL METADATA TOO_MANY_SUBS avatar 1 :Subscription limit reached")
+            transport.feed(":srv 775 me 1 * SUB avatar")
+            transport.feed(":srv FAIL METADATA LIMIT_REACHED * 1 :Metadata limit reached")
+            runCurrent()
+            testScheduler.advanceTimeBy(1_000)
+            runCurrent()
+            assertEquals(1, transport.sent.count { it == "METADATA * SUB avatar" })
+            assertEquals(1, transport.avatarWrites.size)
+
+            transport.feed(":srv CAP me NEW :$METADATA_V3_CAP=max-keys=2,max-subs=2")
+            runCurrent()
+            assertEquals(2, transport.sent.count { it == "METADATA * SUB avatar" })
+            assertEquals(2, transport.avatarWrites.size)
         }
 
     @Test fun metadata_v3_retries_only_current_avatar_requests_and_waits_for_server_state() =
@@ -525,6 +719,41 @@ class AvatarCoordinatorConversationTest {
             assertEquals("METADATA #chat SET avatar $url", transport.sent.last())
         }
 
+    @Test fun a_later_same_url_edit_keeps_its_own_labeled_confirmation() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val roomId = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#chat", displayName = "#chat", type = BufferType.CHANNEL))
+            val store = FakeStore()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, store, connections = connections)
+            val transport = FakeTransport()
+            connections.clients[networkId] = readyClient(transport, caps = "batch labeled-response $METADATA_V3_CAP")
+            val url = "https://example.com/submitted.png"
+            val firstRewrite = "https://example.com/first.png"
+            val secondRewrite = "https://example.com/second.png"
+            val entered = CompletableDeferred<Unit>()
+            val resume = CompletableDeferred<Unit>()
+            store.beforeUpsert = {
+                if (entered.complete(Unit)) resume.await()
+            }
+            val writes = Channel<String>(Channel.UNLIMITED)
+            transport.onMetadataWrite = { writes.trySend(it.substringBefore(' ')).getOrThrow() }
+
+            val first = async { coordinator.setConversationAvatar(roomId, url) }
+            transport.feed("${writes.receive()} :srv 761 me #chat avatar * :$firstRewrite")
+            entered.await()
+            val second = async { coordinator.setConversationAvatar(roomId, url) }
+            val secondLabel = writes.receive()
+
+            resume.complete(Unit)
+            assertEquals(ConversationAvatarOutcome.Shared, first.await())
+            assertEquals(url, db.bufferDao().observeById(roomId)?.avatarOverrideModel)
+            transport.feed("$secondLabel :srv 761 me #chat avatar * :$secondRewrite")
+            assertEquals(ConversationAvatarOutcome.Shared, second.await())
+            assertEquals(secondRewrite, db.bufferDao().observeById(roomId)?.avatarOverrideModel)
+        }
+
     @Test fun metadata_fallback_restores_unconfirmed_self_avatar_without_retrying_old_session_request() =
         runTest {
             val networkId = 5L
@@ -606,6 +835,7 @@ class AvatarCoordinatorConversationTest {
 
     @Test fun metadata_snapshot_cannot_refill_shared_cache_after_opt_out() =
         runTest {
+            useTestSchedulerForRoom()
             val networkId = 5L
             val store = FakeStore()
             val connections = FakeConnections()
@@ -639,6 +869,20 @@ class AvatarCoordinatorConversationTest {
             optOut.await()
             assertTrue(store.upserts.isEmpty())
         }
+
+    private fun TestScope.collectAvatarEvents(
+        networkId: Long,
+        coordinator: AvatarCoordinator,
+        client: IrcClient,
+        beforeEvent: suspend (IrcEvent) -> Unit = {},
+    ) {
+        backgroundScope.launch {
+            for (event in client.criticalEvents) {
+                beforeEvent(event)
+                coordinator.onEvent(networkId, event)
+            }
+        }
+    }
 
     private fun raw(
         line: String,

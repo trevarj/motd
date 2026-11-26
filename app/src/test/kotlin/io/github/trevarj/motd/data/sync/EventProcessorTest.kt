@@ -269,6 +269,35 @@ class EventProcessorTest {
         }
 
     @Test
+    fun repeated_whox_restores_bot_flag_after_channel_rename_merges_into_older_room() =
+        runTest {
+            processor.process(networkId, IrcEvent.Registered("me", emptySet(), mapOf("BOT" to "b"), startsSession = false))
+            processor.process(networkId, IrcEvent.Names("#new", emptyList()))
+            processor.process(networkId, IrcEvent.Names("#old", listOf(IrcEvent.Names.Member("Helper[", "@", null, null))))
+            val destination = db.bufferDao().byName(networkId, "#new")!!
+            val source = db.bufferDao().byName(networkId, "#old")!!
+            val whox = IrcEvent.WhoxRow(12, "helper", "host", "HELPER{", null, "Hb", "Helper")
+            processor.process(networkId, whox)
+            assertTrue(
+                db
+                    .memberDao()
+                    .allNow(source.id)
+                    .single()
+                    .isBot,
+            )
+
+            processor.process(networkId, IrcEvent.ChannelRenamed(ctx(), "oper", "#old", "#new", null))
+            assertEquals(destination.id, db.bufferDao().canonicalId(source.id))
+            assertTrue(db.userDao().isBot(networkId, "helper{"))
+
+            processor.process(networkId, whox)
+            val member = db.memberDao().allNow(destination.id).single()
+            assertEquals("Helper[", member.nick)
+            assertEquals("@", member.prefixes)
+            assertTrue(member.isBot)
+        }
+
+    @Test
     fun whois_bot_numeric_stays_in_command_output_and_only_message_tag_marks_chat() =
         runTest {
             processor.process(networkId, IrcEvent.Joined(ctx(), "Helper", "#chan", null, null, false, isBot = true))
@@ -288,20 +317,60 @@ class EventProcessorTest {
         }
 
     @Test
-    fun bot_status_expires_after_last_shared_part_without_leaking_to_rejoin() =
+    fun bot_status_expires_after_last_irc_folded_part_without_leaking_to_rejoin() =
         runTest {
-            val join = IrcEvent.Joined(ctx(), "Helper", "#first", null, null, false, isBot = true)
+            val join = IrcEvent.Joined(ctx(), "Helper[", "#first", null, null, false, isBot = true)
             processor.process(networkId, join)
             processor.process(networkId, join.copy(channel = "#second", isBot = false))
-            processor.process(networkId, IrcEvent.Parted(ctx(), "Helper", "#first", null, false))
-            assertTrue(db.userDao().isBot(networkId, "helper"))
+            val first = db.bufferDao().byName(networkId, "#first")!!
+            val second = db.bufferDao().byName(networkId, "#second")!!
+            processor.process(networkId, IrcEvent.Parted(ctx(), "HELPER{", "#first", null, false))
+            assertTrue(db.memberDao().allNow(first.id).isEmpty())
+            assertTrue(db.userDao().isBot(networkId, "helper{"))
+            assertTrue(
+                db
+                    .memberDao()
+                    .allNow(second.id)
+                    .single()
+                    .isBot,
+            )
 
-            processor.process(networkId, IrcEvent.Parted(ctx(), "Helper", "#second", null, false))
-            assertFalse(db.userDao().isBot(networkId, "helper"))
+            processor.process(networkId, IrcEvent.Parted(ctx(), "HELPER{", "#second", null, false))
+            assertTrue(db.memberDao().allNow(second.id).isEmpty())
+            assertFalse(db.userDao().isBot(networkId, "helper{"))
 
             processor.process(networkId, join.copy(ctx = ctx(msgid = "human-join", time = 2000), isBot = false))
-            val room = db.bufferDao().byName(networkId, "#first")!!
-            assertFalse(db.userDao().isBot(networkId, "helper"))
+            assertFalse(db.userDao().isBot(networkId, "helper{"))
+            assertFalse(
+                db
+                    .memberDao()
+                    .allNow(first.id)
+                    .single()
+                    .isBot,
+            )
+            assertFalse(db.messageDao().byMsgid(first.id, "human-join")!!.isBot)
+        }
+
+    @Test
+    fun irc_folded_kick_removes_bot_and_expires_cache_before_untagged_rejoin() =
+        runTest {
+            val join = IrcEvent.Joined(ctx(), "Helper[", "#chan", null, null, false, isBot = true)
+            processor.process(networkId, join)
+            val room = db.bufferDao().byName(networkId, "#chan")!!
+            assertTrue(
+                db
+                    .memberDao()
+                    .allNow(room.id)
+                    .single()
+                    .isBot,
+            )
+
+            processor.process(networkId, IrcEvent.Kicked(ctx(), "HELPER{", "#chan", "op", null, false))
+            assertTrue(db.memberDao().allNow(room.id).isEmpty())
+            assertFalse(db.userDao().isBot(networkId, "helper{"))
+
+            processor.process(networkId, join.copy(ctx = ctx(msgid = "human-join", time = 2000), isBot = false))
+            assertFalse(db.userDao().isBot(networkId, "helper{"))
             assertFalse(
                 db
                     .memberDao()

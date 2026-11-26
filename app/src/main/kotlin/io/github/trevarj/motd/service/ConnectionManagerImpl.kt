@@ -1655,6 +1655,7 @@ class ConnectionManagerImpl
                 networkId,
                 event,
                 positiveMetadataOnly = metadataRouting == EventProcessor.MetadataSnapshotRouting.POSITIVE_ONLY,
+                explicitMetadataValues = metadataRouting == EventProcessor.MetadataSnapshotRouting.EXPLICIT_VALUES,
             )
             eventProcessor.process(networkId, event)
             if (clientFor(networkId)?.latestSelfMembershipEvent === event) {
@@ -2660,10 +2661,10 @@ class ConnectionManagerImpl
             originBufferId: Long,
             message: IrcMessage,
             channelContext: String?,
-        ) {
-            val buffer = bufferDao.observeById(originBufferId) ?: return
-            if (buffer.networkId != networkId) return
-            val client = clientFor(networkId) ?: return
+        ): Boolean {
+            val buffer = bufferDao.observeById(originBufferId) ?: return false
+            if (buffer.networkId != networkId) return false
+            val client = clientFor(networkId) ?: return false
             val awayMessage =
                 if (message.command == "AWAY") {
                     message.params.firstOrNull()?.takeIf(String::isNotBlank)
@@ -2677,8 +2678,14 @@ class ConnectionManagerImpl
                     pendingAwayMessages[networkId] = awayMessage
                 }
             }
-            val label = newOutgoingLabel().takeIf { client.hasCap("labeled-response") }
+            val labeledResponse = client.hasCap("labeled-response")
+            val unlabeledWhois =
+                !labeledResponse && message.command.equals("WHOIS", ignoreCase = true) && message.params.isNotEmpty()
+            val label = if (labeledResponse || unlabeledWhois) newOutgoingLabel() else null
             val ready = client.state.value as? IrcClientState.Ready
+            val unlabeledMetadata =
+                label == null && message.command.equals("METADATA", ignoreCase = true) &&
+                    metadataVersion(ready?.caps.orEmpty()) == METADATA_V3_CAP
             val contextTag =
                 channelContext?.takeIf { context ->
                     message.command == "NOTICE" && message.params.firstOrNull()?.let(client.isupport::isChannel) == false &&
@@ -2691,19 +2698,23 @@ class ConnectionManagerImpl
                     bufferId = buffer.id,
                     command = message.command,
                     label = label,
-                    metadataQueryParams =
-                        if (metadataVersion(ready?.caps.orEmpty()) == METADATA_V3_CAP) message.params else emptyList(),
+                    metadataQueryParams = if (unlabeledMetadata) message.params else emptyList(),
+                    deferMetadataWindowUntilWrite = unlabeledMetadata,
                 )
             val tags =
                 message.tags +
                     listOfNotNull(
-                        label?.let { "label" to it },
+                        label?.takeUnless { unlabeledWhois }?.let { "label" to it },
                         contextTag?.let { "+channel-context" to it },
                     )
             val tagged = message.copy(tags = tags)
             val sent =
                 try {
-                    client.sendIfConnected(tagged)
+                    client.sendIfConnected(
+                        tagged,
+                        unlabeledWhoisLabel = label.takeIf { unlabeledWhois },
+                        onWrite = if (unlabeledMetadata) ({ eventProcessor.markMetadataCommandWritten(sessionId) }) else null,
+                    )
                 } catch (cancelled: CancellationException) {
                     eventProcessor.cancelCommandResponse(sessionId)
                     if (message.command == "AWAY") pendingAwayMessages.remove(networkId)
@@ -2718,6 +2729,7 @@ class ConnectionManagerImpl
                 eventProcessor.cancelCommandResponse(sessionId)
                 if (message.command == "AWAY") pendingAwayMessages.remove(networkId)
             }
+            return sent
         }
 
         override suspend fun sendMessage(

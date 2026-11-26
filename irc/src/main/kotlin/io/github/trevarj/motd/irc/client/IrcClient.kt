@@ -313,7 +313,7 @@ class IrcClient(
     private val unlabeledChatHistoryLock = Mutex()
     private val unlabeledSearch = UnlabeledSearchCorrelator()
     private val unlabeledSearchLock = Mutex()
-    private val unlabeledWhois = UnlabeledWhoisCorrelator()
+    private val unlabeledWhois = AtomicReference<UnlabeledWhoisCorrelator?>(null)
     private val unlabeledWhoisLock = Mutex()
     private val unlabeledChannelListLock = Mutex()
     private var unlabeledChannelListDrain: UnlabeledChannelListResponse? = null
@@ -394,7 +394,7 @@ class IrcClient(
         labels.failAll(CancellationException("client stopped"))
         unlabeledChatHistory.failAll(CancellationException("client stopped"))
         unlabeledSearch.failAll(CancellationException("client stopped"))
-        unlabeledWhois.failAll(CancellationException("client stopped"))
+        unlabeledWhois.getAndSet(null)?.failAll(CancellationException("client stopped"))
         cancelWhoxRequests("client stopped")
         sensitiveEchoes.clear()
         batches.reset()
@@ -444,6 +444,8 @@ class IrcClient(
         val t = factory.create(config.host, config.port, config.tls, config.wsUrl, null)
         val joinSession = JoinRejections(t)
         joinRejections.set(joinSession)
+        val whoisSession = UnlabeledWhoisCorrelator(t)
+        unlabeledWhois.set(whoisSession)
         transport = t
         val banSession = ChannelBanRequests(t)
         channelBanSession.set(banSession)
@@ -462,6 +464,7 @@ class IrcClient(
             emitDisconnected(criticalEvents, disconnectedPublished, e.message)
             if (transport === t) transport = null
             if (joinRejections.compareAndSet(joinSession, null)) joinSession.close()
+            if (unlabeledWhois.compareAndSet(whoisSession, null)) whoisSession.failAllDisconnected(e.message)
             return
         }
 
@@ -504,13 +507,15 @@ class IrcClient(
                     }
                 val isMetadataFrame =
                     when (parsed.command) {
-                        "761", "766", "NICK" -> true
+                        "366", "730", "760", "761", "766", "770", "771", "772", "774", "775", "JOIN", "NICK" -> true
                         "BATCH" -> parsed.params.getOrNull(1) == "metadata" && parsed.params[0].startsWith("+")
-                        "WARN" -> parsed.params.firstOrNull() == "METADATA"
+                        "NOTE", "WARN", "FAIL" -> parsed.params.firstOrNull() == "METADATA"
                         else -> false
                     }
                 val msg =
                     if (isMetadataFrame && hasCap(METADATA_V3_CAP) && hasCap("batch")) {
+                        parsed.copy(wireSequence = ++metadataWireSequence, selfNickAtRead = selfNick.get())
+                    } else if (!registered && parsed.command == "001") {
                         parsed.copy(wireSequence = ++metadataWireSequence)
                     } else {
                         parsed
@@ -529,7 +534,7 @@ class IrcClient(
                     // subsequent value-less deferred ACK cannot widen a limited capability.
                     rememberAdvertisedCaps(msg)
                     for (a in reg.onMessage(msg)) {
-                        applyRegAction(a, t, criticalEvents, disconnectedPublished)
+                        applyRegAction(a, t, criticalEvents, disconnectedPublished, msg.wireSequence)
                     }
                 } else {
                     // First post-registration line: release any deferred feature CAP REQs waiting
@@ -565,12 +570,16 @@ class IrcClient(
                 labels.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
                 unlabeledChatHistory.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
                 unlabeledSearch.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
-                unlabeledWhois.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
+                if (unlabeledWhois.compareAndSet(whoisSession, null)) {
+                    whoisSession.failAllDisconnected((_state.value as? IrcClientState.Failed)?.reason)
+                }
             } else {
                 labels.failAll(CancellationException("connection closed"))
                 unlabeledChatHistory.failAll(CancellationException("connection closed"))
                 unlabeledSearch.failAll(CancellationException("connection closed"))
-                unlabeledWhois.failAll(CancellationException("connection closed"))
+                if (unlabeledWhois.compareAndSet(whoisSession, null)) {
+                    whoisSession.failAll(CancellationException("connection closed"))
+                }
             }
             cancelWhoxRequests("connection closed")
             batches.reset()
@@ -590,6 +599,7 @@ class IrcClient(
         t: IrcTransport,
         criticalEvents: Channel<IrcEvent>,
         disconnectedPublished: AtomicBoolean,
+        wireSequence: Long = 0L,
     ) {
         when (a) {
             is RegistrationStateMachine.Action.Send -> {
@@ -651,7 +661,8 @@ class IrcClient(
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
                 _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap, removedIsupport)
-                publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap, removedIsupport))
+                val sequence = wireSequence.takeIf { hasCap(METADATA_V3_CAP) && hasCap("batch") } ?: 0L
+                publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap, removedIsupport, wireSequence = sequence))
             }
 
             is RegistrationStateMachine.Action.Fail -> {
@@ -664,14 +675,16 @@ class IrcClient(
 
     /** Steady-state dispatch: label correlation → CAP NEW/DEL → batch assembly → event mapping. */
     private suspend fun dispatch(
-        msg: IrcMessage,
+        incoming: IrcMessage,
         t: IrcTransport,
         criticalEvents: Channel<IrcEvent>,
     ) {
         // Credential-bearing service commands must never become persisted self-echo chat rows.
-        if (consumeSensitiveEcho(msg)) return
+        if (consumeSensitiveEcho(incoming)) return
         // Labeled responses are consumed by the correlator (incl. their batch contents).
-        if (labels.route(msg)) return
+        if (labels.route(incoming)) return
+        val whoisSession = unlabeledWhois.get()
+        val msg = if (whoisSession != null && whoisSession.transport === t) whoisSession.route(incoming, isupport) ?: return else incoming
         when (msg.command) {
             "367", "368", "403", "442", "482", "FAIL" -> {
                 val banSession = channelBanSession.get()
@@ -685,7 +698,6 @@ class IrcClient(
         // Released soju lacks labeled-response, but its CHATHISTORY/SEARCH replies remain batched.
         if (unlabeledChatHistory.route(msg)) return
         if (unlabeledSearch.route(msg)) return
-        if (unlabeledWhois.route(msg, isupport::normalize)) return
 
         // Runtime CAP NEW/DEL.
         if (msg.command == "CAP") {
@@ -841,16 +853,43 @@ class IrcClient(
         tree: BatchTree,
         historical: Boolean,
         inheritedLabel: String?,
+        joinedChannels: Set<String> = emptySet(),
     ): List<IrcEvent> {
         val responseLabel = tree.opening.tags["label"] ?: inheritedLabel
-        if (tree.type == "metadata" && responseLabel == null && !historical && hasCap(METADATA_V3_CAP) && hasCap("batch")) {
+        if (tree.type == "metadata" && !historical && hasCap(METADATA_V3_CAP) && hasCap("batch")) {
             val target = tree.params.firstOrNull() ?: return emptyList()
-            val messages = tree.children.mapNotNull { (it as? BatchChild.Message)?.message }
-            return listOf(IrcEvent.MetadataSnapshot(target, messages, tree.opening.wireSequence, tree.openedAtNanos))
+            if (responseLabel == null || (responseLabel == inheritedLabel && isupport.normalize(target) in joinedChannels)) {
+                val messages = tree.children.mapNotNull { (it as? BatchChild.Message)?.message }
+                return listOf(
+                    IrcEvent.MetadataSnapshot(
+                        target,
+                        messages,
+                        tree.opening.wireSequence,
+                        tree.openedAtNanos,
+                        tree.opening.selfNickAtRead,
+                        joinResponseLabel = responseLabel,
+                    ),
+                )
+            }
         }
 
         val responseWrapper = tree.type.equals("labeled-response", ignoreCase = true)
         val eventBatchId = tree.ref.takeUnless { responseWrapper }
+        val metadataJoinTargets =
+            if (responseWrapper && responseLabel != null && !historical &&
+                tree.children.any { it is BatchChild.Nested } && hasCap(METADATA_V3_CAP) && hasCap("batch")
+            ) {
+                tree.children.mapNotNullTo(joinedChannels.toMutableSet()) { child ->
+                    val message = (child as? BatchChild.Message)?.message ?: return@mapNotNullTo null
+                    if (message.command != "JOIN" || (message.tags["label"] ?: responseLabel) != responseLabel) return@mapNotNullTo null
+                    val nick = message.source?.nick ?: return@mapNotNullTo null
+                    val ownNick = message.selfNickAtRead ?: return@mapNotNullTo null
+                    if (isupport.normalize(nick) != isupport.normalize(ownNick)) return@mapNotNullTo null
+                    message.params.firstOrNull()?.let(isupport::normalize)
+                }
+            } else {
+                joinedChannels
+            }
 
         fun labeled(message: IrcMessage): IrcMessage {
             var tags = message.tags
@@ -907,7 +946,15 @@ class IrcClient(
 
                     is BatchChild.Nested -> {
                         val nestedHistory = historical || child.batch.type == "chathistory" || child.batch.type == "znc.in/playback"
-                        mapBatchTree(child.batch, nestedHistory, responseLabel)
+                        val sameLabelTargets =
+                            if (child.batch.opening.tags["label"]
+                                    ?.let { it != responseLabel } == true
+                            ) {
+                                emptySet()
+                            } else {
+                                metadataJoinTargets
+                            }
+                        mapBatchTree(child.batch, nestedHistory, responseLabel, sameLabelTargets)
                     }
                 }
             }
@@ -1152,11 +1199,19 @@ class IrcClient(
         }
         val hadLabels = previouslyUsable.any { it.substringBefore('=') == labeled }
         val hasLabels = usable.any { it.substringBefore('=') == labeled }
+        val effectiveRemoved =
+            if (removed.isEmpty()) {
+                emptySet()
+            } else {
+                removed.filterTo(linkedSetOf()) { name ->
+                    previouslyUsable.any { it.substringBefore('=') == name }
+                }
+            }
         publish(
             criticalEvents,
             IrcEvent.CapsChanged(
                 if (hasLabels && !hadLabels) added + labeled else added - labeled,
-                if (hadLabels && !hasLabels) removed + labeled else removed - labeled,
+                if (hadLabels && !hasLabels) effectiveRemoved + labeled else effectiveRemoved - labeled,
             ),
         )
     }
@@ -1233,7 +1288,13 @@ class IrcClient(
     private suspend fun sendSerialized(
         t: IrcTransport,
         msg: IrcMessage,
-    ) {
+        unlabeledWhoisLabel: String? = null,
+        onWrite: (() -> Unit)? = null,
+    ): Boolean {
+        if (msg.command.equals("WHOIS", ignoreCase = true) && (unlabeledWhoisLabel != null || !hasCap("labeled-response"))) {
+            val session = unlabeledWhois.get()?.takeIf { it.transport === t } ?: return false
+            return sendUnlabeledWhois(session, msg, rawLabel = unlabeledWhoisLabel ?: msg.tags["label"], onWrite = onWrite)
+        }
         val line = msg.serialize()
         if (msg.command.equals("JOIN", ignoreCase = true)) {
             outboundLock.withLock {
@@ -1244,27 +1305,34 @@ class IrcClient(
                         if (channel.isNotEmpty() && channel != "0") session.sent(channel, label, requestId = null)
                     }
                 }
+                onWrite?.invoke()
                 t.send(line)
             }
-            return
+            return true
         }
         if (!msg.command.equals("MODE", ignoreCase = true) || msg.params.getOrNull(1)?.contains('b') != true) {
-            sendSerialized(t, line)
-            return
+            sendSerialized(t, line, onWrite)
+            return true
         }
         outboundLock.withLock {
             if ("label" !in msg.tags || !hasCap("labeled-response")) {
                 channelBanSession.get()?.takeIf { it.transport === t }?.rawMode(msg, isupport)
             }
+            onWrite?.invoke()
             t.send(line)
         }
+        return true
     }
 
     private suspend fun sendSerialized(
         t: IrcTransport,
         line: String,
+        onWrite: (() -> Unit)? = null,
     ) {
-        outboundLock.withLock { t.send(line) }
+        outboundLock.withLock {
+            onWrite?.invoke()
+            t.send(line)
+        }
     }
 
     // -- public send API --
@@ -1273,11 +1341,18 @@ class IrcClient(
         transport?.let { sendSerialized(it, msg) }
     }
 
-    /** Send one raw IRC message and report whether a live transport accepted the write. */
-    suspend fun sendIfConnected(msg: IrcMessage): Boolean {
+    /**
+     * Send one raw IRC message. A conflicting unlabeled WHOIS is not written.
+     * [unlabeledWhoisLabel] routes its replies locally, without adding a tag to the wire command.
+     * [onWrite] runs under the outbound lock just before the transport write.
+     */
+    suspend fun sendIfConnected(
+        msg: IrcMessage,
+        unlabeledWhoisLabel: String? = null,
+        onWrite: (() -> Unit)? = null,
+    ): Boolean {
         val t = transport ?: return false
-        sendSerialized(t, msg)
-        return true
+        return sendSerialized(t, msg, unlabeledWhoisLabel, onWrite)
     }
 
     /**
@@ -1381,7 +1456,7 @@ class IrcClient(
         val t = transport ?: throw IrcDisconnectedException(msg.command, null)
         // Degrade without labeled-response: send unlabeled, complete immediately with empty list.
         if (!hasCap("labeled-response")) {
-            sendSerialized(t, msg)
+            if (!sendSerialized(t, msg)) throw unlabeledWhoisBusy()
             return CorrelatedResponse(emptyList(), rootBatch = null)
         }
         val label = labels.next()
@@ -1398,21 +1473,42 @@ class IrcClient(
         }
     }
 
+    private suspend fun sendUnlabeledWhois(
+        session: UnlabeledWhoisCorrelator,
+        message: IrcMessage,
+        rawLabel: String? = null,
+        deferred: CompletableDeferred<List<IrcMessage>>? = null,
+        onWrite: (() -> Unit)? = null,
+    ): Boolean {
+        val line = message.serialize()
+        return outboundLock.withLock {
+            if (unlabeledWhois.get() !== session || transport !== session.transport) return false
+            if (!session.register(message, isupport, rawLabel, deferred)) return false
+            onWrite?.invoke()
+            session.transport.send(line)
+            true
+        }
+    }
+
+    private fun unlabeledWhoisBusy() = IrcCommandException("WHOIS", "BUSY", "a reply for this nick is still pending")
+
     /** Collect WHOIS details without leaking unlabeled numerics into the ordinary event stream. */
     suspend fun whois(nick: String): List<IrcMessage> {
         val message = IrcMessage(command = "WHOIS", params = listOf(nick))
         if (hasCap("labeled-response")) return sendLabeled(message)
+        val session = unlabeledWhois.get() ?: throw IrcDisconnectedException("WHOIS", null)
         return unlabeledWhoisLock.withLock {
-            val t = transport ?: throw IrcDisconnectedException("WHOIS", null)
             val deferred = CompletableDeferred<List<IrcMessage>>()
-            unlabeledWhois.register(nick, deferred)
             try {
-                sendSerialized(t, message)
+                if (!sendUnlabeledWhois(session, message, deferred = deferred)) {
+                    if (unlabeledWhois.get() !== session) throw IrcDisconnectedException("WHOIS", null)
+                    throw unlabeledWhoisBusy()
+                }
                 withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
             } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
                 throw IrcTimeoutException("WHOIS")
             } finally {
-                unlabeledWhois.clear(deferred)
+                session.abandon(deferred)
             }
         }
     }

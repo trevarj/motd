@@ -14,6 +14,7 @@ data class IrcMessage(
     val command: String,
     val params: List<String> = emptyList(),
     val wireSequence: Long = 0L,
+    val selfNickAtRead: String? = null,
 ) {
     companion object {
         /** Max bytes for the non-tag portion including CRLF. */

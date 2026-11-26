@@ -56,6 +56,7 @@ sealed interface IrcEvent {
         /** Uppercase keys explicitly removed by 005, not merely awaiting advertisement. */
         val removedIsupport: Set<String> = emptySet(),
         val startsSession: Boolean = true,
+        val wireSequence: Long = 0L,
     ) : IrcEvent
 
     data class CapsChanged(
@@ -72,6 +73,8 @@ sealed interface IrcEvent {
         val messages: List<IrcMessage>,
         val openingSequence: Long = 0L,
         val openedAtNanos: Long = 0L,
+        val selfNickAtOpen: String? = null,
+        val joinResponseLabel: String? = null,
     ) : IrcEvent
 
     // -- chat
@@ -177,6 +180,7 @@ sealed interface IrcEvent {
         val realname: String?,
         val isSelf: Boolean,
         val isBot: Boolean = false,
+        val wireSequence: Long = 0L,
     ) : IrcEvent
 
     data class Parted(
@@ -213,6 +217,7 @@ sealed interface IrcEvent {
     data class Names(
         val channel: String,
         val members: List<Member>,
+        val wireSequence: Long = 0L,
     ) : IrcEvent {
         data class Member(
             val nick: String,
@@ -285,6 +290,7 @@ sealed interface IrcEvent {
 
     data class MonitorOnline(
         val identities: List<io.github.trevarj.motd.irc.proto.Prefix>,
+        val wireSequence: Long = 0L,
     ) : IrcEvent
 
     data class MonitorOffline(
