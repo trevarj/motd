@@ -1,6 +1,6 @@
 # motd macrobenchmarks
 
-Jetpack Macrobenchmark journeys against the real soju fixture. `:benchmark` instruments `:app`'s
+Jetpack Macrobenchmark journeys against local IRC fixtures. `:benchmark` instruments `:app`'s
 `benchmark` build type (`io.github.trevarj.motd.benchmark`): release code, not debuggable,
 shell-profileable, debug-signed. Debuggable builds are several times slower in Compose, so never
 compare numbers from `debug` or `e2e` builds.
@@ -30,9 +30,9 @@ risk but does not prove that no network request overlapped. Keep refresh rate fi
 dispatches swipe steps at VSync.
 
 **Each test invocation clears all app data for `io.github.trevarj.motd.benchmark`**, including any
-saved certificate trust. Keep personal data out of this package. Setup imports the local `libera`
-network through the real soju UI and accepts the certificate only if its SHA-256 matches the
-required `sojuTlsSha256` argument.
+saved certificate trust. Keep personal data out of this package. The soju fixture setup imports
+the local `libera` network through the real soju UI and accepts the certificate only if its
+SHA-256 matches the required `sojuTlsSha256` argument.
 
 ## Running on a connected device
 
@@ -101,3 +101,66 @@ Build both APKs (`:app:assembleBenchmark :benchmark:assembleBenchmark`) and run 
 self-instrumenting test APK with the corresponding class/method filter and fixture arguments.
 Use a disposable, correctly seeded fixture on a private network reachable by the test device;
 do not expose the listener publicly or use a real account.
+
+## Chat interactions (direct, loopback-only fixture)
+
+Use a dedicated physical device with the app in English and the same shell-profileable `benchmark` build. The
+`ChatInteractionBenchmark` class onboards directly as `motdbench` without TLS or credentials.
+It does not use the soju fixture or `sojuTlsSha256`.
+
+Start the Python 3.10+ stdlib fixture from the repository root and wait for
+`IRC fixture ready on 127.0.0.1:17668`:
+
+```sh
+nix develop -c python3 benchmark/chat-fixture.py
+```
+
+Use USB ADB on a dedicated device with Wi-Fi and mobile data off before creating the
+reverse: `adbd` may bind the device-side port on all interfaces even when the host
+listener binds to loopback. Do not run this fixture over wireless ADB.
+In another terminal, reverse the port and run either the full class or one journey
+(set `METHOD` to the test method name to append `#methodName` to the filter):
+
+```sh
+SERIAL='<benchmark-device-serial>'
+export ANDROID_SERIAL="$SERIAL"
+nix develop -c adb -s "$SERIAL" reverse tcp:17668 tcp:17668
+benchmark=io.github.trevarj.motd.macrobenchmark.ChatInteractionBenchmark
+nix develop -c bash ./gradlew :benchmark:connectedBenchmarkAndroidTest \
+  "-Pandroid.testInstrumentationRunnerArguments.class=${benchmark}${METHOD:+#$METHOD}"
+```
+
+Remove the reverse with `nix develop -c adb -s "$SERIAL" reverse --remove tcp:17668`
+and stop the fixture with Ctrl-C when done. `--port` changes the host listener port for
+local diagnostics; the benchmark expects port 17668 on the device. Keep the listener on
+loopback only: never expose it, tunnel it onto a public interface, or use a real IRC account.
+The fixture has no authentication, TLS, durable storage, rate limits, or other production
+server behavior beyond its small IRC subset.
+
+Both rooms reload their seed on each connection. `#bench-a` has 40 retained rows including
+a tagged embedded reply, a roster with `benchalice` and 300 unrelated nicks, and the newest
+anchor `chat-a ready`.
+`#bench-b` has `chat-b ready`. In `#bench-a`, each unique plain `0 bench fail …` payload is
+rejected immediately the first time; its next send gets a labelled self echo after 1.2 seconds
+so the app can expose pending retry separately from confirmation. `bench burst…` echoes
+normally and adds six incoming rows, ending with `incoming burst ready`.
+
+The class covers warm switching between the two loaded rooms, incremental key input, nick
+autocomplete, a long multiline accessibility replacement and edit, jumping from an embedded reply
+to its source, and failed-send controls, retry, and local deletion. Deletion reports opening the
+dialog separately from confirming removal. Failure journeys keep earlier rows: run the same
+iteration count when comparing builds. The replacement journey does not use the system
+clipboard or measure a paste.
+The nick journey waits through the suggestion debounce and verifies a real popup pick by the
+completed editor text. Its timings do not identify the first frame containing the suggestion.
+
+For fully compiled comparisons, pass `-Pandroid.testInstrumentationRunnerArguments.compilationMode=aot`.
+The default is `baseline` (use the app's Baseline Profile if present). `iterations` defaults to 10.
+
+Report results **per journey**, not as a class-wide aggregate. Keep the per-method JSON
+and Perfetto traces with the device/API, refresh rate, compilation mode and iterations;
+use the same device geometry, font scale and gesture settings for comparisons.
+Report `frameDurationCpuMs` and, where available, `frameOverrunMs` percentiles for the
+measured window. A visible or settled accessibility node marks a UI observation, not
+GPU presentation or idleness; use the trace to check frame presentation and jank. These
+numbers do not characterize production IRC latency, TLS, or soju.
