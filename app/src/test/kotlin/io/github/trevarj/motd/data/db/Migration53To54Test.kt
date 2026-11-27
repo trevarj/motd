@@ -50,7 +50,7 @@ class Migration53To54Test {
             val waiting: ScheduledMessageEntity
             try {
                 val dao = db.scheduledMessageDao()
-                assertEquals(54, db.openHelper.writableDatabase.version)
+                assertEquals(ALL_MIGRATIONS.last().endVersion, db.openHelper.writableDatabase.version)
                 assertEquals("test", db.networkDao().byId(1)?.name)
                 assertEquals("#MiXeD", db.bufferDao().observeById(1)?.displayName)
                 assertTrue(dao.observeAll().first().isEmpty())

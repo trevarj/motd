@@ -578,7 +578,19 @@ internal class TimelineRobot(
 
     fun scrollToBottom() {
         awaitTag("chat_scroll_to_bottom_fab")
-        rule.onNodeWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true).performClick()
+        val fab = rule.onNodeWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true)
+        val newestLabel = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.chat_jump_to_newest)
+        val newestAction =
+            fab
+                .fetchSemanticsNode()
+                .config
+                .getOrNull(SemanticsActions.CustomActions)
+                ?.singleOrNull { it.label == newestLabel }
+        if (newestAction != null) {
+            rule.runOnIdle { assertTrue("Jump to newest action must succeed", newestAction.action()) }
+        } else {
+            fab.performClick()
+        }
         rule.waitUntil(10_000) {
             rule
                 .onAllNodesWithTag("chat_scroll_to_bottom_fab", useUnmergedTree = true)
