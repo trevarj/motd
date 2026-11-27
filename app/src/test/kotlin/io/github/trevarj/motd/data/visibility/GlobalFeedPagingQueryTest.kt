@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.data.visibility
 
+import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -151,5 +152,61 @@ class GlobalFeedPagingQueryTest {
         // The only network id left in the query is the join itself.
         assertEquals(1, Regex("n\\.id").findAll(sql).count())
         assertFalse(sql.contains("n.id NOT IN"))
+    }
+
+    @Test
+    fun onlyReactionScopesBuildAReactionSeekAndAllCapsBothBranchesBeforeMerging() {
+        for (filter in listOf(null, ActivityFilter.MENTIONS, ActivityFilter.KEYWORDS)) {
+            val query = globalFeedPagingQuery(MessageVisibilitySpec(), limit = 50, activityFilter = filter)
+            assertFalse(query.sql, "reactions r" in query.sql)
+            assertFalse(query.sql, "UNION ALL" in query.sql)
+            assertEquals(1, query.argCount)
+        }
+
+        val mixed = globalFeedPagingQuery(MessageVisibilitySpec(), limit = 50, activityFilter = ActivityFilter.ALL)
+        assertTrue(mixed.sql, "ORDER BY m.serverTime DESC, m.id DESC LIMIT ?) UNION ALL" in mixed.sql)
+        assertTrue(mixed.sql, "ORDER BY r.activityAt DESC, r.id DESC LIMIT ?) ORDER BY feedTime DESC, feedKind DESC, feedId DESC LIMIT ?" in mixed.sql)
+        assertEquals(3, mixed.argCount)
+
+        val reactions = globalFeedPagingQuery(MessageVisibilitySpec(), limit = 50, activityFilter = ActivityFilter.REACTIONS)
+        assertTrue(reactions.sql, "r.emoji AS activity_reaction_emoji" in reactions.sql)
+        assertTrue(reactions.sql, "r.activityAt IS NOT NULL" in reactions.sql)
+        assertFalse(reactions.sql, "m.hasMention" in reactions.sql)
+        assertFalse(reactions.sql, "UNION ALL" in reactions.sql)
+        assertEquals(1, reactions.argCount)
+    }
+
+    @Test
+    fun actorFoldingIsOmittedWhenNoFoolRuleCanExcludeAReaction() {
+        val permitted = FoolPreferences(FoolsMode.DIMMED, notifyMentions = true, notifyDirectMessages = true)
+        val permittedSpec = MessageVisibilitySpec(fools = setOf("fool"), foolPreferences = mapOf("fool" to permitted))
+        for (spec in listOf(MessageVisibilitySpec(), permittedSpec)) {
+            val reactions = globalFeedPagingQuery(spec, limit = 50, activityFilter = ActivityFilter.REACTIONS)
+            assertFalse(reactions.sql, "ascii_fold" in reactions.sql)
+        }
+    }
+
+    @Test
+    fun aDifferentSourceSeeksOnTimestampWithoutComparingIds() {
+        val messageKey = GlobalFeedKey(400, 9)
+        val reactionKey = GlobalFeedKey(400, 9, GlobalFeedKind.REACTION)
+        for (seek in GlobalFeedSeek.entries) {
+            val newer = seek == GlobalFeedSeek.NEWER
+            val fromMessage = globalFeedPagingQuery(MessageVisibilitySpec(), messageKey, seek, 50, ActivityFilter.ALL)
+            assertTrue(fromMessage.sql, "AND r.activityAt ${if (newer) ">=" else "<"} ? ORDER BY" in fromMessage.sql)
+            assertEquals(7, fromMessage.argCount)
+
+            val fromReaction = globalFeedPagingQuery(MessageVisibilitySpec(), reactionKey, seek, 50, ActivityFilter.ALL)
+            assertTrue(fromReaction.sql, "AND m.serverTime ${if (newer) ">" else "<="} ? ORDER BY" in fromReaction.sql)
+            assertEquals(8, fromReaction.argCount)
+            val reactionComparison =
+                when (seek) {
+                    GlobalFeedSeek.OLDER -> "<"
+                    GlobalFeedSeek.OLDER_OR_AT -> "<="
+                    GlobalFeedSeek.NEWER -> ">"
+                }
+            assertTrue(fromReaction.sql, "AND r.activityAt = ? AND r.id $reactionComparison ? ORDER BY" in fromReaction.sql)
+            assertTrue(fromReaction.sql, "AND r.activityAt ${if (newer) ">" else "<"} ? ORDER BY" in fromReaction.sql)
+        }
     }
 }

@@ -47,7 +47,7 @@ import io.github.trevarj.motd.data.saved.SavedMessagesDao
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 58,
+    version = 59,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1293,6 +1293,42 @@ val MIGRATION_57_58 =
         }
     }
 
+val MIGRATION_58_59 =
+    object : Migration(58, 59) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """CREATE TABLE reactions_v59 (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    bufferId INTEGER NOT NULL,
+                    targetMsgid TEXT NOT NULL,
+                    actorKey TEXT NOT NULL,
+                    sender TEXT NOT NULL,
+                    emoji TEXT NOT NULL,
+                    serverTime INTEGER NOT NULL,
+                    targetEventId INTEGER REFERENCES messages(id) ON DELETE CASCADE,
+                    activityAt INTEGER,
+                    activitySender TEXT,
+                    activityHasWireTime INTEGER NOT NULL DEFAULT 0,
+                    activityEventMsgid TEXT,
+                    activityAccount TEXT
+                )""",
+            )
+            // Old pruning could strand target IDs. Preserve the visible aggregate, not a dangling link.
+            db.execSQL(
+                """INSERT INTO reactions_v59
+                       (id, bufferId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId)
+                   SELECT r.id, r.bufferId, r.targetMsgid, r.actorKey, r.sender, r.emoji, r.serverTime, m.id
+                   FROM reactions r LEFT JOIN messages m ON m.id = r.targetEventId""",
+            )
+            db.execSQL("DROP TABLE reactions")
+            db.execSQL("ALTER TABLE reactions_v59 RENAME TO reactions")
+            db.execSQL("CREATE UNIQUE INDEX index_reactions_bufferId_targetMsgid_actorKey_emoji ON reactions(bufferId, targetMsgid, actorKey, emoji)")
+            db.execSQL("CREATE INDEX index_reactions_bufferId_targetMsgid_targetEventId ON reactions(bufferId, targetMsgid, targetEventId)")
+            db.execSQL("CREATE INDEX index_reactions_activityAt ON reactions(activityAt)")
+            db.execSQL("CREATE INDEX index_reactions_targetEventId ON reactions(targetEventId)")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1363,6 +1399,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_55_56,
         MIGRATION_56_57,
         MIGRATION_57_58,
+        MIGRATION_58_59,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

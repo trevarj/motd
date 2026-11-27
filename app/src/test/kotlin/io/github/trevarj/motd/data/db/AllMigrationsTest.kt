@@ -624,6 +624,11 @@ class AllMigrationsTest {
                                (2, 1, 2000, 'me', 'me', 'PRIVMSG', 'own', 1, 0, 0, 'self',
                                 1, 2, 0, 'SERVER_TAG', 0, 0, 0)""",
                 )
+                execSQL(
+                    """INSERT INTO reactions (id, bufferId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId)
+                       VALUES (8, 1, 'own', 'nick:bob', 'Bob', '+1', 3000, 2),
+                              (9, 1, 'pruned', 'nick:bob', 'Bob', '+1', 3001, 99)""",
+                )
             }
             legacyHelper!!.close()
             legacyHelper = null
@@ -640,6 +645,17 @@ class AllMigrationsTest {
                 val events = migrated.canonicalTimelineDao().eventsForRoom(1)
                 assertEquals(listOf(0, null), events.map { it.suppressedSignals })
                 assertTrue(events.all { it.suppressionClassifiedAtOrder == null })
+                val reactions = migrated.reactionDao().forRoom(1)
+                assertEquals(listOf(8L, 9L), reactions.map { it.id })
+                assertEquals(listOf(2L, null), reactions.map { it.targetEventId })
+                assertTrue(
+                    reactions.all {
+                        it.activityAt == null && it.activitySender == null && it.activityAccount == null &&
+                            !it.activityHasWireTime && it.activityEventMsgid == null
+                    },
+                )
+                assertEquals(2, migrated.historyPruneDao().deleteOldest(1, 2_001L, presence = false, chunk = 2))
+                assertEquals(listOf(9L), migrated.reactionDao().forRoom(1).map { it.id })
             } finally {
                 migrated.close()
             }
@@ -654,10 +670,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 58` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 59` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 58
+        const val DECLARED_VERSION = 59
     }
 }

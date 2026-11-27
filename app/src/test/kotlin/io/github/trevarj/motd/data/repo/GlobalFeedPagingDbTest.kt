@@ -11,6 +11,7 @@ import io.github.trevarj.motd.data.db.MessageDao
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkIdentityEntity
+import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
@@ -21,6 +22,7 @@ import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
+import io.github.trevarj.motd.data.visibility.GlobalFeedKind
 import io.github.trevarj.motd.data.visibility.GlobalFeedSeek
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
@@ -671,9 +673,210 @@ class GlobalFeedPagingDbTest {
         }
 
     @Test
-    fun eachActivityFilterUsesTheCrossBufferMentionIndex() =
+    fun mixedActivitySeeksAcrossEqualTimesAndRowIdsInBothDirectionsAndRefreshesFromAReaction() =
         runTest {
-            for (filter in ActivityFilter.entries) {
+            val ids =
+                db.messageDao().insertAll(
+                    listOf(
+                        message(bufferA, "own parent", serverTime = 25, dedupKey = "parent", isSelf = true, msgid = "parent"),
+                        message(bufferA, "oldest", serverTime = 100, dedupKey = "oldest", hasMention = true),
+                        message(bufferB, "tied", serverTime = 300, dedupKey = "tied", hasMention = true),
+                        message(bufferB, "newest", serverTime = 500, dedupKey = "newest", hasMention = true),
+                    ),
+                )
+            val (parent, oldest, tied, newest) = ids
+            val atTie = activityReaction(parent, at = 300, actor = "alice").copy(id = tied)
+            val higherId =
+                activityReaction(parent, at = 300, actor = "bob")
+                    .copy(id = tied + 1, activitySender = "Bob", activityAccount = "bob-account")
+            val older = activityReaction(parent, at = 200, actor = "carol").copy(id = tied + 2)
+            for (reaction in listOf(atTie, higherId, older)) db.reactionDao().upsert(reaction)
+
+            val source = GlobalFeedPagingSource(db, MessageVisibilitySpec(), ActivityFilter.ALL)
+            val page1 = source.refresh(key = null, loadSize = 2)
+            val page2 = source.append(checkNotNull(page1.nextKey), loadSize = 2)
+            val page3 = source.append(checkNotNull(page2.nextKey), loadSize = 2)
+            assertEquals(
+                listOf(newest to null, parent to higherId.id, parent to atTie.id, tied to null, parent to older.id, oldest to null),
+                (page1.data + page2.data + page3.data).map { it.message.id to it.activityReaction?.id },
+            )
+
+            val reactionKey =
+                source.getRefreshKey(
+                    PagingState(listOf(page2), anchorPosition = 0, config = GLOBAL_FEED_PAGING_CONFIG, leadingPlaceholderCount = 0),
+                )
+            assertEquals(GlobalFeedKey(300, tied, GlobalFeedKind.REACTION), reactionKey)
+            val fromReaction = source.prepend(checkNotNull(reactionKey), loadSize = 2)
+            assertEquals(page1.data, fromReaction.data)
+            val fromMessage = source.prepend(checkNotNull(page2.nextKey), loadSize = 2)
+            assertEquals(listOf(higherId.id, atTie.id), fromMessage.data.map { it.activityReaction?.id })
+            val refreshed = source.refresh(key = reactionKey, loadSize = 4)
+            assertEquals(page1.data + page2.data, refreshed.data)
+
+            val reactions = GlobalFeedPagingSource(db, MessageVisibilitySpec(), ActivityFilter.REACTIONS)
+            val result = reactions.refresh(key = null, loadSize = 3)
+            assertEquals(listOf(higherId.id, atTie.id, older.id), result.data.map { it.activityReaction?.id })
+            assertEquals(listOf("Bob", "alice", "carol"), result.data.map { it.activityReaction?.sender })
+            val firstReaction = result.data.first()
+            assertEquals("bob-account", firstReaction.activityReaction?.account)
+            assertTrue(result.data.all { it.message.id == parent && it.message.serverTime == 25L && it.activityReaction?.emoji == "👍" })
+        }
+
+    @Test
+    fun reactionEligibilityChecksTheReactorAndCanonicalParentBeforeThePageLimit() =
+        runTest {
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(networkB, caseMapping = "ascii"))
+            val query = db.bufferDao().insert(buffer(networkA, "alice", type = BufferType.QUERY))
+            val archived = db.bufferDao().insert(buffer(networkB, "#archived").copy(archived = true))
+            val dismissed = db.bufferDao().insert(buffer(networkA, "#dismissed").copy(dismissed = true))
+            val closing = db.bufferDao().insert(buffer(networkA, "#closing").copy(pendingCloseAt = 1_000))
+            val redirected = db.bufferDao().insert(buffer(networkA, "#redirected").copy(redirectToRoomId = bufferA))
+            val server = db.bufferDao().insert(buffer(networkA, "server", type = BufferType.SERVER))
+            val rooms = listOf(bufferA, archived, query, dismissed, closing, redirected, server, bufferA, bufferA, bufferA)
+            val parents =
+                db.messageDao().insertAll(
+                    rooms.mapIndexed { index, room ->
+                        message(
+                            room,
+                            "parent-$index",
+                            sender = "hidden-account",
+                            serverTime = 1,
+                            dedupKey = "$index",
+                            kind = if (index == 8) MessageKind.REDACTED else MessageKind.PRIVMSG,
+                            isSelf = index != 9,
+                            msgid = "parent-$index",
+                        )
+                    },
+                )
+            db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(losingEventId = parents[7], canonicalEventId = parents[0]))
+
+            suspend fun react(
+                index: Int,
+                time: Long,
+                actor: String,
+                account: String? = null,
+            ) {
+                db.reactionDao().upsert(
+                    activityReaction(parents[index], at = time, actor = actor, room = rooms[index], target = "parent-$index")
+                        .copy(activityAccount = account),
+                )
+            }
+            react(0, 100, "approved")
+            react(1, 200, "nick{") // ASCII does not fold nick[ to nick{, even in this archived room.
+            react(2, 300, "dm-only")
+            react(0, 7_000, "nick{") // Default RFC1459 does fold those names.
+            react(0, 7_100, "not-a-fool", account = "hidden-account")
+            react(0, 7_200, "dm-only")
+            react(2, 7_300, "approved") // Channel permission is not DM permission.
+            for (index in 3..9) react(index, 8_000, "alice")
+            val orphan = activityReaction(parents[0], at = 9_000, actor = "orphan").copy(targetEventId = null)
+            val mismatchedRoom = activityReaction(parents[0], at = 9_100, actor = "wrong-room", room = bufferB)
+            val historical = activityReaction(parents[0], at = 9_200, actor = "historic").copy(activityAt = null)
+            val incomplete = activityReaction(parents[0], at = 9_300, actor = "incomplete").copy(activitySender = null)
+            for (reaction in listOf(orphan, mismatchedRoom, historical, incomplete)) db.reactionDao().upsert(reaction)
+
+            val spec =
+                MessageVisibilitySpec(
+                    fools = setOf("nick[", "hidden-account", "approved", "dm-only"),
+                    foolPreferences =
+                        mapOf(
+                            "nick[" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                            "hidden-account" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                            "approved" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                            "dm-only" to FoolPreferences(FoolsMode.BLUR, notifyDirectMessages = true),
+                        ),
+                    revealHiddenFools = true,
+                )
+            for (filter in listOf(ActivityFilter.ALL, ActivityFilter.REACTIONS)) {
+                val page = GlobalFeedPagingSource(db, spec, filter).refresh(key = null, loadSize = 3)
+                assertEquals(listOf("dm-only", "nick{", "approved"), page.data.map { it.activityReaction?.sender })
+                assertEquals(listOf(parents[2], parents[1], parents[0]), page.data.map { it.message.id })
+            }
+        }
+
+    @Test
+    fun reactionVisibilityReclassifiesCapturedSpellingWhenCaseMappingChanges() =
+        runTest {
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(networkA, caseMapping = "ascii"))
+            val ownMessage = message(bufferA, "own parent", serverTime = 25, dedupKey = "parent", isSelf = true, msgid = "parent")
+            val inserted = db.messageDao().insertAll(listOf(ownMessage))
+            val parent = inserted.single()
+            db.reactionDao().upsert(activityReaction(parent, at = 200, actor = "iλ[").copy(activitySender = "Iλ["))
+            db.reactionDao().upsert(activityReaction(parent, at = 100, actor = "t~").copy(activitySender = "T~"))
+            val spec =
+                MessageVisibilitySpec(
+                    fools = setOf("iλ{", "t^"),
+                    foolPreferences =
+                        mapOf(
+                            "iλ{" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                            "t^" to FoolPreferences(FoolsMode.HIDE),
+                        ),
+                )
+            val ascii = GlobalFeedPagingSource(db, spec, ActivityFilter.REACTIONS)
+            assertEquals(listOf("Iλ[", "T~"), ascii.refresh(key = null, loadSize = 2).data.map { it.activityReaction?.sender })
+
+            // RFC1459-strict folds brackets, but not ~. Case of the advertisement is immaterial.
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(networkA, caseMapping = "RFC1459-STRICT"))
+            assertTrue(ascii.invalid)
+            val strict = GlobalFeedPagingSource(db, spec, ActivityFilter.REACTIONS)
+            val strictRow = strict.refresh(key = null, loadSize = 1).data.single()
+            assertEquals("T~", strictRow.activityReaction?.sender)
+
+            // Removing the advertisement restores full RFC1459, so ~ also folds to ^.
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(networkA, caseMapping = null))
+            assertTrue(strict.invalid)
+            val fallback = GlobalFeedPagingSource(db, spec, ActivityFilter.REACTIONS)
+            assertTrue(fallback.refresh(key = null, loadSize = 2).data.isEmpty())
+        }
+
+    @Test
+    fun onlyReactionScopesInvalidateOnReactionAddAndRemove() =
+        runTest {
+            val ownMessage = message(bufferA, "own parent", serverTime = 25, dedupKey = "parent", isSelf = true, msgid = "parent")
+            val inserted = db.messageDao().insertAll(listOf(ownMessage))
+            val parent = inserted.single()
+            val scopes = listOf(null) + ActivityFilter.entries
+            val sources = scopes.associateWith { GlobalFeedPagingSource(db, MessageVisibilitySpec(), it) }
+            for ((filter, source) in sources) {
+                val loaded = source.refresh(key = null, loadSize = 10)
+                assertEquals(if (filter == null) 1 else 0, loaded.data.size)
+            }
+
+            val reaction = activityReaction(parent, at = 100, actor = "alice")
+            db.reactionDao().upsert(reaction)
+            assertEquals(setOf(ActivityFilter.ALL, ActivityFilter.REACTIONS), sources.filterValues { it.invalid }.keys)
+
+            val afterAdd = GlobalFeedPagingSource(db, MessageVisibilitySpec(), ActivityFilter.REACTIONS)
+            val addedRow = afterAdd.refresh(key = null, loadSize = 10).data.single()
+            assertEquals("alice", addedRow.activityReaction?.sender)
+            db.reactionDao().deleteForTarget(reaction.bufferId, reaction.targetMsgid)
+            assertTrue(afterAdd.invalid)
+            assertTrue(GlobalFeedPagingSource(db, MessageVisibilitySpec(), ActivityFilter.ALL).refresh(key = null, loadSize = 10).data.isEmpty())
+        }
+
+    private fun activityReaction(
+        parent: Long,
+        at: Long,
+        actor: String,
+        room: Long = bufferA,
+        target: String = "parent",
+    ): ReactionEntity =
+        ReactionEntity(
+            bufferId = room,
+            targetMsgid = target,
+            actorKey = actor,
+            sender = actor,
+            emoji = "👍",
+            serverTime = 10,
+            targetEventId = parent,
+            activityAt = at,
+            activitySender = actor,
+        )
+
+    @Test
+    fun messageActivityFiltersUseTheCrossBufferMentionIndex() =
+        runTest {
+            for (filter in listOf(ActivityFilter.MENTIONS, ActivityFilter.KEYWORDS)) {
                 val plan =
                     db.explainQueryPlan(
                         globalFeedPagingQuery(
@@ -691,6 +894,45 @@ class GlobalFeedPagingDbTest {
         }
 
     @Test
+    fun reactionAnchorsSeekBothTheEqualTimeIdRangeAndDifferentTimestamps() =
+        runTest {
+            for (seek in GlobalFeedSeek.entries) {
+                val range = if (seek == GlobalFeedSeek.NEWER) ">" else "<"
+                val indexSeek = "SEARCH r USING INDEX index_reactions_activityAt"
+                val tieSeek = "$indexSeek (activityAt=? AND rowid$range?)"
+                val timeSeek = "$indexSeek (activityAt$range?)"
+                val query =
+                    globalFeedPagingQuery(
+                        spec = MessageVisibilitySpec(),
+                        key = GlobalFeedKey(400, 9, GlobalFeedKind.REACTION),
+                        seek = seek,
+                        limit = 50,
+                        activityFilter = ActivityFilter.ALL,
+                    )
+                val plan = db.explainQueryPlan(query.sql)
+                assertTrue(plan.toString(), plan.any { "SEARCH m USING INDEX index_messages_hasMention_serverTime_id" in it })
+                assertTrue(plan.toString(), plan.any { tieSeek in it })
+                assertTrue(plan.toString(), plan.any { timeSeek in it })
+
+                val reactionOnly =
+                    globalFeedPagingQuery(
+                        spec = MessageVisibilitySpec(),
+                        key = GlobalFeedKey(400, 9, GlobalFeedKind.REACTION),
+                        seek = seek,
+                        limit = 50,
+                        activityFilter = ActivityFilter.REACTIONS,
+                    )
+                val reactionPlan = db.explainQueryPlan(reactionOnly.sql)
+                assertTrue(reactionPlan.toString(), reactionPlan.any { tieSeek in it })
+                assertTrue(reactionPlan.toString(), reactionPlan.any { timeSeek in it })
+            }
+
+            val firstPage = globalFeedPagingQuery(MessageVisibilitySpec(), limit = 50, activityFilter = ActivityFilter.REACTIONS)
+            val firstPlan = db.explainQueryPlan(firstPage.sql)
+            assertFalse(firstPlan.toString(), firstPlan.any { "USE TEMP B-TREE FOR ORDER BY" in it })
+        }
+
+    @Test
     fun allFeedScopesKeepTheSharedLifecycleFoolAndOrderingClauses() {
         for (filter in listOf(null) + ActivityFilter.entries) {
             val sql =
@@ -704,8 +946,15 @@ class GlobalFeedPagingDbTest {
             assertTrue(sql, "b.redirectToRoomId IS NULL" in sql)
             assertTrue(sql, "redirect.losingEventId IS NULL" in sql)
             assertTrue(sql, "m.kind IN" in sql)
-            assertTrue(sql, "normalizedActor" in sql)
-            assertTrue(sql, "ORDER BY m.serverTime DESC, m.id DESC" in sql)
+            if (filter != ActivityFilter.REACTIONS) {
+                assertTrue(sql, "m.normalizedActor" in sql)
+                assertTrue(sql, "ORDER BY m.serverTime DESC, m.id DESC" in sql)
+            }
+            if (filter == ActivityFilter.ALL || filter == ActivityFilter.REACTIONS) {
+                assertTrue(sql, "ORDER BY r.activityAt DESC, r.id DESC" in sql)
+                assertTrue(sql, "lower(replace(" in sql)
+                assertTrue(sql, "COALESCE(ni.caseMapping,'rfc1459') COLLATE NOCASE" in sql)
+            }
         }
     }
 }
@@ -735,4 +984,12 @@ private suspend fun GlobalFeedPagingSource.append(
 ): PagingSource.LoadResult.Page<GlobalFeedKey, SearchHit> =
     load(
         PagingSource.LoadParams.Append(key = key, loadSize = loadSize, placeholdersEnabled = false),
+    ) as PagingSource.LoadResult.Page
+
+private suspend fun GlobalFeedPagingSource.prepend(
+    key: GlobalFeedKey,
+    loadSize: Int,
+): PagingSource.LoadResult.Page<GlobalFeedKey, SearchHit> =
+    load(
+        PagingSource.LoadParams.Prepend(key = key, loadSize = loadSize, placeholdersEnabled = false),
     ) as PagingSource.LoadResult.Page

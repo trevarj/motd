@@ -1,13 +1,24 @@
 package io.github.trevarj.motd.service
 
+import androidx.room.withTransaction
+import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.EventRedirectEntity
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.inMemoryDb
+import io.github.trevarj.motd.data.db.message
+import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.irc.client.preferredReplyTag
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Test
+import org.junit.runner.RunWith
+import org.robolectric.RobolectricTestRunner
 
+@RunWith(RobolectricTestRunner::class)
 class ReactionMutationStoreTest {
     private class FakeStore(
         initial: ReactionEntity? = null,
@@ -26,16 +37,19 @@ class ReactionMutationStoreTest {
                     it.actorKey in actorKeys && it.emoji == emoji
             }
 
-        override suspend fun upsert(reaction: ReactionEntity) {
+        override suspend fun upsert(reaction: ReactionEntity): ReactionEntity {
             remove(reaction)
             rows += reaction
+            return reaction
         }
 
-        override suspend fun remove(reaction: ReactionEntity) {
-            rows.removeAll {
-                it.bufferId == reaction.bufferId && it.targetMsgid == reaction.targetMsgid &&
-                    it.actorKey == reaction.actorKey && it.emoji == reaction.emoji
-            }
+        override suspend fun remove(reaction: ReactionEntity): ReactionEntity? {
+            val removed =
+                rows.removeAll {
+                    it.bufferId == reaction.bufferId && it.targetMsgid == reaction.targetMsgid &&
+                        it.actorKey == reaction.actorKey && it.emoji == reaction.emoji
+                }
+            return reaction.takeIf { removed }
         }
     }
 
@@ -123,5 +137,82 @@ class ReactionMutationStoreTest {
             mutateReaction(store, previous = null, reaction("👍")) { }
 
             assertEquals(setOf("❤️", "👍"), store.rows.map { it.emoji }.toSet())
+        }
+
+    @Test
+    fun `failed unreact restores to the redirected room and parent`() =
+        runTest {
+            val db = inMemoryDb()
+            try {
+                val networkId = db.networkDao().insert(network())
+                val rooms = BufferStore(db)
+                val winner = rooms.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+                val loser = rooms.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+                val timeline = db.canonicalTimelineDao()
+                val parent = message(winner.id, "parent", serverTime = 1, dedupKey = "m1", msgid = "m1")
+                val winnerId = timeline.insertEvent(parent)
+                val loserId = timeline.insertEvent(parent.copy(bufferId = loser.id))
+                val previous = reaction().copy(bufferId = loser.id, targetEventId = loserId)
+                db.reactionDao().upsert(previous)
+                val saved = db.reactionDao().forRoom(loser.id).single()
+                val failure = IllegalStateException("send failed")
+
+                val actual =
+                    runCatching {
+                        mutateReaction(RoomReactionMutationStore(db), saved, previous) {
+                            db.withTransaction {
+                                db.roomAliasDao().markRedirect(loser.id, winner.id)
+                                timeline.upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
+                                timeline.deleteEvent(loserId)
+                            }
+                            throw failure
+                        }
+                    }.exceptionOrNull()
+
+                assertSame(failure, actual)
+                assertEquals(saved.copy(bufferId = winner.id, targetEventId = winnerId), db.reactionDao().forRoom(winner.id).single())
+                assertEquals(emptyList<ReactionEntity>(), db.reactionDao().forRoom(loser.id))
+            } finally {
+                db.close()
+            }
+        }
+
+    @Test
+    fun `failed unreact cannot restore to a tombstone or a refetched parent`() =
+        runTest {
+            val db = inMemoryDb()
+            try {
+                val networkId = db.networkDao().insert(network())
+                val rooms = BufferStore(db)
+                val timeline = db.canonicalTimelineDao()
+                for (redacted in listOf(true, false)) {
+                    val name = if (redacted) "#redacted" else "#refetched"
+                    val room = rooms.getOrCreate(networkId, name, name, BufferType.CHANNEL)
+                    val parent = message(room.id, "parent", serverTime = 1, dedupKey = "m1", msgid = "m1")
+                    val parentId = timeline.insertEvent(parent)
+                    val previous = reaction().copy(bufferId = room.id)
+                    db.reactionDao().upsert(previous)
+                    val saved = db.reactionDao().forRoom(room.id).single()
+                    val failure = IllegalStateException("send failed")
+
+                    val actual =
+                        runCatching {
+                            mutateReaction(RoomReactionMutationStore(db), saved, previous) {
+                                if (redacted) {
+                                    timeline.updateEvent(parent.copy(id = parentId, kind = MessageKind.REDACTED))
+                                } else {
+                                    timeline.deleteEvent(parentId)
+                                    timeline.insertEvent(parent)
+                                }
+                                throw failure
+                            }
+                        }.exceptionOrNull()
+
+                    assertSame(failure, actual)
+                    assertEquals(emptyList<ReactionEntity>(), db.reactionDao().forRoom(room.id))
+                }
+            } finally {
+                db.close()
+            }
         }
 }

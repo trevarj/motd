@@ -4,20 +4,24 @@ import android.database.SQLException
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.room.InvalidationTracker
+import androidx.room.withTransaction
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
+import io.github.trevarj.motd.data.visibility.GlobalFeedKind
 import io.github.trevarj.motd.data.visibility.GlobalFeedSeek
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
+import io.github.trevarj.motd.data.visibility.includesReactions
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicBoolean
 
-/** Every table the global feed projection reads: any of them can change which rows a page contains. */
-internal val GLOBAL_FEED_TABLES =
+/** Base feed tables; only the reaction scopes also observe the active reaction aggregates. */
+private val GLOBAL_FEED_TABLES =
     arrayOf("messages", "buffers", "networks", "event_redirects", "network_identity")
+private val REACTION_FEED_TABLES = GLOBAL_FEED_TABLES + "reactions"
 
 /**
  * Keyset pager over the cross-buffer stream.
@@ -25,7 +29,7 @@ internal val GLOBAL_FEED_TABLES =
  * Room's generated paging source is positional: it runs `SELECT COUNT(*)` over this five-way join
  * on every initial load — once per arriving message, since any of [GLOBAL_FEED_TABLES] invalidates it
  * — and pages with LIMIT/OFFSET, so a deep scroll recomputes every preceding row. This seeks on
- * `(serverTime, id)` instead: no COUNT, no OFFSET, one indexed page per load in either direction.
+ * `(serverTime, id)` instead: no COUNT, no OFFSET. Activity also seeks reactions by receipt time.
  *
  * Invalidation is wired by hand for the same tables Room used to observe, registered on the first
  * load and released with the source.
@@ -37,7 +41,7 @@ internal class GlobalFeedPagingSource(
     private val isAtNewest: () -> Boolean = { false },
 ) : PagingSource<GlobalFeedKey, SearchHit>() {
     private val observer =
-        object : InvalidationTracker.Observer(GLOBAL_FEED_TABLES) {
+        object : InvalidationTracker.Observer(if (activityFilter.includesReactions) REACTION_FEED_TABLES else GLOBAL_FEED_TABLES) {
             override fun onInvalidated(tables: Set<String>) = invalidate()
         }
     private val observing = AtomicBoolean(false)
@@ -58,7 +62,7 @@ internal class GlobalFeedPagingSource(
         if (activityFilter != null && isAtNewest()) return null
         return state.anchorPosition
             ?.let(state::closestItemToPosition)
-            ?.let { GlobalFeedKey(it.message.serverTime, it.message.id) }
+            ?.key()
     }
 
     override suspend fun load(params: LoadParams<GlobalFeedKey>): LoadResult<GlobalFeedKey, SearchHit> =
@@ -71,7 +75,15 @@ internal class GlobalFeedPagingSource(
                 when (params) {
                     // Anchored refresh includes the anchor row itself, so the viewport keeps its place.
                     is LoadParams.Refresh -> {
-                        if (activityFilter != null) return@withContext refreshActivity(params)
+                        if (activityFilter != null) {
+                            // Each mixed page is one SQL snapshot. An anchored refresh also keeps
+                            // its two directions together across concurrent parent/reaction writes.
+                            return@withContext if (activityFilter.includesReactions && params.key != null && params.loadSize > 1) {
+                                db.withTransaction { refreshActivity(params) }
+                            } else {
+                                refreshActivity(params)
+                            }
+                        }
                         val rows = page(params.key, GlobalFeedSeek.OLDER_OR_AT, params.loadSize)
                         LoadResult.Page(
                             data = rows,
@@ -137,4 +149,11 @@ internal class GlobalFeedPagingSource(
     }
 }
 
-private fun SearchHit.key(): GlobalFeedKey = GlobalFeedKey(message.serverTime, message.id)
+private fun SearchHit.key(): GlobalFeedKey {
+    val reaction = activityReaction
+    return if (reaction == null) {
+        GlobalFeedKey(message.serverTime, message.id)
+    } else {
+        GlobalFeedKey(reaction.at, reaction.id, GlobalFeedKind.REACTION)
+    }
+}

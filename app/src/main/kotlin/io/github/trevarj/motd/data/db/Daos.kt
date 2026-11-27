@@ -34,7 +34,9 @@ internal const val LOCAL_MESSAGE_SEARCH_LIMIT = 200
 private const val SEARCH_PROJECTION =
     """SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName,
               b.type AS bufferType, b.networkId AS networkId, b.avatarOverrideModel AS avatarOverrideModel,
-              ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes
+              ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes,
+              NULL AS activity_reaction_id, NULL AS activity_reaction_at, NULL AS activity_reaction_sender,
+              NULL AS activity_reaction_account, NULL AS activity_reaction_emoji
        FROM messages m"""
 private const val SEARCH_FTS_JOIN = "JOIN messages_fts f ON m.id = f.rowid"
 private const val SEARCH_ROOMS =
@@ -84,7 +86,7 @@ internal fun filteredMessageSearchQuery(
                         "WHEN 'rfc1459' THEN ${packed(IrcCaseMapping.Rfc1459)} " +
                         "WHEN 'rfc1459-strict' THEN ${packed(IrcCaseMapping.Rfc1459Strict)} " +
                         "ELSE ${packed(IrcCaseMapping.Ascii)} END"
-                append(" AND ${searchKeyIn(keys, searchIrcFold("m.sender"))}")
+                append(" AND ${searchKeyIn(keys, ircIdentifierSqlFold("m.sender", SEARCH_CASEMAPPING))}")
             }
             appendLine()
             append("$SEARCH_TIME_ORDER, ")
@@ -102,10 +104,10 @@ private fun searchRoomIds(
     networkKeys: String?,
 ): String {
     val mapping = "COALESCE(ri.caseMapping, 'rfc1459') COLLATE NOCASE"
-    val key = searchIrcFold(room, mapping)
-    val name = searchIrcFold("requested.name", mapping)
-    val display = searchIrcFold("requested.displayName", mapping)
-    val alias = searchIrcFold("a.value", mapping)
+    val key = ircIdentifierSqlFold(room, mapping)
+    val name = ircIdentifierSqlFold("requested.name", mapping)
+    val display = ircIdentifierSqlFold("requested.displayName", mapping)
+    val alias = ircIdentifierSqlFold("a.value", mapping)
     val networks = if (networkKeys == null) "" else "WHERE ${searchKeyIn(networkKeys, "rn.name")}"
     // Match BufferStore's exact normalized alias before considering historical refolded keys.
     // For equally exact nick aliases, the active verified nick wins over a provisional nick.
@@ -142,9 +144,9 @@ private fun searchRoomIds(
         """
 }
 
-private fun searchIrcFold(
+internal fun ircIdentifierSqlFold(
     value: String,
-    mapping: String = SEARCH_CASEMAPPING,
+    mapping: String,
 ): String {
     val brackets = """replace(replace(replace($value, '[', '{'), ']', '}'), '\', '|')"""
     val mapped =
@@ -2074,6 +2076,15 @@ data class SearchHit(
     val avatarOverrideModel: String? = null,
     val caseMapping: String? = null,
     val chanTypes: String? = null,
+    @Embedded(prefix = "activity_reaction_") val activityReaction: ActivityReaction? = null,
+)
+
+data class ActivityReaction(
+    val id: Long,
+    val at: Long,
+    val sender: String,
+    val account: String?,
+    val emoji: String,
 )
 
 data class MessageBoundaryRow(
@@ -2283,8 +2294,189 @@ interface ReactionDao {
         emoji: String,
     ): ReactionEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(r: ReactionEntity)
+    @Query(
+        """SELECT * FROM reactions
+           WHERE bufferId = :roomId AND targetMsgid = :msgid AND actorKey = :actorKey AND emoji = :emoji""",
+    )
+    suspend fun findExact(
+        roomId: RoomId,
+        msgid: String,
+        actorKey: String,
+        emoji: String,
+    ): ReactionEntity?
+
+    @Query(
+        """SELECT * FROM reactions
+           WHERE bufferId = :roomId AND targetMsgid = :targetMsgid AND emoji = :emoji
+             AND activityEventMsgid = :eventMsgid
+             AND (targetEventId IS NULL OR :parentId IS NULL OR targetEventId = :parentId)
+             AND ((actorKey LIKE 'nick:%' AND :actorKey LIKE 'account:%')
+               OR (actorKey LIKE 'account:%' AND :actorKey LIKE 'nick:%'))
+           ORDER BY id LIMIT 1""",
+    )
+    suspend fun findPromotedDelivery(
+        roomId: RoomId,
+        targetMsgid: String,
+        emoji: String,
+        eventMsgid: String,
+        parentId: TimelineEventId?,
+        actorKey: String,
+    ): ReactionEntity?
+
+    @Query(
+        """SELECT * FROM reactions
+           WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid
+             AND actorKey IN (:actorKey, :nickKey, :promotedKey) AND emoji = :emoji
+           ORDER BY id""",
+    )
+    suspend fun matchingActors(
+        bufferId: RoomId,
+        targetMsgid: String,
+        actorKey: String,
+        nickKey: String,
+        promotedKey: String?,
+        emoji: String,
+    ): List<ReactionEntity>
+
+    @Insert
+    suspend fun insert(reaction: ReactionEntity)
+
+    @Update
+    suspend fun update(reaction: ReactionEntity)
+
+    @Query("DELETE FROM reactions WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Transaction
+    suspend fun upsert(
+        r: ReactionEntity,
+        nickKey: String = r.actorKey,
+    ) {
+        val promoted = promotedDelivery(r, r.bufferId)
+        val actorKey = if (promoted != null && r.actorKey.startsWith("nick:")) promoted.actorKey else r.actorKey
+        val existing = matchingActors(r.bufferId, r.targetMsgid, actorKey, nickKey, promoted?.actorKey, r.emoji)
+        if (existing.isEmpty()) {
+            insert(r)
+            return
+        }
+        var firstActivity: ReactionEntity? = null
+        var latestActivity: ReactionEntity? = null
+        for (row in existing) {
+            if (row.activityAt == null || !r.sharesTargetWith(row)) continue
+            if (firstActivity == null) firstActivity = row
+            latestActivity = latestActivity?.latestOccurrence(row) ?: row
+        }
+        val retained = firstActivity ?: existing.firstOrNull { it.actorKey == actorKey } ?: existing.first()
+        existing.forEach { if (it.id != retained.id) deleteById(it.id) }
+        val activity = latestActivity?.latestOccurrence(r, arrivingLive = true) ?: r
+        val updated = r.withTargetAndActivity(retained.id, r.targetEventId ?: retained.targetEventId, activity, actorKey)
+        if (updated != retained) update(updated)
+    }
+
+    @Query("SELECT * FROM reactions WHERE bufferId = :bufferId ORDER BY id")
+    suspend fun forRoom(bufferId: RoomId): List<ReactionEntity>
+
+    /** Part of the caller's canonical room merge transaction. */
+    suspend fun mergeRooms(
+        loserId: RoomId,
+        winnerId: RoomId,
+    ) {
+        forRoom(loserId).forEach { moveToRoom(it, winnerId) }
+    }
+
+    @Query(
+        """SELECT * FROM reactions
+           WHERE bufferId IN (SELECT id FROM buffers WHERE networkId = :networkId)
+             AND ((targetMsgid = :msgid AND targetEventId IS NULL)
+               OR (targetEventId = :parentId
+                 AND (bufferId != :parentRoomId OR :redacted OR (NOT :eligible AND activityAt IS NOT NULL))))
+           ORDER BY bufferId != :parentRoomId, id""",
+    )
+    suspend fun targetsToResolve(
+        networkId: Long,
+        msgid: String,
+        parentId: TimelineEventId,
+        parentRoomId: RoomId,
+        eligible: Boolean,
+        redacted: Boolean,
+    ): List<ReactionEntity>
+
+    /** Part of the caller's mutation transaction. Attach provisional rows only to their exact network target. */
+    suspend fun resolveTarget(
+        networkId: Long,
+        msgid: String,
+        parent: TimelineEventEntity,
+    ) {
+        val eligible = parent.canReceiveReactionActivity
+        val redacted = parent.kind == MessageKind.REDACTED
+        targetsToResolve(networkId, msgid, parent.id, parent.bufferId, eligible, redacted).forEach { row ->
+            if (redacted) {
+                deleteById(row.id)
+            } else {
+                val resolved = row.withTargetAndActivity(row.id, parent.id, row.takeIf { eligible })
+                if (row.bufferId == parent.bufferId) {
+                    update(resolved)
+                } else {
+                    moveToRoom(resolved, parent.bufferId, resolvingTarget = true)
+                }
+            }
+        }
+    }
+
+    private suspend fun promotedDelivery(
+        reaction: ReactionEntity,
+        roomId: RoomId,
+    ): ReactionEntity? {
+        val eventMsgid = reaction.activityEventMsgid ?: return null
+        return findPromotedDelivery(roomId, reaction.targetMsgid, reaction.emoji, eventMsgid, reaction.targetEventId, reaction.actorKey)
+    }
+
+    private suspend fun moveToRoom(
+        original: ReactionEntity,
+        roomId: RoomId,
+        resolvingTarget: Boolean = false,
+    ) {
+        val duplicate = promotedDelivery(original, roomId)
+        val incoming =
+            if (duplicate == null) {
+                original
+            } else {
+                // Only these two storage keys are backed by the same wire addition.
+                val activity = if (original.id < duplicate.id) original else duplicate
+                val account = if (original.actorKey.startsWith("account:")) original else duplicate
+                deleteById(if (activity.id == original.id) duplicate.id else original.id)
+                account.withTargetAndActivity(activity.id, original.targetEventId ?: duplicate.targetEventId, activity)
+            }
+        val resident = findExact(roomId, incoming.targetMsgid, incoming.actorKey, incoming.emoji)?.takeUnless { it.id == incoming.id }
+        if (resident == null) {
+            update(incoming.copy(bufferId = roomId))
+            return
+        }
+        // A provisional route must never transfer activity between two distinct attached targets.
+        val sameTarget = incoming.sharesTargetWith(resident)
+        if (!sameTarget && resolvingTarget) {
+            deleteById(resident.id)
+            update(incoming.copy(bufferId = roomId))
+            return
+        }
+        val firstActivity =
+            when {
+                !sameTarget || incoming.activityAt == null -> resident.takeIf { it.activityAt != null }
+                resident.activityAt == null || incoming.id < resident.id -> incoming
+                else -> resident
+            }
+        val activity =
+            if (sameTarget && firstActivity != null) {
+                firstActivity.latestOccurrence(if (firstActivity.id == incoming.id) resident else incoming)
+            } else {
+                firstActivity
+            }
+        val retainedId = firstActivity?.id ?: resident.id
+        deleteById(if (retainedId == resident.id) incoming.id else resident.id)
+        val merged =
+            resident.withTargetAndActivity(retainedId, resident.targetEventId ?: incoming.targetEventId, activity)
+        if (merged != resident) update(merged)
+    }
 
     @Query("DELETE FROM reactions WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid")
     suspend fun deleteForTarget(
@@ -2306,22 +2498,68 @@ interface ReactionDao {
 
     @Query(
         """DELETE FROM reactions
+           WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid
+             AND actorKey IN (:actorKey, :nickKey) AND emoji = :emoji
+             AND (:live OR activityAt IS NULL OR (activityHasWireTime AND activityAt < :historicalTime))""",
+    )
+    suspend fun deleteFromWire(
+        bufferId: RoomId,
+        targetMsgid: String,
+        actorKey: String,
+        nickKey: String,
+        emoji: String,
+        live: Boolean,
+        historicalTime: Long?,
+    )
+
+    @Query(
+        """DELETE FROM reactions
            WHERE bufferId = :bufferId AND targetMsgid = :targetMsgid AND emoji = :emoji
-              AND (
-                  (:deleteBaseActor = 1 AND actorKey = :baseActorKey) OR
-                  (actorKey >= :legacyPrefix AND actorKey < :legacyUpperBound)
-              )""",
+             AND actorKey >= :legacyPrefix AND actorKey < :legacyUpperBound""",
     )
     suspend fun deleteActorAliases(
         bufferId: Long,
         targetMsgid: String,
-        baseActorKey: String,
-        deleteBaseActor: Boolean,
         legacyPrefix: String,
         legacyUpperBound: String,
         emoji: String,
     ): Int
 }
+
+private fun ReactionEntity.sharesTargetWith(other: ReactionEntity): Boolean = targetEventId == null || other.targetEventId == null || targetEventId == other.targetEventId
+
+/** An untimed live arrival needs distinct wire IDs before it can supersede a stored occurrence. */
+private fun ReactionEntity.latestOccurrence(
+    other: ReactionEntity,
+    arrivingLive: Boolean = false,
+): ReactionEntity {
+    val after = other.activityAt ?: return this
+    val firstId = activityEventMsgid
+    val nextId = other.activityEventMsgid
+    if (firstId != null && nextId != null) {
+        if (firstId == nextId) return this
+        if (arrivingLive && !other.activityHasWireTime) return other
+    }
+    val before = activityAt ?: return this
+    return if (activityHasWireTime && other.activityHasWireTime && after > before) other else this
+}
+
+private fun ReactionEntity.withTargetAndActivity(
+    id: Long,
+    targetEventId: TimelineEventId?,
+    source: ReactionEntity?,
+    actorKey: String = this.actorKey,
+): ReactionEntity =
+    copy(
+        id = id,
+        actorKey = actorKey,
+        targetEventId = targetEventId,
+        activityAt = source?.activityAt,
+        activitySender = source?.activitySender,
+        activityHasWireTime = source?.activityHasWireTime == true,
+        activityEventMsgid = source?.activityEventMsgid,
+        activityAccount = source?.activityAccount,
+    )
 
 @Dao
 interface UserDao {
@@ -2458,21 +2696,6 @@ interface RoomAliasDao {
 
     @Query("DELETE FROM members WHERE bufferId = :loserId")
     suspend fun deleteMembers(loserId: RoomId)
-
-    @Query(
-        """INSERT OR IGNORE INTO reactions(
-               bufferId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId
-           )
-           SELECT :winnerId, targetMsgid, actorKey, sender, emoji, serverTime, targetEventId
-           FROM reactions WHERE bufferId = :loserId""",
-    )
-    suspend fun copyReactions(
-        loserId: RoomId,
-        winnerId: RoomId,
-    )
-
-    @Query("DELETE FROM reactions WHERE bufferId = :loserId")
-    suspend fun deleteReactions(loserId: RoomId)
 
     @Query("UPDATE buffers SET redirectToRoomId = :winnerId WHERE redirectToRoomId = :loserId")
     suspend fun repointRedirects(
@@ -2873,22 +3096,6 @@ interface CanonicalTimelineDao {
            WHERE bufferId = :bufferId AND replyToMsgid = :msgid AND replyToEventId IS NULL""",
     )
     suspend fun resolveReplies(
-        bufferId: RoomId,
-        msgid: String,
-        parentId: TimelineEventId,
-    )
-
-    @Query(
-        """UPDATE OR REPLACE reactions SET bufferId = :bufferId, targetEventId = :parentId
-           WHERE targetMsgid = :msgid
-             AND (targetEventId IS NULL OR (targetEventId = :parentId AND bufferId != :bufferId))
-             AND bufferId IN (
-                 SELECT candidate.id FROM buffers candidate
-                 JOIN buffers parent ON parent.id = :bufferId
-                 WHERE candidate.networkId = parent.networkId
-             )""",
-    )
-    suspend fun resolveReactions(
         bufferId: RoomId,
         msgid: String,
         parentId: TimelineEventId,

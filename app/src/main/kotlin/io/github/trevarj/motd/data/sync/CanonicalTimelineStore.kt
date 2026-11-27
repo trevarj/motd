@@ -670,7 +670,9 @@ class CanonicalTimelineStore
 
             incoming.msgid?.let { msgid ->
                 dao.resolveReplies(canonical.bufferId, msgid, canonical.id)
-                dao.resolveReactions(canonical.bufferId, msgid, canonical.id)
+            }
+            (incoming.msgid ?: canonical.msgid)?.let { msgid ->
+                db.reactionDao().resolveTarget(observation.networkId, msgid, canonical)
             }
             val replyId =
                 incoming.replyToMsgid?.let { replyMsgid ->
@@ -771,8 +773,9 @@ class CanonicalTimelineStore
             roomId: RoomId,
         ): List<TimelineEventId> =
             db.savedMessagesDao().roomMessagesToRedact(networkId, roomId).map { event ->
-                dao.updateEvent(event.redactedFromMarker())
-                db.reactionDao().deleteForTarget(roomId, checkNotNull(event.msgid))
+                val redacted = event.redactedFromMarker()
+                dao.updateEvent(redacted)
+                db.reactionDao().resolveTarget(networkId, checkNotNull(event.msgid), redacted)
                 event.id
             }
 
@@ -920,6 +923,9 @@ class CanonicalTimelineStore
             dao.repointReplies(loser.id, winner.id)
             db.composerDraftDao().repointReplies(loser.id, winner.id)
             dao.repointReactions(loser.id, winner.id)
+            if (merged.kind == MessageKind.REDACTED) {
+                merged.msgid?.let { db.reactionDao().resolveTarget(networkId, it, merged) }
+            }
             dao.repointEventRedirects(loser.id, winner.id)
             dao.upsertEventRedirect(EventRedirectEntity(loser.id, winner.id))
             dao.deleteEvent(loser.id)

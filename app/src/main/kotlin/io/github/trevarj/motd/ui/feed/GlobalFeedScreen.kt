@@ -4,6 +4,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -13,7 +14,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -27,8 +30,10 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DynamicFeed
+import androidx.compose.material.icons.outlined.SentimentSatisfiedAlt
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -38,12 +43,14 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -53,6 +60,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
@@ -69,6 +77,7 @@ import androidx.paging.compose.itemContentType
 import androidx.paging.compose.itemKey
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.ai.AiFeature
+import io.github.trevarj.motd.data.db.ActivityReaction
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.SearchHit
@@ -79,6 +88,7 @@ import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordChannelLabel
 import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.ai.AiTextSheet
 import io.github.trevarj.motd.ui.ai.AiTextViewModel
@@ -174,7 +184,7 @@ fun GlobalFeedScreen(
     }
 }
 
-/** Read-only stream of mentions and keyword highlights, with exact-message jumps. */
+/** Read-only stream of mentions, keyword highlights, and reactions, with exact-message jumps. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ActivityScreen(
@@ -293,8 +303,8 @@ internal fun ActivityFilterChips(
                 .fillMaxWidth()
                 .selectableGroup()
                 .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                .padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         ActivityFilter.entries.forEach { option ->
             val label =
@@ -302,13 +312,25 @@ internal fun ActivityFilterChips(
                     ActivityFilter.ALL -> R.string.activity_filter_all
                     ActivityFilter.MENTIONS -> R.string.activity_filter_mentions
                     ActivityFilter.KEYWORDS -> R.string.activity_filter_keywords
+                    ActivityFilter.REACTIONS -> R.string.activity_filter_reactions
                 }
             val selected = filter == option
+            val icon =
+                when {
+                    selected -> Icons.Filled.Check
+                    option == ActivityFilter.REACTIONS -> Icons.Outlined.SentimentSatisfiedAlt
+                    else -> null
+                }
             FilterChip(
                 selected = selected,
                 onClick = { onFilterSelected(option) },
                 label = { Text(stringResource(label)) },
-                leadingIcon = if (selected) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
+                leadingIcon =
+                    if (icon == null) {
+                        null
+                    } else {
+                        { Icon(icon, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                    },
                 modifier = Modifier.testTag("activity_filter_${option.name.lowercase()}"),
             )
         }
@@ -371,11 +393,24 @@ internal fun GlobalFeedContent(
                     ActivityFilter.ALL -> R.string.activity_empty
                     ActivityFilter.MENTIONS -> R.string.activity_mentions_empty
                     ActivityFilter.KEYWORDS -> R.string.activity_keywords_empty
+                    ActivityFilter.REACTIONS -> R.string.activity_reactions_empty
+                }
+            val message =
+                when (activityFilter) {
+                    null -> R.string.feed_empty_message
+                    ActivityFilter.ALL -> R.string.activity_all_empty_message
+                    ActivityFilter.MENTIONS, ActivityFilter.KEYWORDS -> R.string.activity_empty_message
+                    ActivityFilter.REACTIONS -> R.string.activity_reactions_empty_message
                 }
             EmptyState(
-                icon = if (activityFilter == null) Icons.Outlined.DynamicFeed else Icons.Outlined.Bolt,
+                icon =
+                    when (activityFilter) {
+                        null -> Icons.Outlined.DynamicFeed
+                        ActivityFilter.REACTIONS -> Icons.Outlined.SentimentSatisfiedAlt
+                        else -> Icons.Outlined.Bolt
+                    },
                 title = stringResource(title),
-                message = stringResource(if (activityFilter == null) R.string.feed_empty_message else R.string.activity_empty_message),
+                message = stringResource(message),
                 modifier = modifier,
                 ghostRows = true,
             )
@@ -415,8 +450,7 @@ private fun GlobalFeedList(
         val topKey =
             rows.itemSnapshotList.items
                 .firstOrNull()
-                ?.message
-                ?.id
+                ?.feedItemKey
         val previousTop = remember(listState) { ActivityTopItemTracker(topKey) }
         if (topKey != previousTop.key) {
             val repin =
@@ -433,9 +467,11 @@ private fun GlobalFeedList(
     ) {
         items(
             count = rows.itemCount,
-            // The canonical row id: stable across invalidation, unlike a merged-stream position.
-            key = rows.itemKey { it.message.id },
-            contentType = rows.itemContentType { messageContentType(it.message, collapseSystemEvents = false) },
+            key = rows.itemKey { it.feedItemKey },
+            contentType =
+                rows.itemContentType {
+                    if (it.activityReaction != null) "activity_reaction" else messageContentType(it.message, collapseSystemEvents = false)
+                },
         ) { index ->
             rows[index]?.let { row ->
                 GlobalFeedLineRow(
@@ -456,8 +492,12 @@ private fun GlobalFeedList(
 }
 
 private class ActivityTopItemTracker(
-    var key: Long?,
+    var key: Any?,
 )
+
+// Message keys are Longs; reaction keys are namespaced strings, both saveable by Compose.
+private val SearchHit.feedItemKey: Any
+    get() = activityReaction?.let { "reaction:${it.id}" } ?: message.id
 
 /** Adjacent-activity navigation. Holding Up returns to the newest event. */
 @Composable
@@ -643,8 +683,6 @@ private fun GlobalFeedLineRow(
     visibilitySpec: MessageVisibilitySpec,
 ) {
     val message = row.message
-    val dickordEnabled = LocalDickordLabsEnabled.current
-    val displaySender = dickordNickLabel(message.sender, dickordEnabled)
     // Rows arrive from many networks: each carries its own advertised casemap/chantypes, so mention
     // detection is decided per row rather than from one screen-wide default.
     val identityRules =
@@ -652,8 +690,20 @@ private fun GlobalFeedLineRow(
             IrcIdentityRules.from(row.caseMapping, row.chanTypes)
         }
     val policy = remember(visibilitySpec, identityRules) { MessageVisibilityPolicy(visibilitySpec, identityRules) }
+    val reaction = row.activityReaction
+    if (reaction != null) {
+        val foolMode = policy.foolPreferences(reaction.account, identityRules.normalize(reaction.sender))?.visibility
+        if (foolMode != FoolsMode.HIDE) {
+            ActivityReactionRow(row, reaction, showNetwork, formatTime, foolMode) {
+                onOpenMessage(message.bufferId, message.id, message.serverTime)
+            }
+        }
+        return
+    }
     val foolMode = if (activity) policy.foolPreferences(message)?.visibility else null
     if (foolMode != null && !policy.mentionAttention(message, row.bufferType == BufferType.QUERY)) return
+    val dickordEnabled = LocalDickordLabsEnabled.current
+    val displaySender = dickordNickLabel(message.sender, dickordEnabled)
     val newerMessage = newer?.message
     // Activity skips intervening chat lines, so each row needs its own conversation label.
     val sameBuffer = !activity && newerMessage?.bufferId == message.bufferId
@@ -711,6 +761,85 @@ private fun GlobalFeedLineRow(
                 onClickLabel = stringResource(if (activity) R.string.activity_open_message else R.string.feed_open_message),
                 onLongPress = { onTranslateMessage?.invoke(message) },
                 onLongPressLabel = onTranslateMessage?.let { stringResource(R.string.ai_text_translate_message) },
+            )
+        }
+    }
+}
+
+@Composable
+private fun ActivityReactionRow(
+    row: SearchHit,
+    reaction: ActivityReaction,
+    showNetwork: Boolean,
+    formatTime: (Long) -> String,
+    foolMode: FoolsMode?,
+    onOpenMessage: () -> Unit,
+) {
+    val dickordEnabled = LocalDickordLabsEnabled.current
+    val sender = dickordNickLabel(reaction.sender, dickordEnabled)
+    val conversation = conversationTag(dickordChannelLabel(row.bufferDisplayName, dickordEnabled), row.networkName, showNetwork)
+    val time = remember(reaction.at, formatTime) { formatTime(reaction.at) }
+    val colors = MaterialTheme.colorScheme
+    val typography = MaterialTheme.typography
+    val revealed = if (foolMode == FoolsMode.BLUR) remember(reaction.id) { mutableStateOf(false) } else null
+    val concealed = revealed?.value == false
+    Column(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .heightIn(min = 48.dp)
+                .testTag("activity_reaction_${reaction.id}")
+                .clickable(
+                    onClickLabel =
+                        stringResource(if (concealed) R.string.activity_reaction_reveal else R.string.activity_open_reacted_message),
+                    role = Role.Button,
+                    onClick = {
+                        if (revealed != null && !revealed.value) revealed.value = true else onOpenMessage()
+                    },
+                ).alpha(if (foolMode == FoolsMode.DIMMED) 0.7f else 1f)
+                .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Text(
+            text = conversation,
+            style = typography.labelSmall,
+            color = colors.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text = time,
+            style = typography.labelSmall,
+            color = colors.onSurfaceVariant,
+            modifier = Modifier.fillMaxWidth(),
+        )
+        Text(
+            text =
+                when {
+                    foolMode == FoolsMode.COLLAPSE -> stringResource(R.string.chat_fool_hidden, sender)
+                    concealed -> stringResource(R.string.activity_reaction_concealed_summary, sender)
+                    else -> stringResource(R.string.activity_reaction_summary, sender, reaction.emoji)
+                },
+            style = typography.labelMedium,
+            color = colors.onSurface,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+        )
+        if (foolMode != FoolsMode.COLLAPSE) {
+            val preview =
+                if (concealed) {
+                    stringResource(R.string.activity_reaction_preview_hidden)
+                } else {
+                    val body = row.message.ircFormattedText ?: row.message.text
+                    remember(body) { plainIrcText(body) }
+                }
+            Text(
+                text = preview,
+                style = typography.bodySmall,
+                color = colors.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
         }
     }

@@ -3322,6 +3322,176 @@ class EventProcessorTest {
             val reactions = db.reactionDao().observeFor(buffer.id, listOf("m1")).first()
             assertEquals(1, reactions.size)
             assertEquals("👍", reactions.single().emoji)
+            assertNull(reactions.single().activityAt)
+        }
+
+    @Test
+    fun reactionActivityUsesCanonicalTargetAndSurvivesAccountPromotionAndHistoryRefresh() =
+        runTest {
+            processor.onRegistered(networkId, "me", mapOf("CASEMAPPING" to "ascii"))
+            val parent =
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "Opaque-Parent"),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("me"),
+                    target = "#actual",
+                    text = "my message",
+                    isSelf = true,
+                    replyToMsgid = null,
+                )
+            processor.process(networkId, parent)
+            val room = checkNotNull(db.bufferDao().byName(networkId, "#actual"))
+            val parentId = checkNotNull(db.messageDao().byMsgid(room.id, "Opaque-Parent")).id
+            val reactions = db.reactionDao()
+            val add =
+                IrcEvent.TagMessage(
+                    ctx = ctx(msgid = "add", time = 2_000),
+                    source = Prefix("B[ob]"),
+                    target = "me",
+                    typing = null,
+                    reactEmoji = "👍",
+                    reactTargetMsgid = "Opaque-Parent",
+                )
+            processor.process(networkId, add)
+            val first = reactions.forRoom(room.id).single()
+            assertEquals(parentId, first.targetEventId)
+            assertEquals(2_000L, first.activityAt)
+            assertEquals("B[ob]", first.activitySender)
+            assertEquals("add", first.activityEventMsgid)
+            assertNull(first.activityAccount)
+            assertNull(db.bufferDao().byName(networkId, "b[ob]"))
+
+            val accountEcho = add.copy(ctx = ctx(msgid = "add", time = 2_100, account = "bob-account"), source = Prefix("B[OB]"))
+            processor.process(networkId, accountEcho)
+            processor.process(networkId, IrcEvent.HistoryBatch("#actual", listOf(accountEcho.copy(target = "#actual"))))
+            val refreshed = reactions.forRoom(room.id).single()
+            assertEquals(first.id, refreshed.id)
+            assertEquals("account:bob-account", refreshed.actorKey)
+            assertEquals(first.activityAt, refreshed.activityAt)
+            assertEquals(first.activitySender, refreshed.activitySender)
+            assertEquals(first.activityEventMsgid, refreshed.activityEventMsgid)
+            assertNull(refreshed.activityAccount)
+
+            processor.process(
+                networkId,
+                IrcEvent.Raw(IrcMessage.parse("@account=bob-account;+draft/unreact=👍;+reply=Opaque-Parent :b[ob]!u@h TAGMSG me")),
+            )
+            assertTrue(reactions.forRoom(room.id).isEmpty())
+            processor.process(networkId, IrcEvent.HistoryBatch("#actual", listOf(accountEcho.copy(target = "#actual"))))
+            assertNull(reactions.forRoom(room.id).single().activityAt)
+            processor.process(networkId, accountEcho.copy(ctx = ctx(msgid = "new-add", time = 3_000, account = "bob-account")))
+            val readded = reactions.forRoom(room.id).single()
+            assertNotEquals(first.id, readded.id)
+            assertEquals(3_000L, readded.activityAt)
+
+            // This add is a new occurrence even though the client missed the intervening unreact.
+            val latest = accountEcho.copy(ctx = ctx(msgid = "missed-unreact-readd", time = 5_000, account = "bob-account"))
+            processor.process(networkId, latest)
+            val latestRow = reactions.forRoom(room.id).single()
+            assertEquals(readded.id, latestRow.id)
+            assertEquals(5_000L, latestRow.activityAt)
+            assertEquals("missed-unreact-readd", latestRow.activityEventMsgid)
+
+            processor.process(networkId, IrcEvent.HistoryBatch("#actual", listOf(accountEcho.copy(target = "#actual"))))
+            val oldRemoval =
+                IrcEvent.Raw(
+                    IrcMessage.parse(
+                        "@time=1970-01-01T00:00:04.000Z;account=bob-account;+draft/unreact=👍;" +
+                            "+reply=Opaque-Parent :b[ob]!u@h TAGMSG #actual",
+                    ),
+                )
+            val undated = IrcEvent.Raw(oldRemoval.message.copy(tags = oldRemoval.message.tags - "time"))
+            processor.process(networkId, IrcEvent.HistoryBatch("#actual", listOf(oldRemoval, undated)))
+            assertEquals(5_000L, reactions.forRoom(room.id).single().activityAt)
+
+            val newer = IrcEvent.Raw(oldRemoval.message.copy(tags = oldRemoval.message.tags + ("time" to "1970-01-01T00:00:06.000Z")))
+            processor.process(networkId, IrcEvent.HistoryBatch("#actual", listOf(newer)))
+            assertTrue(reactions.forRoom(room.id).isEmpty())
+
+            val receipt = accountEcho.copy(ctx = ctx(time = 3_000, account = "bob-account").copy(serverTimeSource = ServerTimeSource.LOCAL))
+            processor.process(networkId, receipt)
+            processor.process(networkId, IrcEvent.ReplayBatch("#actual", listOf(newer)))
+            assertEquals(3_000L, reactions.forRoom(room.id).single().activityAt)
+            processor.process(networkId, newer)
+            assertTrue(reactions.forRoom(room.id).isEmpty())
+
+            processor.process(networkId, accountEcho.copy(ctx = ctx(msgid = "account-first", time = 7_000, account = "bob-account")))
+            val firstByAccount = reactions.forRoom(room.id).single()
+            val duplicateWithoutTime = ctx(msgid = "account-first", time = 7_100).copy(serverTimeSource = ServerTimeSource.LOCAL)
+            processor.process(networkId, add.copy(ctx = duplicateWithoutTime))
+            val nickEcho = reactions.forRoom(room.id).single()
+            assertEquals(firstByAccount.id, nickEcho.id)
+            assertEquals("account:bob-account", nickEcho.actorKey)
+            assertEquals("bob-account", nickEcho.activityAccount)
+            assertEquals(7_000L, nickEcho.activityAt)
+
+            val untimed = duplicateWithoutTime.copy(msgid = "distinct-untimed", account = "bob-account", serverTime = 8_000)
+            processor.process(networkId, accountEcho.copy(ctx = untimed))
+            val untimedRow = reactions.forRoom(room.id).single()
+            assertEquals(firstByAccount.id, untimedRow.id)
+            assertEquals(8_000L, untimedRow.activityAt)
+            assertEquals("distinct-untimed", untimedRow.activityEventMsgid)
+            assertFalse(untimedRow.activityHasWireTime)
+            val missedRemoval = IrcEvent.Raw(oldRemoval.message.copy(tags = oldRemoval.message.tags + ("time" to "1970-01-01T00:00:07.500Z")))
+            processor.process(networkId, IrcEvent.HistoryBatch("#actual", listOf(missedRemoval)))
+            assertEquals(untimedRow, reactions.forRoom(room.id).single())
+        }
+
+    @Test
+    fun historyReplayPushSelfAndSuppressedActorsDoNotCreateReactionActivity() =
+        runTest {
+            val own =
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "own"),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("me"),
+                    target = "#chan",
+                    text = "parent",
+                    isSelf = true,
+                    replyToMsgid = null,
+                )
+            db.networkIgnoreDao().upsert(NetworkIgnoreEntity(networkId = networkId, pattern = "blocked!*@*", createdAt = 1))
+            db.networkIgnoreDao().upsert(
+                NetworkIgnoreEntity(
+                    networkId = networkId,
+                    pattern = "quiet!*@*",
+                    createdAt = 1,
+                    dropMessages = false,
+                    suppressedSignals = SUPPRESS_HIGHLIGHT,
+                ),
+            )
+            processor.process(networkId, own)
+
+            fun add(nick: String) = IrcEvent.TagMessage(ctx(time = 2_000), Prefix(nick, "u", "h"), "#chan", null, "👍", "own")
+
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(add("historic"))))
+            processor.process(networkId, IrcEvent.ReplayBatch("#chan", listOf(add("replay"))))
+            processor.processPush(networkId, add("push"))
+            listOf("ME", "blocked", "quiet").forEach { processor.process(networkId, add(it)) }
+            val account = add("Bob").copy(ctx = ctx(time = 2_000, account = "bob-account"))
+            processor.process(networkId, account)
+
+            val room = checkNotNull(db.bufferDao().byName(networkId, "#chan"))
+            val rows = db.reactionDao().forRoom(room.id)
+            assertEquals(setOf("historic", "replay", "push", "ME", "blocked", "quiet", "Bob"), rows.map { it.sender }.toSet())
+            assertEquals("bob-account", rows.filter { it.activityAt != null }.single().activityAccount)
+
+            val otherNetwork =
+                db.networkDao().insert(checkNotNull(db.networkDao().byId(networkId)).copy(id = 0, name = "Other network"))
+            processor.onRegistered(otherNetwork, "me", emptyMap())
+            val otherRoom = BufferStore(db).getOrCreate(otherNetwork, "#chan", "#chan", BufferType.CHANNEL)
+            processor.process(otherNetwork, add("Pat"))
+            val unresolved = db.reactionDao().forRoom(otherRoom.id).single()
+            assertNull(unresolved.targetEventId)
+            processor.process(otherNetwork, own.copy(source = Prefix("other"), isSelf = false))
+            val otherReaction = db.reactionDao().forRoom(otherRoom.id).single()
+            assertEquals(db.messageDao().byMsgid(otherRoom.id, "own")?.id, otherReaction.targetEventId)
+            assertNull(otherReaction.activityAt)
+            assertEquals(rows, db.reactionDao().forRoom(room.id))
+
+            processor.process(networkId, IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#chan", "own", null))
+            processor.process(networkId, account)
+            assertTrue(db.reactionDao().forRoom(room.id).isEmpty())
         }
 
     @Test
@@ -4078,14 +4248,9 @@ class EventProcessorTest {
                     reactTargetMsgid = "late-parent",
                 ),
             )
-            assertEquals(
-                1,
-                db
-                    .reactionDao()
-                    .observeFor(buffer.id, listOf("late-parent"))
-                    .first()
-                    .size,
-            )
+            val before = db.reactionDao().forRoom(buffer.id).single()
+            assertNull(before.targetEventId)
+            assertEquals(5L, before.activityAt)
 
             processor.process(
                 networkId,
@@ -4104,6 +4269,10 @@ class EventProcessorTest {
             assertEquals("👍", reactions.single().emoji)
             assertEquals("bob", reactions.single().sender)
             assertEquals(db.messageDao().byMsgid(buffer.id, "late-parent")?.id, reactions.single().targetEventId)
+            assertEquals(before.id, reactions.single().id)
+            assertEquals(5L, reactions.single().activityAt)
+            assertEquals(1, db.historyPruneDao().deleteOldest(buffer.id, 7L, presence = false, chunk = 1))
+            assertTrue(db.reactionDao().forRoom(buffer.id).isEmpty())
         }
 
     @Test
@@ -4165,6 +4334,7 @@ class EventProcessorTest {
                     .first()
                     .single()
             assertEquals(parent.id, reaction.targetEventId)
+            assertNull(reaction.activityAt)
             assertTrue(
                 db
                     .reactionDao()
@@ -4184,10 +4354,10 @@ class EventProcessorTest {
                 IrcEvent.ChatMessage(
                     ctx = ctx(msgid = "m1"),
                     kind = IrcEvent.ChatKind.PRIVMSG,
-                    source = Prefix("alice"),
+                    source = Prefix("me"),
                     target = "#chan",
                     text = "hi",
-                    isSelf = false,
+                    isSelf = true,
                     replyToMsgid = null,
                 ),
             )
@@ -4220,6 +4390,7 @@ class EventProcessorTest {
             assertEquals(1, reactions.size)
             assertEquals("Me", reactions.single().sender)
             assertEquals(9, reactions.single().serverTime)
+            assertNull(reactions.single().activityAt)
         }
 
     @Test

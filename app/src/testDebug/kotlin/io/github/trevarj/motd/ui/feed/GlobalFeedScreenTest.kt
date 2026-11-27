@@ -13,11 +13,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertContentDescriptionEquals
+import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotSelected
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextContains
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
@@ -26,6 +32,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
@@ -43,6 +50,7 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
+import io.github.trevarj.motd.data.db.ActivityReaction
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
@@ -51,6 +59,7 @@ import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.prefs.TimeFormat
 import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
@@ -59,17 +68,23 @@ import io.github.trevarj.motd.ui.ai.AiTextSource
 import io.github.trevarj.motd.ui.ai.AiTextUiState
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import io.github.trevarj.motd.ui.theme.TimestampConfig
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.GraphicsMode
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
@@ -207,6 +222,24 @@ class GlobalFeedScreenTest {
         networkId = 1L,
     )
 
+    private fun SearchHit.reacted(
+        id: Long,
+        sender: String,
+        at: Long,
+        emoji: String = "👍",
+        account: String? = null,
+    ): SearchHit =
+        copy(
+            activityReaction =
+                ActivityReaction(
+                    id = id,
+                    at = at,
+                    sender = sender,
+                    account = account,
+                    emoji = emoji,
+                ),
+        )
+
     @Test
     @org.robolectric.annotation.Config(qualifiers = "w411dp-h891dp")
     fun feedAndActivityHoldsTranslateWithoutChangingOriginClicks() {
@@ -231,7 +264,7 @@ class GlobalFeedScreenTest {
                 }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
             }
         }
-        for (scope in listOf(null) + ActivityFilter.entries) {
+        for (scope in listOf(null, ActivityFilter.ALL, ActivityFilter.MENTIONS, ActivityFilter.KEYWORDS)) {
             compose.runOnIdle { filter = scope }
             val text = compose.onNodeWithText(hit.message.text)
             text.performClick()
@@ -351,6 +384,148 @@ class GlobalFeedScreenTest {
         compose.onNodeWithText("daily build").performClick()
 
         compose.runOnIdle { assertEquals(Triple(7L, 21L, 1_700_000_000_000L), opened) }
+    }
+
+    @Test
+    @org.robolectric.annotation.Config(qualifiers = "w411dp-h891dp")
+    fun reactionRowsExposeTheirOwnActorEmojiAndTimeButOpenTheExactParent() {
+        val parent = row(id = 98L, bufferId = 12L, sender = "me", isSelf = true, ircFormattedText = "\u0002My original message\u0002")
+        val at = parent.message.serverTime + 172_800_000L
+        val newer = parent.reacted(id = 21L, sender = "Alice", at = at)
+        val earlier = parent.reacted(id = 22L, sender = "Bob", at = at - 60_000L, emoji = "🎉")
+        // A message ID may equal a reaction ID, and both reactions point to the same parent.
+        val mention = row(id = 21L, text = "ordinary activity")
+        val stream = flowOf(PagingData.from(listOf(newer, earlier, mention)))
+        val pattern = "'Very long custom time label that wraps independently of the conversation name:' yyyy-MM-dd HH:mm"
+        val time = SimpleDateFormat(pattern, Locale.getDefault()).format(Date(at))
+        compose.setContent {
+            MotdTheme(
+                dynamicColor = false,
+                uiFontScalePercent = 150,
+                timestampConfig = TimestampConfig(format = TimeFormat.CUSTOM, customPattern = pattern),
+            ) {
+                GlobalFeedContent(
+                    rows = stream.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
+                    showNetwork = false,
+                    onOpenMessage = { bufferId, eventId, serverTime -> opened = Triple(bufferId, eventId, serverTime) },
+                    activityFilter = ActivityFilter.ALL,
+                    onTranslateMessage = {},
+                )
+            }
+        }
+
+        awaitTag("activity_row_21")
+        val resources = RuntimeEnvironment.getApplication().resources
+        val reaction = compose.onNodeWithTag("activity_reaction_21")
+        reaction
+            .assertIsDisplayed()
+            .assertTextContains(resources.getString(R.string.activity_reaction_summary, "Alice", "👍"))
+            .assertTextContains("My original message")
+            .assertTextContains(time)
+        val inReaction = hasAnyAncestor(hasTestTag("activity_reaction_21"))
+        for (label in listOf("#kotlin", time)) {
+            val text = compose.onNode(hasText(label) and inReaction, useUnmergedTree = true).assertIsDisplayed()
+            val layouts = mutableListOf<TextLayoutResult>()
+            text.performSemanticsAction(SemanticsActions.GetTextLayoutResult) {
+                assertTrue(it(layouts))
+            }
+            val layout = layouts.single()
+            val size = text.fetchSemanticsNode().size
+            // Native wrap-content layout can flag overflow even when all lines fit the rendered node.
+            assertFalse("$label lost lines", layout.multiParagraph.didExceedMaxLines)
+            assertEquals("$label lost its ending", label.length, layout.getLineEnd(layout.lineCount - 1, visibleEnd = true))
+            for (line in 0 until layout.lineCount) {
+                assertFalse("$label line $line was ellipsized", layout.isLineEllipsized(line))
+                assertTrue(
+                    "$label line $line overflowed $size",
+                    layout.getLineLeft(line) >= -1f && layout.getLineRight(line) <= size.width + 1f &&
+                        layout.getLineTop(line) >= -1f && layout.getLineBottom(line) <= size.height + 1f,
+                )
+            }
+            if (label == time) assertTrue(layout.lineCount > 1)
+        }
+        compose
+            .onNodeWithTag("activity_reaction_22")
+            .assertIsDisplayed()
+            .assertTextContains(resources.getString(R.string.activity_reaction_summary, "Bob", "🎉"))
+        val action = reaction.fetchSemanticsNode().config
+        assertEquals(resources.getString(R.string.activity_open_reacted_message), action[SemanticsActions.OnClick].label)
+        assertFalse(action.contains(SemanticsActions.OnLongClick))
+        val ordinary = compose.onNodeWithText("ordinary activity").fetchSemanticsNode().config
+        assertEquals(resources.getString(R.string.activity_open_message), ordinary[SemanticsActions.OnClick].label)
+        assertTrue(ordinary.contains(SemanticsActions.OnLongClick))
+
+        reaction.performClick()
+        compose.runOnIdle { assertEquals(Triple(12L, 98L, parent.message.serverTime), opened) }
+    }
+
+    @Test
+    fun reactionVisibilityFollowsTheReactorAndNeverTheParent() {
+        val at = 1_700_180_000_000L
+        val collapsed = row(41L, isSelf = true, text = "Collapsed preview").reacted(1L, "Alice", at, account = "ignored-account")
+        val hidden = row(42L, isSelf = true, text = "Hidden preview").reacted(2L, "Masked", at)
+        val visible = row(43L, isSelf = true, sender = "Masked", text = "Visible preview").reacted(3L, "Bob", at)
+        val blurred = row(44L, buffer = "#blurred-room", isSelf = true, text = "Blurred preview").reacted(4L, "Blurred", at, emoji = "🚀")
+        val spec =
+            MessageVisibilitySpec(
+                fools = setOf("ignored-account", "MASKED", "blurred"),
+                foolPreferences =
+                    mapOf(
+                        "ignored-account" to FoolPreferences(FoolsMode.COLLAPSE, notifyMentions = true),
+                        "MASKED" to FoolPreferences(FoolsMode.HIDE, notifyMentions = true),
+                        "blurred" to FoolPreferences(FoolsMode.BLUR, notifyMentions = true),
+                    ),
+            )
+        setContent(
+            flowOf(PagingData.from(listOf(collapsed, hidden, visible, blurred))),
+            activityFilter = ActivityFilter.REACTIONS,
+            visibilitySpec = { spec },
+        )
+
+        awaitTag("activity_reaction_3")
+        val resources = RuntimeEnvironment.getApplication().resources
+        val collapsedRow = compose.onNodeWithTag("activity_reaction_1")
+        collapsedRow.assertTextContains(resources.getString(R.string.chat_fool_hidden, "Alice"))
+        compose.onNodeWithText("Collapsed preview", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("activity_reaction_2").assertDoesNotExist()
+        compose.onNodeWithTag("activity_reaction_3").assertTextContains("Visible preview")
+        val blurredRow = compose.onNodeWithTag("activity_reaction_4")
+        blurredRow
+            .assertTextContains("#blurred-room")
+            .assertTextContains(resources.getString(R.string.activity_reaction_concealed_summary, "Blurred"))
+            .assertTextContains(resources.getString(R.string.activity_reaction_preview_hidden))
+        compose.onNodeWithText("Blurred preview", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithText("🚀", substring = true, useUnmergedTree = true).assertDoesNotExist()
+        compose
+            .onAllNodes(hasAnyAncestor(hasTestTag("activity_reaction_4")) and hasClickAction(), useUnmergedTree = true)
+            .assertCountEquals(0)
+        assertEquals(resources.getString(R.string.activity_reaction_reveal), blurredRow.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        blurredRow.performClick()
+        compose.runOnIdle { assertEquals(null, opened) }
+        blurredRow
+            .assertTextContains("Blurred preview")
+            .assertTextContains(resources.getString(R.string.activity_reaction_summary, "Blurred", "🚀"))
+        assertEquals(resources.getString(R.string.activity_open_reacted_message), blurredRow.fetchSemanticsNode().config[SemanticsActions.OnClick].label)
+        blurredRow.performClick()
+        compose.runOnIdle { assertEquals(Triple(7L, 44L, blurred.message.serverTime), opened) }
+        collapsedRow.performClick()
+        compose.runOnIdle { assertEquals(Triple(7L, 41L, collapsed.message.serverTime), opened) }
+    }
+
+    @Test
+    fun reactionVisibilityReevaluatesTheSenderWhenTheCurrentNetworkCasemapChanges() {
+        val hit = row(42L, isSelf = true).reacted(1L, "[Alice]", at = 1_700_180_000_000L).copy(caseMapping = "ascii")
+        val pages = MutableStateFlow(PagingData.from(listOf(hit)))
+        val spec = MessageVisibilitySpec(fools = setOf("{ALICE}"), foolsMode = FoolsMode.HIDE)
+        setContent(pages, activityFilter = ActivityFilter.REACTIONS, visibilitySpec = { spec })
+
+        awaitTag("activity_reaction_1")
+        compose.runOnIdle { pages.value = PagingData.from(listOf(hit.copy(caseMapping = "rfc1459"))) }
+        compose.waitUntil(timeoutMillis = 10_000) {
+            compose.onAllNodesWithTag("activity_reaction_1").fetchSemanticsNodes().isEmpty()
+        }
+        compose.runOnIdle { pages.value = PagingData.from(listOf(hit)) }
+        awaitTag("activity_reaction_1")
     }
 
     @Test
@@ -611,7 +786,9 @@ class GlobalFeedScreenTest {
         val all = compose.onNodeWithTag("activity_filter_all")
         val mentions = compose.onNodeWithTag("activity_filter_mentions")
         val keywords = compose.onNodeWithTag("activity_filter_keywords")
+        val reactions = compose.onNodeWithTag("activity_filter_reactions")
         all.assertIsSelected()
+        compose.onNodeWithText(resources.getString(R.string.activity_all_empty_message)).assertIsDisplayed()
         mentions.assertIsNotSelected().performClick()
         all.assertIsNotSelected()
         mentions.assertIsSelected()
@@ -620,6 +797,16 @@ class GlobalFeedScreenTest {
         mentions.assertIsNotSelected()
         keywords.assertIsSelected()
         compose.onNodeWithText(resources.getString(R.string.activity_keywords_empty)).assertIsDisplayed()
+        reactions
+            .performScrollTo()
+            .assertIsDisplayed()
+            .assertTextContains(resources.getString(R.string.activity_filter_reactions))
+            .assertIsNotSelected()
+            .performClick()
+        keywords.assertIsNotSelected()
+        reactions.assertIsSelected()
+        compose.onNodeWithText(resources.getString(R.string.activity_reactions_empty)).assertIsDisplayed()
+        compose.onNodeWithText(resources.getString(R.string.activity_reactions_empty_message)).assertIsDisplayed()
     }
 
     @Test

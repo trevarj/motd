@@ -31,6 +31,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.alertsAsMention
+import io.github.trevarj.motd.data.db.canReceiveReactionActivity
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.suppressesNotifications
 import io.github.trevarj.motd.data.db.suppressesUnread
@@ -39,6 +40,7 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.matchKeywordHighlight
 import io.github.trevarj.motd.data.repo.DROP_IGNORED_MESSAGE
 import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
 import io.github.trevarj.motd.data.repo.incomingIgnoreSignals
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -1211,7 +1213,8 @@ class EventProcessor
             // React rows are emoji-specific; an account-tag echo also removes the optimistic nick key.
             val emoji = e.reactEmoji
             val targetMsgid = e.reactTargetMsgid
-            if (emoji != null && targetMsgid != null) {
+            if (emoji == null || targetMsgid == null) return
+            db.withTransaction {
                 val account =
                     e.ctx.account ?: if (origin == EventOrigin.LIVE) {
                         userDao.byNick(networkId, st.normalize(e.source.nick))?.account
@@ -1230,18 +1233,26 @@ class EventProcessor
                         route,
                         st,
                         account,
-                    ) ?: return
+                    ) ?: return@withTransaction
                 // Keep an orphan temporarily when the target's echo/history row is still in flight.
                 // Once exact target identity exists, resolution also repairs an ambiguous query route.
                 if (targetEvent != null) {
-                    db.canonicalTimelineDao().resolveReactions(bufferId, targetMsgid, targetEvent.id)
+                    reactionDao.resolveTarget(networkId, targetMsgid, targetEvent)
+                    if (targetEvent.kind == MessageKind.REDACTED) return@withTransaction
                 }
                 val actorKey = st.actorKey(e.source.nick, account)
                 val nickKey = st.actorKey(e.source.nick, account = null)
-                deleteLegacyReactionAliases(bufferId, targetMsgid, e.source.nick, nickKey, emoji)
-                if (actorKey != nickKey) {
-                    reactionDao.delete(bufferId, targetMsgid, nickKey, emoji)
-                }
+                deleteLegacyReactionAliases(bufferId, targetMsgid, e.source.nick, emoji)
+                val captureActivity =
+                    origin == EventOrigin.LIVE && !e.ctx.isHistoryContext && !route.sourceIsSelf &&
+                        !isServerSource(e.source.nick) && (targetEvent == null || targetEvent.canReceiveReactionActivity) &&
+                        (
+                            incomingIgnoreSignals(
+                                networkIgnoreCache.enabledForNetwork(networkId),
+                                e.source,
+                                st.identityRules,
+                            ) and SUPPRESS_HIGHLIGHT
+                        ) == 0
                 reactionDao.upsert(
                     ReactionEntity(
                         bufferId = bufferId,
@@ -1251,7 +1262,13 @@ class EventProcessor
                         emoji = emoji,
                         serverTime = e.ctx.serverTime,
                         targetEventId = targetEvent?.id,
+                        activityAt = e.ctx.serverTime.takeIf { captureActivity },
+                        activitySender = e.source.nick.takeIf { captureActivity },
+                        activityHasWireTime = captureActivity && e.ctx.serverTimeSource == ServerTimeSource.TAG,
+                        activityEventMsgid = if (captureActivity) e.ctx.msgid?.takeIf(String::isNotEmpty) else null,
+                        activityAccount = account?.takeUnless { !captureActivity || it.isEmpty() || it == "*" },
                     ),
+                    nickKey = nickKey,
                 )
             }
         }
@@ -1296,10 +1313,15 @@ class EventProcessor
                 val channelKey = canonicalExpectedRoomId?.let { savedMessages.channelKey(it) } ?: channelName
                 savedMessages.rememberRedaction(networkId, canonicalExpectedRoomId, channelKey, target?.id, event.targetMsgid)
                 savedMessages.redact(networkId, canonicalExpectedRoomId, channelKey, target?.id, event.targetMsgid)
-                if (target == null) return@withTransaction null
-                reactionDao.deleteForTarget(target.bufferId, event.targetMsgid)
+                if (target == null) {
+                    canonicalExpectedRoomId?.let { reactionDao.deleteForTarget(it, event.targetMsgid) }
+                    return@withTransaction null
+                }
                 // Retry post-commit retirement without rewriting an existing tombstone.
-                if (target.kind == MessageKind.REDACTED) return@withTransaction target.bufferId to target.id
+                if (target.kind == MessageKind.REDACTED) {
+                    reactionDao.resolveTarget(networkId, event.targetMsgid, target)
+                    return@withTransaction target.bufferId to target.id
+                }
 
                 val tombstone =
                     "Message deleted by ${event.source.nick}" +
@@ -1307,7 +1329,9 @@ class EventProcessor
                             ?.takeIf(String::isNotBlank)
                             ?.let { " ($it)" }
                             .orEmpty()
-                messageDao.update(target.redacted(tombstone))
+                val redacted = target.redacted(tombstone)
+                messageDao.update(redacted)
+                reactionDao.resolveTarget(networkId, event.targetMsgid, redacted)
                 target.bufferId to target.id
             }
         }
@@ -4137,7 +4161,7 @@ class EventProcessor
             origin: EventOrigin,
             historyTarget: String?,
         ) {
-            if (removeReaction(networkId, e.message, origin, historyTarget)) return
+            if (removeReaction(networkId, e, origin, historyTarget)) return
             if (origin != EventOrigin.LIVE) return
             val response =
                 commandResponse(networkId, e.message.tags["label"], includeMetadataQuery = true)?.takeIf { session ->
@@ -4189,10 +4213,11 @@ class EventProcessor
         /** Consume Raw `draft/unreact` at the sole reaction-persistence boundary. */
         private suspend fun removeReaction(
             networkId: Long,
-            message: io.github.trevarj.motd.irc.proto.IrcMessage,
+            event: IrcEvent.Raw,
             origin: EventOrigin,
             historyTarget: String?,
         ): Boolean {
+            val message = event.message
             if (message.command != "TAGMSG") return false
             val emoji = message.unreactionValue() ?: return false
             val targetMsgid = message.replyReference() ?: return true
@@ -4200,34 +4225,44 @@ class EventProcessor
             val target = message.params.firstOrNull() ?: return true
             val st = stateFor(networkId)
             val route = resolveReactionRoute(networkId, source, target, historyTarget, st)
-            val account =
-                message.tags["account"] ?: if (origin == EventOrigin.LIVE) {
-                    userDao.byNick(networkId, st.normalize(source))?.account
-                } else {
-                    null
+            return db.withTransaction {
+                val account =
+                    message.tags["account"] ?: if (origin == EventOrigin.LIVE) {
+                        userDao.byNick(networkId, st.normalize(source))?.account
+                    } else {
+                        null
+                    }
+                val targetEvent =
+                    db.canonicalTimelineDao().eventByAlias(
+                        networkId,
+                        EventAliasNamespace.MSGID,
+                        targetMsgid.toByteArray(Charsets.UTF_8),
+                    )
+                val bufferId =
+                    targetEvent?.bufferId ?: existingReactionRoomId(
+                        networkId,
+                        route,
+                        st,
+                        account,
+                    ) ?: return@withTransaction true
+                if (targetEvent != null) {
+                    reactionDao.resolveTarget(networkId, targetMsgid, targetEvent)
                 }
-            val targetEvent =
-                db.canonicalTimelineDao().eventByAlias(
-                    networkId,
-                    EventAliasNamespace.MSGID,
-                    targetMsgid.toByteArray(Charsets.UTF_8),
+                val actorKey = st.actorKey(source, account)
+                val nickKey = st.actorKey(source, account = null)
+                deleteLegacyReactionAliases(bufferId, targetMsgid, source, emoji)
+                val live = origin == EventOrigin.LIVE && "draft/chathistory-context" !in message.tags
+                reactionDao.deleteFromWire(
+                    bufferId,
+                    targetMsgid,
+                    actorKey,
+                    nickKey,
+                    emoji,
+                    live,
+                    historicalTime = if (live) null else event.historyEventMetadataOrNull()?.serverTime,
                 )
-            val bufferId =
-                targetEvent?.bufferId ?: existingReactionRoomId(
-                    networkId,
-                    route,
-                    st,
-                    account,
-                ) ?: return true
-            if (targetEvent != null) {
-                db.canonicalTimelineDao().resolveReactions(bufferId, targetMsgid, targetEvent.id)
+                true
             }
-            val actorKey = st.actorKey(source, account)
-            val nickKey = st.actorKey(source, account = null)
-            deleteLegacyReactionAliases(bufferId, targetMsgid, source, nickKey, emoji)
-            reactionDao.delete(bufferId, targetMsgid, actorKey, emoji)
-            if (actorKey != nickKey) reactionDao.delete(bufferId, targetMsgid, nickKey, emoji)
-            return true
         }
 
         /** Own away confirmation (305/306) → presence event in the SERVER buffer. */
@@ -4548,7 +4583,6 @@ class EventProcessor
             bufferId: RoomId,
             targetMsgid: String,
             sender: String,
-            currentNickActorKey: String,
             emoji: String,
         ) {
             // v10 reactions were irreversibly keyed with RFC1459, independent of current rules.
@@ -4557,8 +4591,6 @@ class EventProcessor
             reactionDao.deleteActorAliases(
                 bufferId,
                 targetMsgid,
-                baseActorKey,
-                currentNickActorKey == baseActorKey,
                 legacyPrefix,
                 "$legacyPrefix\uFFFF",
                 emoji,

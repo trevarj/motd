@@ -952,8 +952,7 @@ class BufferStore
                         )
                     aliasDao.copyMembers(loser.id, winner.id)
                     aliasDao.deleteMembers(loser.id)
-                    aliasDao.copyReactions(loser.id, winner.id)
-                    aliasDao.deleteReactions(loser.id)
+                    db.reactionDao().mergeRooms(loser.id, winner.id)
                     canonicalTimeline.applyMergedRedactions(winner.networkId, winner.id).forEach { eventId ->
                         db.appStateDao().insert(AppStateEntity("$ROOM_MERGE_REDACTION_PREFIX${winner.id}:$eventId"))
                     }

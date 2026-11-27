@@ -826,6 +826,17 @@ data class AppStateEntity(
     indices = [
         Index(value = ["bufferId", "targetMsgid", "actorKey", "emoji"], unique = true),
         Index(value = ["bufferId", "targetMsgid", "targetEventId"]),
+        // SQLite appends rowid (the id column's alias), enabling a tuple seek on (activityAt, id).
+        Index(value = ["activityAt"]),
+        Index(value = ["targetEventId"]),
+    ],
+    foreignKeys = [
+        ForeignKey(
+            entity = MessageEntity::class,
+            parentColumns = ["id"],
+            childColumns = ["targetEventId"],
+            onDelete = ForeignKey.CASCADE,
+        ),
     ],
 )
 data class ReactionEntity(
@@ -839,7 +850,16 @@ data class ReactionEntity(
     val emoji: String,
     val serverTime: Long,
     val targetEventId: TimelineEventId? = null,
+    /** Evidence of the current live add. An orphan is never shown until its parent resolves. */
+    val activityAt: Long? = null,
+    val activitySender: String? = null,
+    @ColumnInfo(defaultValue = "0") val activityHasWireTime: Boolean = false,
+    val activityEventMsgid: String? = null,
+    val activityAccount: String? = null,
 )
+
+internal val TimelineEventEntity.canReceiveReactionActivity: Boolean
+    get() = isSelf && (kind == MessageKind.PRIVMSG || kind == MessageKind.NOTICE || kind == MessageKind.ACTION)
 
 @Entity(tableName = "users", primaryKeys = ["networkId", "nick"])
 data class UserEntity(

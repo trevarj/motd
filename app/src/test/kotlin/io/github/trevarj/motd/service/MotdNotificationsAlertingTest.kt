@@ -1211,7 +1211,7 @@ class MotdNotificationsAlertingTest {
             assertEquals(KeywordMatch.ALERT, plainRow.keywordMatch)
             for (filter in ActivityFilter.entries) {
                 val activity = db.messageDao().globalFeedPage(globalFeedPagingQuery(MessageVisibilitySpec(), activityFilter = filter))
-                assertTrue(activity.any { it.message.id == quietRow.id })
+                assertEquals(filter != ActivityFilter.REACTIONS, activity.any { it.message.id == quietRow.id })
                 assertTrue(activity.none { it.message.id == plainRow.id })
             }
 

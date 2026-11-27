@@ -435,6 +435,7 @@ class BufferStoreCanonicalTest {
                         normalizedActor = "same",
                         kind = MessageKind.PRIVMSG,
                         text = "same authoritative event",
+                        isSelf = true,
                         dedupKey = "diagnostic-only",
                     ),
                 origin = ObservationOrigin.HISTORY,
@@ -444,6 +445,20 @@ class BufferStoreCanonicalTest {
             )
             val winnerEvent = timeline.ingest(observation(winner.id, msgid = null)).event
             val loserEvent = timeline.ingest(observation(loser.id, msgid = "source-msgid")).event
+            db.reactionDao().upsert(
+                ReactionEntity(
+                    bufferId = loser.id,
+                    targetMsgid = "source-msgid",
+                    actorKey = "nick:peer",
+                    sender = "Peer",
+                    emoji = "+1",
+                    serverTime = 5_000,
+                    targetEventId = loserEvent.id,
+                    activityAt = 5_000,
+                    activitySender = "Peer",
+                ),
+            )
+            val before = db.reactionDao().forRoom(loser.id).single()
             db.bufferDao().update(
                 winner.copy(
                     localReadAnchorTime = winnerEvent.serverTime,
@@ -466,6 +481,10 @@ class BufferStoreCanonicalTest {
 
             assertEquals(1, db.messageDao().countForBuffer(merged.id))
             assertEquals("source-msgid", db.messageDao().byMsgid(merged.id, "source-msgid")?.msgid)
+            val after = db.reactionDao().forRoom(merged.id).single()
+            assertEquals(before.id, after.id)
+            assertEquals(winnerEvent.id, after.targetEventId)
+            assertEquals(before.activityAt, after.activityAt)
             val gap = db.historyGapDao().forRoom(merged.id).single()
             assertEquals(winnerEvent.id, gap.newerEventId)
             assertEquals(winnerEvent.timelineOrder, gap.newerTimelineOrder)
@@ -480,10 +499,82 @@ class BufferStoreCanonicalTest {
         }
 
     @Test
-    fun roomMergeCopiesLoserOnlyReactionsWithoutIdsAndDedupesActorEmojiCollisions() =
+    fun orphanAccountPromotionRequiresTheSameWireAddition() =
+        runTest {
+            val nickRoom = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+            val accountRoom = store.getOrCreate(networkId, "reuse", "Reuse", BufferType.QUERY)
+            val targetRoom = store.getOrCreate(networkId, "#actual", "#actual", BufferType.CHANNEL)
+            val reactions = db.reactionDao()
+            val first =
+                ReactionEntity(
+                    bufferId = nickRoom.id,
+                    targetMsgid = "late",
+                    actorKey = "nick:peer",
+                    sender = "Peer",
+                    emoji = "same",
+                    serverTime = 2_000,
+                    activityAt = 2_000,
+                    activitySender = "Peer",
+                    activityEventMsgid = "same-wire-id",
+                )
+            reactions.upsert(first)
+            val firstId = reactions.forRoom(nickRoom.id).single().id
+            val promoted = first.copy(bufferId = accountRoom.id, actorKey = "account:peer")
+            reactions.upsert(promoted)
+            reactions.upsert(first.copy(emoji = "different", activityEventMsgid = "id-one"))
+            reactions.upsert(promoted.copy(emoji = "different", activityEventMsgid = "id-two"))
+
+            val timeline = CanonicalTimelineStore(db)
+            val ingestion =
+                timeline.ingest(
+                    TimelineObservation(
+                        networkId = networkId,
+                        event =
+                            MessageEntity(
+                                bufferId = targetRoom.id,
+                                msgid = "late",
+                                serverTime = 1_000,
+                                sender = "me",
+                                kind = MessageKind.PRIVMSG,
+                                text = "parent",
+                                isSelf = true,
+                                dedupKey = "late",
+                            ),
+                        origin = ObservationOrigin.LIVE,
+                        connectionGeneration = 1,
+                        batchId = null,
+                        timeProvenance = TimeProvenance.SERVER_TAG,
+                    ),
+                )
+
+            val rows = reactions.forRoom(targetRoom.id)
+            val reconciled = rows.single { it.emoji == "same" }
+            assertEquals(firstId, reconciled.id)
+            assertEquals("account:peer", reconciled.actorKey)
+            assertEquals(setOf(ingestion.event.id), rows.map { it.targetEventId }.toSet())
+            assertEquals(setOf("nick:peer", "account:peer"), rows.filter { it.emoji == "different" }.map { it.actorKey }.toSet())
+            assertTrue(reactions.forRoom(nickRoom.id).isEmpty())
+            assertTrue(reactions.forRoom(accountRoom.id).isEmpty())
+        }
+
+    @Test
+    fun roomMergeKeepsActiveReactionIdsAndDedupesActorEmojiCollisions() =
         runTest {
             val winner = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
             val loser = store.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+            val parentId =
+                db.canonicalTimelineDao().insertEvent(
+                    MessageEntity(
+                        bufferId = loser.id,
+                        msgid = "parent",
+                        serverTime = 50,
+                        sender = "me",
+                        kind = MessageKind.PRIVMSG,
+                        text = "my message",
+                        isSelf = true,
+                        dedupKey = "parent",
+                    ),
+                )
             db.reactionDao().upsert(
                 ReactionEntity(
                     bufferId = winner.id,
@@ -502,6 +593,10 @@ class BufferStoreCanonicalTest {
                     sender = "Loser duplicate",
                     emoji = "same",
                     serverTime = 200,
+                    targetEventId = parentId,
+                    activityAt = 200,
+                    activitySender = "Loser duplicate",
+                    activityAccount = "shared",
                 ),
             )
             db.reactionDao().upsert(
@@ -512,16 +607,25 @@ class BufferStoreCanonicalTest {
                     sender = "Loser only",
                     emoji = "unique",
                     serverTime = 300,
+                    targetEventId = parentId,
+                    activityAt = 300,
+                    activitySender = "Loser only",
                 ),
             )
 
+            val originalIds = db.reactionDao().forRoom(loser.id).associate { it.emoji to it.id }
             val merged = store.mergeRooms(winner.id, loser.id)
             val rows = db.reactionDao().observeForBuffer(merged.id).first()
 
             assertEquals(2, rows.size)
             assertEquals("Winner spelling", rows.single { it.emoji == "same" }.sender)
             assertEquals("Loser only", rows.single { it.emoji == "unique" }.sender)
-            assertTrue(rows.all { it.id > 0 })
+            assertEquals(originalIds, rows.associate { it.emoji to it.id })
+            assertEquals(setOf(parentId), rows.map { it.targetEventId }.toSet())
+            assertEquals(setOf(200L, 300L), rows.map { it.activityAt }.toSet())
+            assertEquals("Loser duplicate", rows.single { it.emoji == "same" }.activitySender)
+            assertEquals("shared", rows.single { it.emoji == "same" }.activityAccount)
+            assertEquals(merged.id, db.messageDao().byId(parentId)?.bufferId)
             assertTrue(
                 db
                     .reactionDao()

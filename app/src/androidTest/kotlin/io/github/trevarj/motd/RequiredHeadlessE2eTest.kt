@@ -991,6 +991,13 @@ class RequiredHeadlessE2eTest {
             val keywordText = "$word report arrived"
             val mentionText = "${ready.nick}: direct mention"
             val tailText = "activity viewport tail ${bootstrap.args.runId}"
+            val reactionTargetText = "$word own reaction target"
+            val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
+            chats.open(bufferId)
+            timeline.awaitTag("chat_timeline")
+            timeline.awaitEntryVeilLifted()
+            ChatRobot(compose).send(reactionTargetText)
+            val reactionTarget = runBlocking { probe.awaitCanonical(reactionTargetText, bufferId) }
             FixtureIrcClient.connect(bootstrap.args).use { peer ->
                 peer.sendMessage(bootstrap.args.channel, keywordText)
                 peer.sendMessage(bootstrap.args.channel, mentionText)
@@ -998,16 +1005,13 @@ class RequiredHeadlessE2eTest {
                 peer.sendMessage(bootstrap.args.channel, tailText)
                 peer.flushThroughServer(word)
             }
-            val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
             val keyword = runBlocking { probe.awaitCanonicalFromAnySender(keywordText, bufferId) }
             val mention = runBlocking { probe.awaitCanonicalFromAnySender(mentionText, bufferId) }
             val tail = runBlocking { probe.awaitCanonicalFromAnySender(tailText, bufferId) }
-            chats.open(bufferId)
-            timeline.awaitTag("chat_timeline")
-            timeline.awaitEntryVeilLifted()
             if (timeline.isPresent("chat_scroll_to_bottom_fab")) timeline.scrollToBottom()
             timeline.assertMessageVisible(tail.tag())
             compose.onNodeWithTag(keyword.tag(), useUnmergedTree = true).assertIsNotDisplayed()
+            compose.onNodeWithTag(reactionTarget.tag(), useUnmergedTree = true).assertIsNotDisplayed()
             awaitWhileComposing("baseline chat read through tail for buffer=$bufferId", probeTimeoutMs = 20_000) {
                 awaitMarkerAtLeast(bootstrap, bufferId, tail.anchor())
             }
@@ -1030,8 +1034,12 @@ class RequiredHeadlessE2eTest {
             timeline.awaitTag("chat_timeline")
             timeline.awaitEntryVeilLifted()
             timeline.assertMessageVisible(keyword.tag())
+            if (timeline.isPresent("chat_scroll_to_bottom_fab")) timeline.scrollToBottom()
+            timeline.assertMessageVisible(tail.tag())
+            compose.onNodeWithTag(reactionTarget.tag(), useUnmergedTree = true).assertIsNotDisplayed()
             requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
             chats.awaitTag("activity_filter_keywords")
+            exerciseReactionActivity(bootstrap, reactionTarget, mentionRow, keywordRow)
             requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
             chats.awaitTag("chatlist_row_$bufferId")
             milestones.record("activity_keyword_origin_visible", "buffer=$bufferId event=${keyword.id}")
@@ -1041,6 +1049,64 @@ class RequiredHeadlessE2eTest {
                 preferences.setMentionsPlacement(original.mentionsPlacement)
                 preferences.setMentionsEnabled(original.mentionsEnabled)
             }
+        }
+    }
+
+    private fun exerciseReactionActivity(
+        bootstrap: E2eBootstrap,
+        target: MessageEntity,
+        mentionRow: String,
+        keywordRow: String,
+    ) {
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val chats = ChatListRobot(compose)
+        val timeline = TimelineRobot(compose)
+        val msgid = requireNotNull(target.msgid)
+        FixtureIrcClient.connect(bootstrap.args, messageTags = true).use { peer ->
+            val room = bootstrap.args.channel
+            val emoji = "👍"
+            val summary = resources.getString(R.string.activity_reaction_summary, peer.nick, emoji)
+            val otherEmoji = "🎉"
+            val retained = resources.getString(R.string.activity_reaction_summary, peer.nick, otherEmoji)
+
+            fun awaitReaction() {
+                compose.waitUntil("Live peer reaction to an own message is visible", 20_000) {
+                    runCatching {
+                        compose.onNodeWithText(summary).assertIsDisplayed()
+                        compose.onNodeWithText(retained).assertIsDisplayed()
+                    }.isSuccess
+                }
+            }
+
+            peer.sendReaction(room, msgid, emoji)
+            peer.sendReaction(room, msgid, otherEmoji)
+            peer.flushThroughServer("activity-reaction-add")
+            chats.click("activity_filter_all")
+            awaitReaction()
+            chats.click("activity_filter_mentions")
+            chats.awaitTag(mentionRow)
+            compose.onAllNodes(hasText(summary) or hasText(retained)).assertCountEquals(0)
+            chats.click("activity_filter_keywords")
+            chats.awaitTag(keywordRow)
+            compose.onAllNodes(hasText(summary) or hasText(retained)).assertCountEquals(0)
+            compose
+                .onNodeWithTag("activity_filter_reactions", useUnmergedTree = true)
+                .performScrollTo()
+                .performClick()
+            awaitReaction()
+            compose.onNode(hasText(summary) and hasText(target.text)).assertIsDisplayed().performClick()
+            timeline.awaitTag("chat_timeline")
+            timeline.awaitEntryVeilLifted()
+            timeline.assertMessageVisible(target.tag())
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            awaitReaction()
+            peer.sendReaction(room, msgid, emoji, remove = true)
+            peer.flushThroughServer("activity-reaction-remove")
+            compose.waitUntil("Removing the peer reaction clears the Activity row", 20_000) {
+                compose.onAllNodes(hasText(summary)).fetchSemanticsNodes().isEmpty() &&
+                    runCatching { compose.onNodeWithText(retained).assertIsDisplayed() }.isSuccess
+            }
+            milestones.record("activity_reaction_origin_visible", "buffer=${target.bufferId} event=${target.id}")
         }
     }
 

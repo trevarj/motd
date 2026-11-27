@@ -4,6 +4,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.ircIdentifierSqlFold
 import io.github.trevarj.motd.data.db.suppressesUnread
 import io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS
 import io.github.trevarj.motd.data.prefs.FoolPreferences
@@ -275,11 +276,12 @@ internal class MessageVisibilitySql(
     private fun attentionPermissions(
         bufferTypeExpr: String,
         alias: String,
+        reaction: Boolean = false,
     ): String =
         allOf(
-            notHidden(alias),
-            "(($bufferTypeExpr = 'QUERY' AND ${buildNotFoolPredicate(directMessagesDisabled, alias)}) " +
-                "OR ($bufferTypeExpr != 'QUERY' AND ${buildNotFoolPredicate(mentionsDisabled, alias)}))",
+            buildNotFoolPredicate(hiddenIdentities, alias, reaction),
+            "(($bufferTypeExpr = 'QUERY' AND ${buildNotFoolPredicate(directMessagesDisabled, alias, reaction)}) " +
+                "OR ($bufferTypeExpr != 'QUERY' AND ${buildNotFoolPredicate(mentionsDisabled, alias, reaction)}))",
         )
 
     private fun notHidden(alias: String): String = buildNotFoolPredicate(hiddenIdentities, alias)
@@ -353,15 +355,27 @@ internal class MessageVisibilitySql(
     private fun buildNotFoolPredicate(
         identities: String,
         alias: String = "m",
+        reaction: Boolean = false,
     ): String {
         if (identities.isEmpty()) return TRUE
-        return "NOT (${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL) " +
-            "AND ${column(alias, "isSelf")} = 0 " +
-            "AND EXISTS (SELECT 1 FROM (VALUES $identities) AS fool " +
-            "WHERE fool.column1 = CAST(${column(alias, "normalizedActor")} AS BLOB) " +
-            "OR (${column(alias, "senderAccount")} IS NOT NULL " +
-            "AND COALESCE(fool.column2, fool.column1) = " +
-            "CAST(${column(alias, "senderAccount")} AS BLOB))))"
+        val actor =
+            if (reaction) {
+                // Activity snapshots display spelling so a later CASEMAPPING change can reclassify it.
+                ircIdentifierSqlFold(column(alias, "activitySender"), "'${identityRules.caseMapping.rawName}' COLLATE NOCASE")
+            } else {
+                column(alias, "normalizedActor")
+            }
+        val account = column(alias, if (reaction) "activityAccount" else "senderAccount")
+        val matchingIdentity =
+            "EXISTS (SELECT 1 FROM (VALUES $identities) AS fool " +
+                "WHERE fool.column1 = CAST($actor AS BLOB) " +
+                "OR ($account IS NOT NULL AND COALESCE(fool.column2, fool.column1) = CAST($account AS BLOB)))"
+        return if (reaction) {
+            "NOT $matchingIdentity"
+        } else {
+            "NOT (${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL) " +
+                "AND ${column(alias, "isSelf")} = 0 AND $matchingIdentity)"
+        }
     }
 
     companion object {
@@ -384,14 +398,29 @@ internal class MessageVisibilitySql(
             alias: String = "m",
         ): String = anyCasemap(spec, caseMappingExpr) { it.attentionPermissions(bufferTypeExpr, alias) }
 
+        fun reactionAttentionPermissionsAnyCasemap(
+            spec: MessageVisibilitySpec,
+            caseMappingExpr: String,
+            bufferTypeExpr: String,
+        ): String =
+            if (spec.fools.isEmpty()) {
+                TRUE
+            } else {
+                anyCasemap(spec, caseMappingExpr, asciiCasemapName = true) {
+                    it.attentionPermissions(bufferTypeExpr, "r", reaction = true)
+                }
+            }
+
         private fun anyCasemap(
             spec: MessageVisibilitySpec,
             caseMappingExpr: String,
+            asciiCasemapName: Boolean = false,
             predicate: (MessageVisibilitySql) -> String,
         ): String {
             val rfc1459 = IrcCaseMapping.Rfc1459.rawName
             val strict = IrcCaseMapping.Rfc1459Strict.rawName
-            val casemap = "LOWER(COALESCE($caseMappingExpr,'$rfc1459'))"
+            val storedCasemap = "COALESCE($caseMappingExpr,'$rfc1459')"
+            val casemap = if (asciiCasemapName) "($storedCasemap COLLATE NOCASE)" else "LOWER($storedCasemap)"
             return listOf(
                 "$casemap = '$rfc1459'" to IrcCaseMapping.Rfc1459,
                 "$casemap = '$strict'" to IrcCaseMapping.Rfc1459Strict,
@@ -562,22 +591,31 @@ internal fun nearestUnreadMentionInPrefixQuery(
 /**
  * Keyset cursor into the cross-buffer stream.
  *
- * `(serverTime, id)` is the only globally comparable ordering key. `timelineOrder` carries two
- * incomparable scales — `CanonicalTimelineStore`'s playback settle rewrites dense per-(buffer,
- * serverTime) indexes 0,1,2…, while every other writer stores the rowid — so it orders rows only
- * WITHIN one buffer. Cross-buffer it would sink settled history below live rows on every
- * same-second tie and flip a buffer's position whenever its history replays.
+ * Activity uses the reaction's canonical time instead of the parent's server time. The source kind keeps
+ * IDs from different tables distinct on a time tie. `timelineOrder` is local to a buffer: history
+ * settle rewrites it independently in each room, so it cannot order a cross-buffer stream.
  */
 data class GlobalFeedKey(
     val serverTime: Long,
     val id: Long,
+    val kind: GlobalFeedKind = GlobalFeedKind.MESSAGE,
 )
+
+enum class GlobalFeedKind(
+    internal val sortOrder: Int,
+) {
+    MESSAGE(0),
+    REACTION(1),
+}
 
 /** Which side of a [GlobalFeedKey] a page reads, and whether the key row itself is included. */
 internal enum class GlobalFeedSeek { OLDER, OLDER_OR_AT, NEWER }
 
 /** Stored attention provenance to include in Activity. */
-enum class ActivityFilter { ALL, MENTIONS, KEYWORDS }
+enum class ActivityFilter { ALL, MENTIONS, KEYWORDS, REACTIONS }
+
+internal val ActivityFilter?.includesReactions: Boolean
+    get() = this == ActivityFilter.ALL || this == ActivityFilter.REACTIONS
 
 /**
  * Cross-buffer reverse-chronological conversation stream, newest first.
@@ -599,66 +637,174 @@ internal fun globalFeedPagingQuery(
     limit: Int? = null,
     activityFilter: ActivityFilter? = null,
 ): SimpleSQLiteQuery {
-    val direction = if (key != null && seek == GlobalFeedSeek.NEWER) "ASC" else "DESC"
-    val keyset = if (key == null) "" else "${keysetPredicate(seek)} "
+    val newer = key != null && seek == GlobalFeedSeek.NEWER
+    val direction = if (newer) "ASC" else "DESC"
     val limitClause = if (limit == null) "" else " LIMIT ?"
-    val mentions = "m.directMention = 1"
-    val keywords = "m.keywordMatch IN ('SILENT','ALERT')"
-    val provenance =
-        when (activityFilter) {
-            null -> ""
-            ActivityFilter.ALL -> "($mentions OR $keywords)"
-            ActivityFilter.MENTIONS -> mentions
-            ActivityFilter.KEYWORDS -> keywords
-        }
-    // The persisted aggregate bounds every Activity scope to the sparse attention index.
-    val attention = if (activityFilter == null) "" else "AND m.hasMention = 1 AND m.isSelf = 0 AND $provenance "
-    val visibility =
-        if (activityFilter == null) {
-            MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")
+    val mixed = activityFilter == ActivityFilter.ALL
+    val reactionAnchor = key?.kind == GlobalFeedKind.REACTION && activityFilter.includesReactions
+    val merge = mixed || reactionAnchor
+    val messageSql =
+        if (activityFilter != ActivityFilter.REACTIONS) {
+            val mentions = "m.directMention = 1"
+            val keywords = "m.keywordMatch IN ('SILENT','ALERT')"
+            val provenance =
+                when (activityFilter) {
+                    null, ActivityFilter.REACTIONS -> ""
+                    ActivityFilter.ALL -> "($mentions OR $keywords)"
+                    ActivityFilter.MENTIONS -> mentions
+                    ActivityFilter.KEYWORDS -> keywords
+                }
+            // The persisted aggregate bounds the Activity message branch to the sparse attention index.
+            val attention = if (activityFilter == null) "" else "AND m.hasMention = 1 AND m.isSelf = 0 AND $provenance "
+            val visibility =
+                if (activityFilter == null) {
+                    MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")
+                } else {
+                    MessageVisibilitySql.attentionPermissionsAnyCasemap(spec, "ni.caseMapping", "b.type")
+                }
+            GLOBAL_FEED_PROJECTION +
+                (if (mixed) MESSAGE_ACTIVITY_PROJECTION else "") +
+                "FROM messages m $GLOBAL_FEED_ROOM_JOINS " +
+                GLOBAL_FEED_ACTIVE_ROOM +
+                (if (activityFilter == null) "AND b.archived = 0 " else "") +
+                GLOBAL_FEED_ACTIVE_PARENT +
+                attention +
+                "AND $visibility " +
+                keysetPredicate(key, seek, GlobalFeedKind.MESSAGE, "m.serverTime", "m.id") +
+                "ORDER BY m.serverTime $direction, m.id $direction" +
+                limitClause
         } else {
-            MessageVisibilitySql.attentionPermissionsAnyCasemap(spec, "ni.caseMapping", "b.type")
+            null
+        }
+    val reactionPage =
+        if (activityFilter.includesReactions) {
+            val visibility = MessageVisibilitySql.reactionAttentionPermissionsAnyCasemap(spec, "ni.caseMapping", "b.type")
+            val base =
+                GLOBAL_FEED_PROJECTION +
+                    REACTION_ACTIVITY_PROJECTION +
+                    (if (merge) REACTION_ACTIVITY_SORT else "") +
+                    "FROM reactions r CROSS JOIN messages m ON m.id = r.targetEventId AND m.bufferId = r.bufferId " +
+                    "$GLOBAL_FEED_ROOM_JOINS " +
+                    GLOBAL_FEED_ACTIVE_ROOM +
+                    GLOBAL_FEED_ACTIVE_PARENT +
+                    "AND m.isSelf = 1 AND r.activitySender IS NOT NULL AND $visibility "
+            val order = "ORDER BY r.activityAt $direction, r.id $direction$limitClause"
+            if (reactionAnchor) {
+                // Older SQLite versions only seek the leading column of a tuple with a rowid
+                // suffix. Split the equal-time ID range from the strict time range.
+                val idComparison = seek.idComparison()
+                val timeComparison = if (newer) ">" else "<"
+                "SELECT * FROM ($base AND r.activityAt = ? AND r.id $idComparison ? $order) UNION ALL " +
+                    "SELECT * FROM ($base AND r.activityAt $timeComparison ? $order)"
+            } else {
+                val reactionSeek =
+                    if (key == null) {
+                        "AND r.activityAt IS NOT NULL "
+                    } else {
+                        keysetPredicate(key, seek, GlobalFeedKind.REACTION, "r.activityAt", "r.id")
+                    }
+                val query = "$base$reactionSeek$order"
+                if (merge) "SELECT * FROM ($query)" else query
+            }
+        } else {
+            null
+        }
+    // Every input is capped independently; the merge sees at most three pages in one snapshot.
+    val sql =
+        if (merge) {
+            val messagePage = if (messageSql == null) "" else "SELECT * FROM ($messageSql) UNION ALL "
+            "$messagePage$reactionPage ORDER BY feedTime $direction, feedKind $direction, feedId $direction$limitClause"
+        } else {
+            messageSql ?: checkNotNull(reactionPage)
         }
     return SimpleSQLiteQuery(
-        "SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName, " +
-            "b.type AS bufferType, b.networkId AS networkId, " +
-            "b.avatarOverrideModel AS avatarOverrideModel, " +
-            "ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes " +
-            "FROM messages m " +
-            // CROSS JOIN pins join order, not semantics: driven from buffers the ORDER BY becomes
-            // a temp B-tree sort per page instead of a walk of index_messages_serverTime_id.
-            "CROSS JOIN buffers b ON b.id = m.bufferId " +
-            "JOIN networks n ON n.id = b.networkId " +
-            "LEFT JOIN network_identity ni ON ni.networkId = b.networkId " +
-            "LEFT JOIN event_redirects redirect ON redirect.losingEventId = m.id " +
-            "WHERE b.type IN ('CHANNEL','QUERY') AND b.dismissed = 0 " +
-            (if (activityFilter == null) "AND b.archived = 0 " else "") +
-            "AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL " +
-            "AND redirect.losingEventId IS NULL " +
-            "AND m.kind IN ($CONVERSATION_KIND_SQL) " +
-            attention +
-            "AND $visibility " +
-            keyset +
-            "ORDER BY m.serverTime $direction, m.id $direction" +
-            limitClause,
+        sql,
         buildList<Any> {
-            key?.let { addAll(listOf(it.serverTime, it.serverTime, it.id)) }
-            limit?.let { add(it) }
+            if (messageSql != null) addFeedSeekArgs(key, limit, GlobalFeedKind.MESSAGE)
+            if (reactionPage != null) {
+                if (reactionAnchor) {
+                    val anchor = checkNotNull(key)
+                    add(anchor.serverTime)
+                    add(anchor.id)
+                    limit?.let { add(it) }
+                    add(anchor.serverTime)
+                    limit?.let { add(it) }
+                } else {
+                    addFeedSeekArgs(key, limit, GlobalFeedKind.REACTION)
+                }
+            }
+            if (merge && limit != null) add(limit)
         }.toTypedArray(),
     )
 }
 
-/**
- * Written as a leading-column range plus a tie-break rather than the row-value form
- * `(serverTime, id) < (?, ?)`: SQLite gives no index guarantee for row values, while
- * `serverTime <= ?` is a plain range constraint the `(serverTime, id)` index can seek on.
- */
-private fun keysetPredicate(seek: GlobalFeedSeek): String =
-    when (seek) {
-        GlobalFeedSeek.OLDER -> "AND m.serverTime <= ? AND (m.serverTime < ? OR m.id < ?)"
-        GlobalFeedSeek.OLDER_OR_AT -> "AND m.serverTime <= ? AND (m.serverTime < ? OR m.id <= ?)"
-        GlobalFeedSeek.NEWER -> "AND m.serverTime >= ? AND (m.serverTime > ? OR m.id > ?)"
+private const val GLOBAL_FEED_PROJECTION =
+    "SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName, " +
+        "b.type AS bufferType, b.networkId AS networkId, " +
+        "b.avatarOverrideModel AS avatarOverrideModel, " +
+        "ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes "
+
+private val MESSAGE_ACTIVITY_PROJECTION =
+    ", NULL AS activity_reaction_id, NULL AS activity_reaction_at, NULL AS activity_reaction_sender, " +
+        "NULL AS activity_reaction_account, NULL AS activity_reaction_emoji, " +
+        "m.serverTime AS feedTime, ${GlobalFeedKind.MESSAGE.sortOrder} AS feedKind, m.id AS feedId "
+
+private const val REACTION_ACTIVITY_PROJECTION =
+    ", r.id AS activity_reaction_id, r.activityAt AS activity_reaction_at, r.activitySender AS activity_reaction_sender, " +
+        "r.activityAccount AS activity_reaction_account, " +
+        "r.emoji AS activity_reaction_emoji "
+
+private val REACTION_ACTIVITY_SORT = ", r.activityAt AS feedTime, ${GlobalFeedKind.REACTION.sortOrder} AS feedKind, r.id AS feedId "
+
+// CROSS JOIN keeps the driving table in chronological index order instead of visiting rooms first.
+private const val GLOBAL_FEED_ROOM_JOINS =
+    "CROSS JOIN buffers b ON b.id = m.bufferId " +
+        "JOIN networks n ON n.id = b.networkId " +
+        "LEFT JOIN network_identity ni ON ni.networkId = b.networkId " +
+        "LEFT JOIN event_redirects redirect ON redirect.losingEventId = m.id"
+
+private const val GLOBAL_FEED_ACTIVE_ROOM = "WHERE b.type IN ('CHANNEL','QUERY') AND b.dismissed = 0 "
+
+private fun keysetPredicate(
+    key: GlobalFeedKey?,
+    seek: GlobalFeedSeek,
+    kind: GlobalFeedKind,
+    time: String,
+    id: String,
+): String {
+    if (key == null) return ""
+    val newer = seek == GlobalFeedSeek.NEWER
+    val comparison = if (newer) ">" else "<"
+    if (key.kind != kind) {
+        // At an equal timestamp the entire other source is on the same side of the cursor.
+        val includeEqual = (kind.sortOrder > key.kind.sortOrder) == newer
+        val timeComparison = if (includeEqual) "$comparison=" else comparison
+        return "AND $time $timeComparison ? "
     }
+    return "AND $time $comparison= ? AND ($time $comparison ? OR $id ${seek.idComparison()} ?) "
+}
+
+private fun GlobalFeedSeek.idComparison(): String =
+    when (this) {
+        GlobalFeedSeek.OLDER -> "<"
+        GlobalFeedSeek.OLDER_OR_AT -> "<="
+        GlobalFeedSeek.NEWER -> ">"
+    }
+
+private fun MutableList<Any>.addFeedSeekArgs(
+    key: GlobalFeedKey?,
+    limit: Int?,
+    kind: GlobalFeedKind,
+) {
+    if (key != null) {
+        add(key.serverTime)
+        if (key.kind == kind) {
+            add(key.serverTime)
+            add(key.id)
+        }
+    }
+    if (limit != null) add(limit)
+}
 
 private fun allOf(vararg clauses: String): String =
     clauses
@@ -692,3 +838,6 @@ private const val HEX = "0123456789abcdef"
 private val PRESENCE_KIND_SQL = PRESENCE_KINDS.joinToString(",") { "'${it.name}'" }
 private val ACTOR_PRESENCE_KIND_SQL = ACTOR_PRESENCE_KINDS.joinToString(",") { "'${it.name}'" }
 internal val CONVERSATION_KIND_SQL = CONVERSATION_KINDS.joinToString(",") { "'${it.name}'" }
+private val GLOBAL_FEED_ACTIVE_PARENT =
+    "AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL " +
+        "AND redirect.losingEventId IS NULL AND m.kind IN ($CONVERSATION_KIND_SQL) "
