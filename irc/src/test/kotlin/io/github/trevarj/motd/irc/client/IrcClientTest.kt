@@ -20,6 +20,7 @@ import kotlinx.coroutines.flow.filterIsInstance
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.StandardTestDispatcher
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.advanceTimeBy
@@ -33,6 +34,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import java.io.IOException
 import java.util.Base64
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.TimeUnit
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class IrcClientTest {
@@ -3036,6 +3039,84 @@ class IrcClientTest {
         }
 
     @Test
+    fun `LIST publishes bounded matches before the terminator on both response paths`() =
+        runTest {
+            for (useLabels in listOf(false, true)) {
+                val ft = FakeTransport()
+                val client = if (useLabels) registered(ft) else registeredNoCaps(ft)
+                for (cap in 0..1) {
+                    val snapshots = LinkedBlockingQueue<ChannelListProgress>()
+                    val result =
+                        clientScope().async {
+                            client.listChannels(minUsers = 10, cap = cap) {
+                                snapshots.add(it)
+                                if (cap == 0) error("observer stopped")
+                            }
+                        }
+                    runCurrent()
+                    val prefix =
+                        if (useLabels) {
+                            val label = responseLabel(ft.sent.last { it.contains("LIST") })
+                            ft.feed("@label=$label BATCH +list draft/labeled-response")
+                            "@batch=list "
+                        } else {
+                            ""
+                        }
+                    ft.feed("$prefix:srv 322 motd #filtered 10 :filtered")
+                    ft.feed("$prefix:srv 322 motd #first 11 :first")
+                    assertTrue(snapshots.isEmpty()) // Never run the observer inline on the eager IRC reader.
+                    runCurrent()
+                    assertFalse(result.isCompleted)
+                    val first = listOf(ChannelListing("#first", 11, "first")).take(cap)
+                    assertEquals(ChannelListProgress(first, 1), snapshots.remove())
+
+                    if (cap > 0) {
+                        // No publication without a match, even across an entire throttle interval.
+                        ft.feed("$prefix:srv 322 motd #ignored 0 :ignored")
+                        runCurrent()
+                        assertNull(snapshots.poll(250, TimeUnit.MILLISECONDS))
+                    }
+
+                    ft.feed("$prefix:srv 322 motd #largest 50 :largest")
+                    val largest = listOf(ChannelListing("#largest", 50, "largest")).take(cap)
+                    if (cap > 0) {
+                        runCurrent()
+                        assertEquals(ChannelListProgress(largest, 2), snapshots.remove())
+                    }
+                    ft.feed("$prefix:srv 322 motd #tie 50 :later tie")
+                    ft.feed("$prefix:srv 323 motd :End of /LIST")
+                    if (useLabels) ft.feed("BATCH -list")
+                    runCurrent()
+                    assertEquals(largest, result.await())
+                }
+            }
+        }
+
+    @Test
+    fun `cancelled raw LIST discards queued progress but drains remaining numerics`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val snapshots = mutableListOf<ChannelListProgress>()
+            val request = clientScope().async { client.listChannels { snapshots.add(it) } }
+            runCurrent()
+            ft.feed(":srv 322 motd #queued 3 :queued before cancellation")
+            request.cancel()
+            runCurrent()
+            val next = clientScope().async { client.listChannels() }
+            runCurrent()
+            assertEquals(1, ft.sent.count { it == "LIST" })
+            ft.feed(":srv 322 motd #late 5 :drained after cancellation")
+            ft.feed(":srv 323 motd :End of /LIST")
+            runCurrent()
+            assertTrue(snapshots.isEmpty())
+            assertEquals(2, ft.sent.count { it == "LIST" })
+            ft.feed(":srv 323 motd :End of /LIST")
+            runCurrent()
+            assertTrue(next.await().isEmpty())
+        }
+
+    @Test
     fun `LIST matches case mapped literal names before applying the cap`() =
         runTest {
             for (elist in listOf("U", "MU")) {
@@ -3210,7 +3291,8 @@ class IrcClientTest {
             val ft = FakeTransport()
             val client = registeredNoCaps(ft)
 
-            val first = clientScope().async { runCatching { client.listChannels() } }
+            val snapshots = mutableListOf<ChannelListProgress>()
+            val first = clientScope().async { runCatching { client.listChannels { snapshots.add(it) } } }
             runCurrent()
             assertEquals(1, ft.sent.count { it.startsWith("LIST") })
 
@@ -3227,6 +3309,7 @@ class IrcClientTest {
             ft.feed(":srv 323 motd :End of /LIST")
             runCurrent()
             assertEquals(2, ft.sent.count { it.startsWith("LIST") })
+            assertTrue(snapshots.isEmpty())
 
             ft.feed(":srv 322 motd #motd 42 :search response")
             ft.feed(":srv 323 motd :End of /LIST")
@@ -3394,6 +3477,7 @@ class IrcClientTest {
                 clientScope(),
                 observerBufferCapacity,
                 clientVersion = clientVersion,
+                listProgressDispatcher = StandardTestDispatcher(testScheduler),
             )
         client.start()
         runCurrent()
@@ -3432,7 +3516,7 @@ class IrcClientTest {
     /** Registers a client whose server offers no labeled-response cap (raw LIST fallback path). */
     private suspend fun kotlinx.coroutines.test.TestScope.registeredNoCaps(ft: FakeTransport): IrcClient {
         val caps = "message-tags server-time batch"
-        val client = IrcClient(config(), ft.factory(), clientScope())
+        val client = IrcClient(config(), ft.factory(), clientScope(), listProgressDispatcher = StandardTestDispatcher(testScheduler))
         client.start()
         runCurrent()
         ft.feed(":srv CAP * LS :$caps")

@@ -9,6 +9,7 @@ import io.github.trevarj.motd.data.db.JoinedChannelRow
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.gesture.FakeBuffers
 import io.github.trevarj.motd.gesture.FakeNetworks
 import io.github.trevarj.motd.irc.client.IrcClient
@@ -68,11 +69,15 @@ class ChannelListViewModelTest {
             assertTrue("LIST" in first.sent)
             first.feed(":srv 322 me #old-before-switch 100 :Old network")
             runCurrent()
+            val oldRows = browser.state.popular.visibleListings
+            assertEquals(listOf("#old-before-switch"), oldRows.map { it.name })
 
             browser.model.selectNetwork(2L)
             runCurrent()
             assertEquals(2L, browser.state.networkId)
             assertTrue(browser.state.popular.loading)
+            assertNull(browser.state.popular.progress)
+            assertNull(browser.state.popular.fetchedAtMillis)
             assertTrue("LIST" in second.sent)
             second.feed(":srv 322 me #current 100 :Selected network", ":srv 323 me :End of LIST")
             runCurrent()
@@ -84,6 +89,105 @@ class ChannelListViewModelTest {
             runCurrent()
             assertEquals(2L, browser.state.networkId)
             assertEquals(popularRows, browser.state.popular.listings)
+            assertNull(browser.state.popular.progress)
+        }
+
+    @Test
+    fun refreshShowsPartialRowsButFailureRestoresLastSuccessfulFetch() =
+        runTest {
+            val browser = Fixture(this)
+            val wire = browser.transports.getValue(1L)
+            wire.feed(":srv 322 me #saved 100 :Original")
+            runCurrent()
+            val partial = browser.state.popular
+            assertEquals(1L, partial.progress?.matchedCount)
+            assertNull(browser.state.popular.fetchedAtMillis)
+            assertTrue(partial.listings.isEmpty())
+
+            browser.now = 1_000L
+            wire.feed(":srv 323 me :End of LIST")
+            runCurrent()
+            val saved = browser.state.popular
+            assertEquals(listOf("#saved"), saved.visibleListings.map { it.name })
+            assertNull(saved.progress)
+            assertEquals(1_000L, saved.fetchedAtMillis)
+
+            browser.now = 2_000L
+            browser.model.refresh()
+            runCurrent()
+            assertEquals(saved.visibleListings, browser.state.popular.visibleListings)
+            wire.feed(":srv 322 me #partial 200 :Refreshing")
+            runCurrent()
+            val refreshing = browser.state.popular
+            assertEquals(listOf("#partial"), refreshing.visibleListings.map { it.name })
+            assertEquals(saved.listings, browser.state.popular.listings)
+            assertEquals(saved.fetchedAtMillis, browser.state.popular.fetchedAtMillis)
+
+            wire.feed(":srv 263 me LIST :Try again later", ":srv 322 me #late 200 :Ignored", ":srv 323 me :End of LIST")
+            runCurrent()
+            val failed = browser.state.popular
+            assertTrue(!failed.loading && failed.error != null)
+            assertNull(failed.progress)
+            assertEquals(saved.listings, failed.visibleListings)
+            assertEquals(saved.fetchedAtMillis, failed.fetchedAtMillis)
+        }
+
+    @Test
+    fun returningToSameSearchWhileCancelledListDrainsOnlyShowsNewRequestRows() =
+        runTest {
+            val browser = Fixture(this)
+            val wire = browser.transports.getValue(1L)
+            wire.feed(":srv 322 me #popular 100 :Popular", ":srv 323 me :End of LIST")
+            runCurrent()
+            browser.model.search("room")
+            runCurrent()
+            wire.feed(":srv 322 me #old-room 20 :First search")
+            runCurrent()
+            val first = requireNotNull(browser.state.remote).result
+            assertEquals(listOf("#old-room"), first.visibleListings.map { it.name })
+
+            browser.model.onQueryChange("different")
+            browser.model.search("room")
+            runCurrent()
+            wire.feed(":srv 322 me #late-room 20 :Cancelled search", ":srv 323 me :End of LIST")
+            runCurrent()
+            val fresh = requireNotNull(browser.state.remote).result
+            assertTrue(fresh.loading && fresh.visibleListings.isEmpty())
+            assertNull(fresh.fetchedAtMillis)
+            assertEquals(3, wire.sent.count { it == "LIST" })
+
+            wire.feed(":srv 322 me #new-room 20 :Second search")
+            runCurrent()
+            val second = requireNotNull(browser.state.remote).result
+            assertEquals(listOf("#new-room"), second.visibleListings.map { it.name })
+            wire.feed(":srv 323 me :End of LIST")
+            runCurrent()
+            val completed = requireNotNull(browser.state.remote).result
+            assertTrue(completed.loaded)
+            assertNull(completed.progress)
+            assertEquals(listOf("#new-room"), completed.listings.map { it.name })
+        }
+
+    @Test
+    fun closingDirectoryDiscardsPartialRefreshAndIgnoresLateReplies() =
+        runTest {
+            val browser = Fixture(this)
+            val wire = browser.transports.getValue(1L)
+            wire.feed(":srv 322 me #saved 100 :Original", ":srv 323 me :End of LIST")
+            runCurrent()
+            val saved = browser.state.popular
+            browser.model.refresh()
+            runCurrent()
+            wire.feed(":srv 322 me #partial 100 :Partial")
+            runCurrent()
+            val partial = browser.state.popular
+            assertEquals(listOf("#partial"), partial.visibleListings.map { it.name })
+
+            models.clear()
+            browser.now++
+            wire.feed(":srv 322 me #late 100 :Late", ":srv 323 me :End of LIST")
+            runCurrent()
+            assertEquals(saved, browser.state.popular)
         }
 
     @Test
@@ -184,14 +288,17 @@ class ChannelListViewModelTest {
         val connections: TestConnections
         val model: ChannelListViewModel
         val state get() = model.state.value
+        var now = 100L
 
         init {
+            val progressDispatcher = StandardTestDispatcher(scope.testScheduler)
             val clients =
                 transports.mapValues { (_, transport) ->
                     IrcClient(
                         IrcClientConfig("irc.example", 6697, true, "me", "me", "Me"),
                         TransportFactory { _, _, _, _, _ -> transport },
                         scope.backgroundScope,
+                        listProgressDispatcher = progressDispatcher,
                     ).apply { start() }
                 }
             scope.runCurrent()
@@ -211,7 +318,15 @@ class ChannelListViewModelTest {
                 object : BufferRepository by FakeBuffers() {
                     override fun observeJoinedChannels(networkId: Long) = memberships.getValue(networkId)
                 }
-            model = ChannelListViewModel(SavedStateHandle(mapOf("networkId" to 1L)), FakeNetworks(networks), buffers, connections, context)
+            model =
+                ChannelListViewModel(
+                    SavedStateHandle(mapOf("networkId" to 1L)),
+                    FakeNetworks(networks),
+                    buffers,
+                    connections,
+                    context,
+                    AppClock { now },
+                )
             models.put("browse", model)
             model.start()
             scope.runCurrent()

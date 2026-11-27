@@ -13,6 +13,8 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
+import io.github.trevarj.motd.di.AppClock
+import io.github.trevarj.motd.irc.client.ChannelListProgress
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
@@ -25,9 +27,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.job
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import javax.inject.Inject
@@ -37,7 +41,11 @@ data class DirectoryResult(
     val loading: Boolean = false,
     val loaded: Boolean = false,
     val error: String? = null,
-)
+    val progress: ChannelListProgress? = null,
+    val fetchedAtMillis: Long? = null,
+) {
+    val visibleListings: List<ChannelListing> get() = progress?.listings ?: listings
+}
 
 data class DirectorySearch(
     val query: String,
@@ -82,6 +90,7 @@ class ChannelListViewModel
         private val bufferRepository: BufferRepository,
         private val connectionManager: ConnectionManager,
         @ApplicationContext private val context: Context,
+        private val clock: AppClock = AppClock(System::currentTimeMillis),
     ) : ViewModel() {
         private val initialNetworkId = savedStateHandle.toRoute<ChannelListRoute>().networkId
         private val _state = MutableStateFlow(ChannelListUiState(query = savedStateHandle.get<String>(QUERY).orEmpty()))
@@ -252,6 +261,11 @@ class ChannelListViewModel
             queuedRequests.removeAll { it is DirectoryRequest.Search && it.query != term }
             savedStateHandle[QUERY] = query
             _state.value = current.copy(query = query, remote = current.remote?.takeIf { it.query == term })
+            val activeSearch = activeRequest as? DirectoryRequest.Search
+            if (activeSearch != null && activeSearch.query != term) {
+                cancelActiveRequest()
+                startNextRequest()
+            }
         }
 
         fun search(query: String) {
@@ -289,51 +303,81 @@ class ChannelListViewModel
             val client = readyClient ?: return
             if (activeRequest != null || !isCurrentReadyClient()) return
             val request = queuedRequests.removeFirstOrNull() ?: return
+            val networkId = _state.value.networkId
             activeRequest = request
             listJob =
                 viewModelScope.launch(start = CoroutineStart.LAZY) {
+                    val owner = coroutineContext.job
+
+                    fun ownsResult(): Boolean =
+                        listJob === owner && owner.isActive && _state.value.networkId == networkId &&
+                            readyClient === client && isCurrentReadyClient() &&
+                            (request !is DirectoryRequest.Search || _state.value.remote?.query == request.query)
+
+                    val progress = Channel<ChannelListProgress>(Channel.CONFLATED)
+                    val publisher =
+                        launch {
+                            for (snapshot in progress) {
+                                if (!ownsResult()) continue
+                                val current = _state.value
+                                _state.value = current.withResult(request, current.resultFor(request).copy(progress = snapshot))
+                            }
+                        }
                     val result =
                         try {
                             val listings =
-                                when (request) {
-                                    DirectoryRequest.Popular -> client.listChannels(minUsers = SMALL_CHANNEL_MAX_USERS, cap = DIRECTORY_CHANNEL_LIMIT)
-                                    DirectoryRequest.Smaller -> client.listChannels(maxUsers = SMALL_CHANNEL_MAX_USERS, cap = DIRECTORY_CHANNEL_LIMIT)
-                                    is DirectoryRequest.Search -> client.listChannels(cap = CHANNEL_SEARCH_LIMIT, nameContains = request.query)
-                                }
-                            DirectoryResult(listings = listings, loaded = true)
+                                client.listChannels(
+                                    minUsers = SMALL_CHANNEL_MAX_USERS.takeIf { request == DirectoryRequest.Popular },
+                                    maxUsers = SMALL_CHANNEL_MAX_USERS.takeIf { request == DirectoryRequest.Smaller },
+                                    cap = if (request is DirectoryRequest.Search) CHANNEL_SEARCH_LIMIT else DIRECTORY_CHANNEL_LIMIT,
+                                    nameContains = (request as? DirectoryRequest.Search)?.query,
+                                    onProgress = { progress.trySend(it) },
+                                )
+                            DirectoryResult(listings = listings, loaded = true, fetchedAtMillis = clock.nowMillis())
                         } catch (cancelled: CancellationException) {
                             throw cancelled
                         } catch (error: Exception) {
                             _state.value.resultFor(request).copy(
                                 loading = false,
+                                progress = null,
                                 error = error.message ?: context.getString(R.string.channel_list_load_failed),
                             )
+                        } finally {
+                            progress.cancel()
+                            publisher.cancel()
                         }
-                    if (readyClient !== client || !isCurrentReadyClient()) return@launch
-                    val current = _state.value
-                    if (request !is DirectoryRequest.Search || current.remote?.query == request.query) {
-                        _state.value = current.withResult(request, result)
-                    }
-                    if (autoIncludeSmaller && request == DirectoryRequest.Popular && result.loaded && result.listings.isEmpty()) {
+                    if (!ownsResult()) return@launch
+                    _state.value = _state.value.withResult(request, result)
+                    if (autoIncludeSmaller && request == DirectoryRequest.Popular && result.error == null && result.listings.isEmpty()) {
                         setIncludeSmaller(true)
                     }
+                    listJob = null
                     activeRequest = null
                     startNextRequest()
                 }
             listJob?.start()
         }
 
-        private fun cancelDirectory() {
+        private fun cancelActiveRequest() {
             listJob?.cancel()
+            listJob = null
             activeRequest = null
+        }
+
+        private fun cancelDirectory() {
+            cancelActiveRequest()
             queuedRequests.clear()
             val current = _state.value
             _state.value =
                 current.copy(
-                    popular = current.popular.copy(loading = false),
-                    smaller = current.smaller.copy(loading = false),
-                    remote = current.remote?.let { it.copy(result = it.result.copy(loading = false)) },
+                    popular = current.popular.copy(loading = false, progress = null),
+                    smaller = current.smaller.copy(loading = false, progress = null),
+                    remote = current.remote?.let { it.copy(result = it.result.copy(loading = false, progress = null)) },
                 )
+        }
+
+        override fun onCleared() {
+            cancelDirectory()
         }
 
         fun join(

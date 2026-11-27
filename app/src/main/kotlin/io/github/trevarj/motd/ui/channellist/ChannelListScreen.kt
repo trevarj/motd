@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Tune
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.IconButton
@@ -49,10 +50,12 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
@@ -83,6 +86,8 @@ import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import io.github.trevarj.motd.ui.theme.readingInk
+import java.text.DateFormat
+import java.util.Date
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
@@ -139,6 +144,7 @@ internal fun ChannelListContent(
         val focus = LocalFocusManager.current
         val canvas = MaterialTheme.colorScheme.surfaceContainerLowest
         val ready = state.availability == ChannelBrowserAvailability.READY
+        var sort by rememberSaveable { mutableStateOf(DirectorySort.POPULATION) }
         Scaffold(
             modifier = Modifier.testTag("channel_list_screen"),
             containerColor = canvas,
@@ -152,6 +158,7 @@ internal fun ChannelListContent(
                         }
                     },
                     actions = {
+                        if (ready) DirectorySortMenu(sort) { sort = it }
                         IconButton(
                             enabled = ready && !state.popular.loading && !state.smaller.loading,
                             onClick = onRefresh,
@@ -175,10 +182,37 @@ internal fun ChannelListContent(
                     onSelectNetwork(id)
                 }
                 if (ready) {
-                    ChannelDirectory(state, onQueryChange, onSearch, onRetryDirectory, onIncludeSmaller, onJoin, onOpenChat)
+                    ChannelDirectory(state, sort, onQueryChange, onSearch, onRetryDirectory, onIncludeSmaller, onJoin, onOpenChat)
                 } else {
                     NotReadyState(state, onConnect)
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DirectorySortMenu(
+    sort: DirectorySort,
+    onSelect: (DirectorySort) -> Unit,
+) {
+    var expanded by remember { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { expanded = true }, modifier = Modifier.testTag("channel_list_sort")) {
+            Icon(Icons.Outlined.Tune, stringResource(R.string.channel_list_sort))
+        }
+        EffectDropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+            DirectorySort.entries.forEach { option ->
+                val label = if (option == DirectorySort.NAME) R.string.channel_list_sort_name else R.string.channel_list_sort_population
+                DropdownMenuItem(
+                    text = { Text(stringResource(label)) },
+                    trailingIcon = { if (option == sort) Icon(Icons.Filled.Check, contentDescription = null) },
+                    onClick = {
+                        expanded = false
+                        onSelect(option)
+                    },
+                    modifier = Modifier.semantics { selected = option == sort }.testTag("channel_list_sort_${option.name.lowercase()}"),
+                )
             }
         }
     }
@@ -234,6 +268,7 @@ private fun NetworkSelector(
 @Composable
 private fun ChannelDirectory(
     state: ChannelListUiState,
+    sort: DirectorySort,
     onQueryChange: (String) -> Unit,
     onSearch: (String) -> Unit,
     onRetryDirectory: (Boolean) -> Unit,
@@ -258,19 +293,17 @@ private fun ChannelDirectory(
     }
     val exactTarget = exactChannelTarget(query, rules)
     val (smaller, popular, additional) =
-        remember(state.smaller.listings, state.popular.listings, state.includeSmaller, query, rules, remote?.listings) {
+        remember(state.smaller.visibleListings, state.popular.visibleListings, state.includeSmaller, query, rules, remote?.visibleListings, sort) {
             val seen = mutableSetOf<String>()
-
-            fun List<ChannelListing>.unique() = filter { seen.add(rules.normalize(it.name)) }
 
             Triple(
                 if (state.includeSmaller) {
-                    filterLoadedChannels(state.smaller.listings, query, rules).sortedBy { it.userCount }.unique()
+                    sortedDirectoryRows(filterLoadedChannels(state.smaller.visibleListings, query, rules), sort, rules, seen, smaller = true)
                 } else {
                     emptyList()
                 },
-                filterLoadedChannels(state.popular.listings, query, rules).sortedByDescending { it.userCount }.unique(),
-                remote?.listings.orEmpty().unique(),
+                sortedDirectoryRows(filterLoadedChannels(state.popular.visibleListings, query, rules), sort, rules, seen),
+                sortedDirectoryRows(remote?.visibleListings.orEmpty(), sort, rules, seen),
             )
         }
     val join = { name: String, secret: String?, openAfter: Boolean ->
@@ -361,7 +394,7 @@ private fun ChannelDirectory(
                 listingKey,
                 submitSearch,
                 listingRow,
-                emptyLabel = if (remote.listings.isEmpty()) R.string.channel_list_empty else R.string.channel_list_remote_duplicates,
+                emptyLabel = if (remote.visibleListings.isEmpty()) R.string.channel_list_empty else R.string.channel_list_remote_duplicates,
             )
         }
         if (query.isNotBlank()) {
@@ -396,9 +429,25 @@ private fun LazyListScope.directorySection(
     item(key = "section_$id") {
         Column(Modifier.testTag("channel_list_section_$id")) {
             SectionHeading(title)
+            result.fetchedAtMillis?.let { millis ->
+                val locale = LocalConfiguration.current.locales[0]
+                val time = remember(millis, locale) { DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale).format(Date(millis)) }
+                Text(
+                    stringResource(R.string.channel_list_last_fetch, time),
+                    modifier = Modifier.testTag("channel_list_fetched_$id"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            }
             when {
                 result.loading -> {
                     Text(stringResource(R.string.channel_list_loading), style = MaterialTheme.typography.bodySmall)
+                    result.progress?.matchedCount?.let { count ->
+                        Text(
+                            stringResource(R.string.channel_list_matched, count),
+                            modifier = Modifier.testTag("channel_list_progress_$id"),
+                            style = MaterialTheme.typography.bodySmall,
+                        )
+                    }
                     LinearProgressIndicator(Modifier.fillMaxWidth().padding(vertical = 4.dp))
                 }
 
@@ -417,7 +466,7 @@ private fun LazyListScope.directorySection(
                     Text(
                         stringResource(emptyLabel),
                         modifier =
-                            if (id == "remote" && result.listings.isEmpty()) {
+                            if (id == "remote" && result.visibleListings.isEmpty()) {
                                 Modifier.testTag("channel_list_search_empty")
                             } else {
                                 Modifier

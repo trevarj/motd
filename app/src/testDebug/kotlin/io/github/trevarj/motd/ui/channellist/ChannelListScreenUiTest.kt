@@ -11,6 +11,8 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsNotFocused
+import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -28,6 +30,7 @@ import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.prefs.ColorThemePreset
+import io.github.trevarj.motd.irc.client.ChannelListProgress
 import io.github.trevarj.motd.irc.client.ChannelListing
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
@@ -42,6 +45,8 @@ import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.text.DateFormat
+import java.util.Date
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -52,6 +57,57 @@ class ChannelListScreenUiTest {
 
     @get:Rule
     val compose = createComposeRule()
+
+    @Test
+    fun sortChangesOrderWithoutChangingExpandedChannel() {
+        val restoration = StateRestorationTester(compose)
+        val rows = listOf(ChannelListing("#zed", 300, "Zed topic"), ChannelListing("#alpha", 100, "Alpha topic"))
+        restoration.setContent {
+            MotdTheme { ChannelListContent(readyState().copy(popular = DirectoryResult(rows, loaded = true))) }
+        }
+        val alpha = compose.onNodeWithTag("channel_list_row_alpha")
+        val zed = compose.onNodeWithTag("channel_list_row_zed")
+
+        fun alphaFirst() = alpha.fetchSemanticsNode().boundsInRoot.top < zed.fetchSemanticsNode().boundsInRoot.top
+
+        assertTrue(!alphaFirst())
+        zed.performClick()
+        compose.onNodeWithTag("channel_list_sort").performClick()
+        compose.onNodeWithTag("channel_list_sort_name").performClick()
+        assertTrue(alphaFirst())
+        compose.onNodeWithTag("channel_list_topic_zed").assertIsDisplayed()
+        compose.onNodeWithTag("channel_list_topic_alpha").assertDoesNotExist()
+        restoration.emulateSavedInstanceStateRestore()
+        assertTrue(alphaFirst())
+        compose.onNodeWithTag("channel_list_sort").performClick()
+        compose.onNodeWithTag("channel_list_sort_population").performClick()
+        assertTrue(!alphaFirst())
+    }
+
+    @Test
+    fun partialRowsAndLastSuccessfulFetchFollowSectionState() {
+        val previous = DirectoryResult(listOf(ChannelListing("#previous", 125, "")), loaded = true, fetchedAtMillis = 1000L)
+        val partial = ChannelListProgress(listOf(ChannelListing("#new", 100, "")), matchedCount = 130L)
+        var result by mutableStateOf(previous.copy(loading = true, progress = partial))
+        lateinit var expected: String
+        compose.setContent {
+            val locale = androidx.compose.ui.platform.LocalConfiguration.current.locales[0]
+            expected = "Last fetched: " + DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT, locale).format(Date(1000L))
+            MotdTheme { ChannelListContent(readyState().copy(popular = result)) }
+        }
+        val fetched = compose.onNodeWithTag("channel_list_fetched_popular")
+        val progress = compose.onNodeWithTag("channel_list_progress_popular")
+        fetched.assertTextEquals(expected)
+        progress.assertTextEquals("Matching channels received: 130")
+        compose.onNodeWithText("Loading channels…").assertIsDisplayed()
+        compose.onNodeWithTag("channel_list_row_new").assertIsDisplayed()
+        compose.onNodeWithTag("channel_list_row_previous").assertDoesNotExist()
+        compose.runOnIdle { result = previous.copy(error = "Request failed") }
+        fetched.assertTextEquals(expected)
+        progress.assertDoesNotExist()
+        compose.onNodeWithTag("channel_list_row_new").assertDoesNotExist()
+        compose.onNodeWithTag("channel_list_row_previous").assertIsDisplayed()
+    }
 
     @Test
     fun directoryDescriptionsUseNeutralInkOnListFillWithoutChangingLinksOrUserCount() {

@@ -21,9 +21,11 @@ import io.github.trevarj.motd.irc.transport.TransportConfigurationException
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancelAndJoin
@@ -33,6 +35,7 @@ import kotlinx.coroutines.channels.ReceiveChannel
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -119,6 +122,11 @@ data class ChannelListing(
     val name: String,
     val userCount: Int,
     val topic: String,
+)
+
+data class ChannelListProgress(
+    val listings: List<ChannelListing>,
+    val matchedCount: Long,
 )
 
 /** Collects one unlabelled LIST response. The caller must start this before writing LIST. */
@@ -221,22 +229,32 @@ private class BoundedChannelListings(
         val order: Long,
     )
 
+    @Volatile
+    var progress: Channel<ChannelListProgress>? = null
+
     private val entries =
         PriorityQueue<Entry>(
             compareBy<Entry> { it.listing.userCount }.thenByDescending { it.order },
         )
-    private var nextOrder = 0L
+    private var matchedCount = 0L
+    private var lastProgressNanos = 0L
 
     fun add(element: ChannelListing) {
-        val entry = Entry(element, nextOrder++)
-        if (capacity <= 0) return
-        if (entries.size < capacity) {
-            entries.add(entry)
-            return
+        val order = matchedCount++
+        if (capacity > 0 && (entries.size < capacity || element.userCount > entries.peek().listing.userCount)) {
+            if (entries.size == capacity) entries.remove()
+            entries.add(Entry(element, order))
         }
-        if (element.userCount <= entries.peek().listing.userCount) return
-        entries.remove()
-        entries.add(entry)
+        val mailbox = progress ?: return
+        val now = System.nanoTime()
+        if (matchedCount != 1L && now - lastProgressNanos < 200_000_000L) return
+        lastProgressNanos = now
+        mailbox.trySend(ChannelListProgress(toList(), matchedCount))
+    }
+
+    fun stopProgress() {
+        progress?.cancel()
+        progress = null
     }
 
     fun toList(): List<ChannelListing> =
@@ -258,6 +276,8 @@ class IrcClient(
     private val observerBufferCapacity: Int = OBSERVER_EVENT_CAPACITY,
     private val nickRecoveryGuard: NickRecoveryGuard = NickRecoveryGuard(),
     clientVersion: String = "motd",
+    /** Must dispatch rather than resume inline on the protocol reader. */
+    private val listProgressDispatcher: CoroutineDispatcher = Dispatchers.Default,
 ) {
     private val _state = MutableStateFlow<IrcClientState>(IrcClientState.Disconnected)
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
@@ -2107,6 +2127,8 @@ class IrcClient(
      * wire filters share one comma-separated argument. Uses labeled-response when available;
      * otherwise collects raw 322s until 323, a rejection, or a 15s timeout. Returns the [cap]
      * most populated matching rows, keeping memory bounded even for a large unfiltered LIST.
+     * [onProgress] receives conflated, bounded snapshots outside the socket reader.
+     * The first match is immediate, then matching rows publish at most once every 200 ms.
      */
     suspend fun listChannels(
         mask: String? = null,
@@ -2114,6 +2136,43 @@ class IrcClient(
         cap: Int = 2000,
         maxUsers: Int? = null,
         nameContains: String? = null,
+        onProgress: ((ChannelListProgress) -> Unit)? = null,
+    ): List<ChannelListing> {
+        val out = BoundedChannelListings(cap)
+        if (onProgress == null) return collectChannelList(mask, minUsers, maxUsers, nameContains, out)
+        return coroutineScope {
+            val mailbox = Channel<ChannelListProgress>(Channel.CONFLATED)
+            out.progress = mailbox
+            val consumer =
+                launch(listProgressDispatcher) {
+                    try {
+                        for (snapshot in mailbox) {
+                            ensureActive()
+                            onProgress(snapshot)
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
+                        // A failed observer must not interrupt the LIST response.
+                    } finally {
+                        out.stopProgress()
+                    }
+                }
+            try {
+                collectChannelList(mask, minUsers, maxUsers, nameContains, out)
+            } finally {
+                consumer.cancel()
+                out.stopProgress()
+            }
+        }
+    }
+
+    private suspend fun collectChannelList(
+        mask: String?,
+        minUsers: Int?,
+        maxUsers: Int?,
+        nameContains: String?,
+        out: BoundedChannelListings,
     ): List<ChannelListing> {
         val support = _isupport.get()
         val caseMapping = support.identityRules.caseMapping
@@ -2142,7 +2201,6 @@ class IrcClient(
             }
         val params = if (filters.size <= 1) filters else listOf(filters.joinToString(","))
         val msg = IrcMessage(command = "LIST", params = params)
-        val out = BoundedChannelListings(cap)
         val collectRow: (IrcMessage) -> Unit = { message -> parseListMessage(message, minUsers, maxUsers, nameMatches)?.let(out::add) }
 
         if (hasCap("labeled-response")) {
@@ -2182,6 +2240,7 @@ class IrcClient(
                 out.toList()
             } finally {
                 if (sent && !drained) {
+                    out.stopProgress()
                     unlabeledChannelListDrain = UnlabeledChannelListResponse(t, collector)
                 } else {
                     if (sent) unlabeledChannelListDrain = null

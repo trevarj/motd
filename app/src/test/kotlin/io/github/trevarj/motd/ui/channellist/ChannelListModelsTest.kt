@@ -9,6 +9,34 @@ import org.junit.Test
 
 class ChannelListModelsTest {
     @Test
+    fun directorySortUsesNetworkNamesForOrderingAndPopulationTies() {
+        val bracket = ChannelListing("#[room]", 10, "")
+        val zed = ChannelListing("#Z", 10, "")
+        val quiet = ChannelListing("#a", 1, "")
+        val rows = listOf(bracket, zed, quiet, bracket.copy(name = "#{room}"))
+        val rules = IrcIdentityRules()
+        assertEquals(listOf(zed, bracket, quiet), sortedDirectoryRows(rows, DirectorySort.POPULATION, rules, mutableSetOf()))
+        assertEquals(listOf(quiet, zed, bracket), sortedDirectoryRows(rows, DirectorySort.POPULATION, rules, mutableSetOf(), smaller = true))
+        assertEquals(listOf(quiet, zed, bracket), sortedDirectoryRows(rows, DirectorySort.NAME, rules, mutableSetOf()))
+        val ascii = IrcIdentityRules.from("ascii", null)
+        assertEquals(listOf(bracket, quiet, zed), sortedDirectoryRows(rows.take(3), DirectorySort.NAME, ascii, mutableSetOf()))
+    }
+
+    @Test
+    fun sectionPopulationSelectsAliasRepresentativeRegardlessOfDisplaySort() {
+        val busy = ChannelListing("#[Room]", 20, "Busy topic")
+        val quiet = ChannelListing("#{room}", 2, "Quiet topic")
+        val otherAlias = quiet.copy(name = "#[room]", topic = "Later topic")
+        for (sort in DirectorySort.entries) {
+            val rules = IrcIdentityRules()
+            val seen = mutableSetOf<String>()
+            assertEquals(listOf(quiet), sortedDirectoryRows(listOf(busy, quiet, otherAlias), sort, rules, seen, smaller = true))
+            assertEquals(emptyList<ChannelListing>(), sortedDirectoryRows(listOf(busy), sort, rules, seen))
+            assertEquals(listOf(busy), sortedDirectoryRows(listOf(quiet, busy), sort, rules, mutableSetOf()))
+        }
+    }
+
+    @Test
     fun `live ready client wins while manager snapshot is absent or stale`() {
         val ready = IrcClientState.Ready("me", emptySet(), mapOf("ELIST" to "U"))
 

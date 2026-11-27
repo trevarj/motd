@@ -60,6 +60,38 @@ fun channelBrowserAvailability(
         }
     }
 
+internal enum class DirectorySort { POPULATION, NAME }
+
+internal fun sortedDirectoryRows(
+    listings: List<ChannelListing>,
+    sort: DirectorySort,
+    rules: IrcIdentityRules,
+    seen: MutableSet<String>,
+    smaller: Boolean = false,
+): List<ChannelListing> {
+    if (listings.isEmpty()) return emptyList()
+    val representatives = HashMap<String, ChannelListing>()
+    for (listing in listings) {
+        val name = rules.normalize(listing.name)
+        if (name in seen) continue
+        val previous = representatives[name]
+        if (previous == null || (if (smaller) listing.userCount < previous.userCount else listing.userCount > previous.userCount)) {
+            representatives[name] = listing
+        }
+    }
+    seen.addAll(representatives.keys)
+    return representatives.entries
+        .sortedWith { a, b ->
+            val population =
+                when {
+                    sort == DirectorySort.NAME -> 0
+                    smaller -> a.value.userCount.compareTo(b.value.userCount)
+                    else -> b.value.userCount.compareTo(a.value.userCount)
+                }
+            if (population == 0) a.key.compareTo(b.key) else population
+        }.map { it.value }
+}
+
 internal fun filterLoadedChannels(
     listings: List<ChannelListing>,
     query: String,

@@ -2020,6 +2020,11 @@
     <string name="channel_list_search_action">Search network</string>
     <string name="channel_list_refresh">Refresh channel list</string>
     <string name="channel_list_loading">Loading channels…</string>
+    <string name="channel_list_sort">Sort channels</string>
+    <string name="channel_list_sort_name">Name</string>
+    <string name="channel_list_sort_population">Population</string>
+    <string name="channel_list_last_fetch">Last fetched: %1$s</string>
+    <string name="channel_list_matched">Matching channels received: %1$d</string>
     <string name="channel_list_popular">Most populated</string>
     <string name="channel_list_include_smaller">Include smaller channels</string>
     <string name="channel_list_smaller">Smaller channels first</string>
