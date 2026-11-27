@@ -263,6 +263,8 @@ class IrcClient(
     val state: StateFlow<IrcClientState> = _state.asStateFlow()
     private val _joinedChannels = MutableStateFlow<Set<String>>(emptySet())
     val joinedChannels: StateFlow<Set<String>> = _joinedChannels.asStateFlow()
+    private val selfPrivileges = SelfChannelPrivileges()
+    val selfChannelModes: StateFlow<Map<String, Set<Char>>> = selfPrivileges.modes
 
     @Volatile
     var latestSelfMembershipEvent: IrcEvent? = null
@@ -381,6 +383,7 @@ class IrcClient(
 
     fun stop() {
         _joinedChannels.value = emptySet()
+        selfPrivileges.clear()
         latestSelfMembershipEvent = null
         watchdog?.stop()
         watchdog = null
@@ -507,13 +510,18 @@ class IrcClient(
                     }
                 val isMetadataFrame =
                     when (parsed.command) {
-                        "366", "730", "760", "761", "766", "770", "771", "772", "774", "775", "JOIN", "NICK" -> true
+                        "366", "730", "731", "760", "761", "766", "770", "771", "772", "774", "775",
+                        "JOIN", "PART", "KICK", "QUIT", "NICK", "RENAME", "METADATA",
+                        -> true
+
                         "BATCH" -> parsed.params.getOrNull(1) == "metadata" && parsed.params[0].startsWith("+")
+
                         "NOTE", "WARN", "FAIL" -> parsed.params.firstOrNull() == "METADATA"
+
                         else -> false
                     }
                 val msg =
-                    if (isMetadataFrame && hasCap(METADATA_V3_CAP) && hasCap("batch")) {
+                    if (isMetadataFrame && METADATA_VERSIONED_CAPS.any(::hasCap) && hasCap("batch")) {
                         parsed.copy(wireSequence = ++metadataWireSequence, selfNickAtRead = selfNick.get())
                     } else if (!registered && parsed.command == "001") {
                         parsed.copy(wireSequence = ++metadataWireSequence)
@@ -774,6 +782,7 @@ class IrcClient(
         ev: IrcEvent,
         criticalEvents: Channel<IrcEvent>,
     ) {
+        selfPrivileges.apply(ev, isupport, selfNick.get(), _joinedChannels.value)
         updateJoinedChannels(ev)
         if (ev is IrcEvent.BouncerNetworkState) {
             _bouncerNetworks.update { cur ->
@@ -800,6 +809,18 @@ class IrcClient(
 
                 is IrcEvent.Kicked -> {
                     event.channel.takeIf { event.isSelf }
+                }
+
+                is IrcEvent.ChannelRenamed -> {
+                    val old = isupport.normalize(event.oldName)
+                    _joinedChannels.update { joined ->
+                        if (joined.none { isupport.normalize(it) == old }) {
+                            joined
+                        } else {
+                            joined.filterNotTo(linkedSetOf()) { isupport.normalize(it) == old } + event.newName
+                        }
+                    }
+                    return
                 }
 
                 is IrcEvent.NetworkBatch -> {
@@ -958,6 +979,18 @@ class IrcClient(
                     }
                 }
             }
+        if (tree.type == "metadata" && !historical && responseLabel == null && hasCap("draft/metadata-2") && hasCap("batch")) {
+            val target = tree.params.firstOrNull() ?: return flattened
+            val messages = tree.children.mapNotNull { (it as? BatchChild.Message)?.message }
+            return flattened +
+                IrcEvent.MetadataSnapshot(
+                    target,
+                    messages,
+                    tree.opening.wireSequence,
+                    tree.openedAtNanos,
+                    tree.opening.selfNickAtRead,
+                )
+        }
         return if (tree.type == "chathistory") {
             val target = tree.params.firstOrNull().orEmpty()
             listOf(
@@ -1254,7 +1287,10 @@ class IrcClient(
         criticalEvents: Channel<IrcEvent>,
     ) {
         val isupport = _isupport.get()
+        val priorPrefix = isupport["PREFIX"]
+        val priorCaseMapping = isupport.identityRules.caseMapping
         isupport.update(msg.params.drop(1).dropLast(1))
+        if (priorPrefix != isupport["PREFIX"] || priorCaseMapping != isupport.identityRules.caseMapping) selfPrivileges.clear()
         val removedIsupport = isupport.removedKeys
         if (isupport["CHANTYPES"] != null || "CHANTYPES" in removedIsupport) _targetClassificationReady.value = true
         channelBanSession.get()?.updateMapping(isupport.identityRules.caseMapping)
@@ -1273,6 +1309,7 @@ class IrcClient(
         val banSession = channelBanSession.get()
         if (criticalEvents === criticalEventChannel && channelBanSession.compareAndSet(banSession, null)) banSession?.close()
         _joinedChannels.value = emptySet()
+        selfPrivileges.clear()
         latestSelfMembershipEvent = null
         publish(criticalEvents, IrcEvent.Disconnected(reason))
     }
@@ -1449,14 +1486,33 @@ class IrcClient(
     /** Attach a label tag, suspend until the labeled response/ack batch completes. */
     suspend fun sendLabeled(msg: IrcMessage): List<IrcMessage> = sendLabeledResponse(msg).messages
 
+    /** Like [sendLabeled], but recheck feature-specific write fencing under the outbound lock. */
+    suspend fun sendLabeled(
+        msg: IrcMessage,
+        beforeWrite: () -> Unit,
+    ): List<IrcMessage> = sendLabeledResponse(msg, beforeWrite = beforeWrite).messages
+
+    /** The metadata batch opening, not its contained rows, orders a GET snapshot against live updates. */
+    suspend fun sendLabeledMetadataGet(
+        msg: IrcMessage,
+        beforeWrite: () -> Unit,
+    ): Pair<Long, List<IrcMessage>> {
+        val response = sendLabeledResponse(msg, beforeWrite = beforeWrite)
+        val opening =
+            response.rootBatch?.takeIf { it.params.getOrNull(1) == "metadata" }
+                ?: response.messages.firstOrNull { it.command == "BATCH" && it.params.getOrNull(1) == "metadata" }
+        return (opening?.wireSequence ?: 0L) to response.messages
+    }
+
     private suspend fun sendLabeledResponse(
         msg: IrcMessage,
+        beforeWrite: (() -> Unit)? = null,
         consumer: ((IrcMessage) -> Unit)? = null,
     ): CorrelatedResponse {
         val t = transport ?: throw IrcDisconnectedException(msg.command, null)
         // Degrade without labeled-response: send unlabeled, complete immediately with empty list.
         if (!hasCap("labeled-response")) {
-            if (!sendSerialized(t, msg)) throw unlabeledWhoisBusy()
+            if (!sendSerialized(t, msg, onWrite = beforeWrite)) throw unlabeledWhoisBusy()
             return CorrelatedResponse(emptyList(), rootBatch = null)
         }
         val label = labels.next()
@@ -1464,7 +1520,7 @@ class IrcClient(
         labels.register(label, msg.command, deferred, consumer = consumer)
         val labeled = msg.copy(tags = msg.tags + ("label" to label))
         return try {
-            sendSerialized(t, labeled)
+            sendSerialized(t, labeled, onWrite = beforeWrite)
             withTimeout(LABEL_TIMEOUT_MS) { deferred.await() }
         } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
             throw IrcTimeoutException(label)

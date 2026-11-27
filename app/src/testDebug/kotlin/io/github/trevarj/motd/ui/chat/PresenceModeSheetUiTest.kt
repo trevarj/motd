@@ -76,6 +76,7 @@ class PresenceModeSheetUiTest {
                     onShowComposerFormattingTools = {},
                     onShowVoiceMessageButton = {},
                     onNicknameTapAction = {},
+                    onProfileDisplayNameFirst = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},

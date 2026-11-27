@@ -41,6 +41,23 @@ class ComposerToolsSettingsTest {
         }
 
     @Test
+    fun ircIdentityComesFirstByDefaultAndOrderPersists() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val original = repository.settings.first().profileDisplayNameFirst
+            try {
+                assertFalse(original)
+                assertFalse(Json.decodeFromString<Settings>("{}").profileDisplayNameFirst)
+                repository.setProfileDisplayNameFirst(true)
+                assertTrue(DataStoreSettingsRepository(context).settings.first().profileDisplayNameFirst)
+                repository.setProfileDisplayNameFirst(false)
+                assertFalse(repository.settings.first().profileDisplayNameFirst)
+            } finally {
+                repository.setProfileDisplayNameFirst(original)
+            }
+        }
+
+    @Test
     fun formattingToolsPreferenceRoundTrips() =
         runTest {
             repository.setShowComposerFormattingTools(false)

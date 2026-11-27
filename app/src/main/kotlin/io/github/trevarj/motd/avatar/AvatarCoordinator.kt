@@ -18,6 +18,8 @@ import io.github.trevarj.motd.irc.client.preferredNoImplicitNames
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.profile.ProfileKey
+import io.github.trevarj.motd.profile.ProfileWriteResult
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -38,13 +40,7 @@ import javax.inject.Singleton
 sealed interface ConversationAvatarOutcome {
     data object LocalOnly : ConversationAvatarOutcome
 
-    data object Shared : ConversationAvatarOutcome
-
-    data object RequestSent : ConversationAvatarOutcome
-
     data object LocalReset : ConversationAvatarOutcome
-
-    data object SharedCleared : ConversationAvatarOutcome
 
     data object Invalid : ConversationAvatarOutcome
 
@@ -80,10 +76,6 @@ interface AvatarController {
 
     suspend fun resetConversationAvatar(bufferId: Long): ConversationAvatarOutcome = ConversationAvatarOutcome.Failed
 
-    suspend fun shareConversationAvatar(bufferId: Long): ConversationAvatarOutcome = ConversationAvatarOutcome.Failed
-
-    suspend fun clearSharedConversationAvatar(bufferId: Long): ConversationAvatarOutcome = ConversationAvatarOutcome.Failed
-
     fun publishingAvailable(networkId: Long): Boolean
 }
 
@@ -111,10 +103,6 @@ object NoopAvatarController : AvatarController {
 
     override suspend fun resetConversationAvatar(bufferId: Long) = ConversationAvatarOutcome.Failed
 
-    override suspend fun shareConversationAvatar(bufferId: Long) = ConversationAvatarOutcome.Failed
-
-    override suspend fun clearSharedConversationAvatar(bufferId: Long) = ConversationAvatarOutcome.Failed
-
     override fun publishingAvailable(networkId: Long) = false
 }
 
@@ -139,11 +127,16 @@ class AvatarCoordinator
         private val pendingMetadata = mutableMapOf<MetadataRequestKey, MetadataRequest>()
         private val expectedMetadataSnapshots = mutableMapOf<MetadataRequestKey, SnapshotTrigger>()
         private val avatarSubscriptions = mutableMapOf<Long, IrcClient>()
+        private val subscriptionLock = Mutex()
+        private val profileSubscriptions = ConcurrentHashMap<Long, ProfileSubscriptions>()
         private val onlineMonitors = ConcurrentHashMap<Long, MutableSet<String>>()
         private val selfWrites = ConcurrentHashMap<Long, IrcClient>()
-        private val avatarEditLock = Mutex()
-        private val avatarEditGenerations = mutableMapOf<Long, Long>()
-        private var avatarEditGeneration = 0L
+        private val selfAvatarLock = Mutex()
+
+        private data class ProfileSubscriptions(
+            val client: IrcClient,
+            val keys: List<ProfileKey>,
+        )
 
         private data class SnapshotTrigger(
             val sequence: Long,
@@ -166,11 +159,8 @@ class AvatarCoordinator
 
         private class MetadataRequest(
             val message: IrcMessage,
-            val roomId: Long? = null,
             val refresh: Boolean = false,
-            val editGeneration: Long? = null,
         ) {
-            var labeled = roomId != null
             var writtenAt: Long? = System.nanoTime()
             var retry: Job? = null
             var retrySeconds = 0L
@@ -250,21 +240,20 @@ class AvatarCoordinator
             client: IrcClient,
             replaySelf: Boolean,
         ) {
-            val caps = client.ready?.caps ?: return
-            val version = metadataVersion(caps) ?: return
-            val show = prefs.config.first().showSharedAvatars
-            if (version == METADATA_CAP || (show && supportsMetadataSubscription(caps))) {
-                updateSubscription(networkId, client, show)
-            }
+            if (metadataVersion(client.ready?.caps.orEmpty()) == null) return
+            updateSubscriptions(networkId, client, prefs.config.first().showSharedAvatars)
             if (!replaySelf) return
-            val url =
-                when (val self = prefs.selfSetting(networkId).first()) {
-                    SelfAvatarSetting.Unmanaged -> return
-                    SelfAvatarSetting.ExplicitlyCleared -> null
-                    is SelfAvatarSetting.Set -> self.url
+            selfAvatarLock.withLock {
+                if (prefs.profileOwnsSelfAvatar(networkId)) return
+                val url =
+                    when (val self = prefs.selfSetting(networkId).first()) {
+                        SelfAvatarSetting.Unmanaged -> return
+                        SelfAvatarSetting.ExplicitlyCleared -> null
+                        is SelfAvatarSetting.Set -> self.url
+                    }
+                if (connections.get().clientFor(networkId) === client) {
+                    client.publishSelfAvatarIfReady(networkId, url)
                 }
-            if (connections.get().clientFor(networkId) === client) {
-                client.publishSelfAvatarIfReady(networkId, url)
             }
         }
 
@@ -346,7 +335,9 @@ class AvatarCoordinator
                 is IrcEvent.Joined -> {
                     val client = connections.get().clientFor(networkId) ?: return
                     val caps = client.ready?.caps.orEmpty()
-                    if (event.isSelf && client.supportsV2Subscriptions() && prefs.config.first().showSharedAvatars) {
+                    if (event.isSelf && client.supportsV2Subscriptions() &&
+                        (hasProfileSubscriptions(networkId, client) || prefs.config.first().showSharedAvatars)
+                    ) {
                         client.send(syncMetadataMessage(event.channel))
                     } else if (metadataVersion(caps) == METADATA_V3_CAP) {
                         withSharedAvatars {
@@ -358,7 +349,7 @@ class AvatarCoordinator
                                 cache.rosters[channel]?.joins?.set(client.isupport.normalize(event.nick), event.wireSequence)
                             }
                         }
-                        if (event.isSelf && prefs.config.first().showSharedAvatars) {
+                        if (event.isSelf) {
                             expectMetadataSnapshots(networkId, listOf(event.channel), event.wireSequence)
                         }
                     }
@@ -432,7 +423,7 @@ class AvatarCoordinator
             val client = connections.get().clientFor(networkId) ?: return
             if (metadataVersion(client.ready?.caps.orEmpty()) != METADATA_V3_CAP) return
             metadataLock.withLock {
-                if (!registration && avatarSubscriptions[networkId] !== client) return@withLock
+                if (!registration && avatarSubscriptions[networkId] !== client && !hasProfileSubscriptions(networkId, client)) return@withLock
                 val trigger = SnapshotTrigger(triggerSequence)
                 targets.forEach { target ->
                     expectedMetadataSnapshots[client.metadataKey(networkId, "SYNC", target)] = trigger
@@ -518,6 +509,7 @@ class AvatarCoordinator
             val version = metadataVersion(ready.caps) ?: return
             val v3 = version == METADATA_V3_CAP
             if (v3 && (!client.isMetadataReply(message) || "batch" in message.tags || "label" in message.tags)) return
+            if (!v3 && message.command in avatarNumericCommands && !client.isMetadataReply(message)) return
             if (v3 && message.command == "775") {
                 handleRateLimit(networkId, client, message)
                 return
@@ -555,7 +547,7 @@ class AvatarCoordinator
                 metadataLock.withLock {
                     val key = client.metadataKey(networkId, "SET", client.resolveMetadataTarget(target, selfNick))
                     val pending = pendingMetadata[key]
-                    if (pending != null && !pending.labeled && pending.retry == null &&
+                    if (pending != null && pending.retry == null &&
                         (key.target == "*" || metadata.matchesRequestedValue(pending.message.params.getOrNull(3)))
                     ) {
                         removeMetadataRequest(key)
@@ -563,12 +555,13 @@ class AvatarCoordinator
                 }
             }
             if (metadata is AvatarMetadataEvent.SyncLater) {
-                if (!prefs.config.first().showSharedAvatars) return
+                val hasProfiles = hasProfileSubscriptions(networkId, client)
+                if (!hasProfiles && !prefs.config.first().showSharedAvatars) return
                 if (v3) {
                     if (!supportsMetadataSubscription(ready.caps)) return
                     val request = syncMetadataMessage(client.resolveMetadataTarget(metadata.target, selfNick))
                     metadataLock.withLock {
-                        if (avatarSubscriptions[networkId] !== client) return@withLock
+                        if (!hasProfiles && avatarSubscriptions[networkId] !== client) return@withLock
                         val key = client.metadataKey(networkId, request)
                         expectedMetadataSnapshots.remove(key)
                         val pending = pendingMetadata.getOrPut(key) { MetadataRequest(request) }
@@ -628,52 +621,59 @@ class AvatarCoordinator
             }
         }
 
-        private suspend fun handleSnapshot(
+        internal suspend fun handleSnapshot(
             networkId: Long,
             event: IrcEvent.MetadataSnapshot,
             positiveOnly: Boolean,
             explicitValues: Boolean,
-        ) {
-            val client = connections.get().clientFor(networkId) ?: return
-            val ready = client.ready ?: return
-            if (metadataVersion(ready.caps) != METADATA_V3_CAP || !isMetadataTarget(event.target)) return
+        ): Boolean {
+            val client = connections.get().clientFor(networkId) ?: return false
+            val ready = client.ready ?: return false
+            if (metadataVersion(ready.caps) != METADATA_V3_CAP || !isMetadataTarget(event.target)) return false
+            val selfNick = event.selfNickAtOpen ?: ready.nick
+            val target = if (event.target == "*") selfNick else event.target
+            val currentTarget =
+                cacheLock.withLock {
+                    if (target == "*ALL" && openedBeforeAvatarsEnabled(event)) return false
+                    avatarCaches[networkId]?.takeIf { it.client === client }?.currentNick(target, event.openingSequence) ?: target
+                }
+            var omissions = false
+            val authorized =
+                !explicitValues &&
+                    metadataLock.withLock {
+                        val key = client.metadataKey(networkId, "SYNC", currentTarget)
+                        val expected = expectedMetadataSnapshots[key]
+                        val sync = if (event.joinResponseLabel == null) pendingMetadata[key] else null
+                        val now = System.nanoTime()
+                        // Closing after a trigger does not make a batch that opened earlier its response.
+                        val synced =
+                            sync?.writtenAt?.let { sentAt ->
+                                now - sentAt <= METADATA_SNAPSHOT_WINDOW_NS &&
+                                    (event.openedAtNanos == 0L || event.openedAtNanos - sentAt >= 0L)
+                            } == true
+                        val automatic = expected?.authorizes(event, now) == true
+                        if (!positiveOnly) {
+                            if (automatic) expectedMetadataSnapshots.remove(key)
+                            // *ALL after SUB contains only the newly subscribed keys, not all keys.
+                            omissions = target != "*ALL" && (synced || automatic) || synced && !automatic
+                            if (synced || (automatic && sync?.refresh == true && sync.writtenAt == null)) removeMetadataRequest(key)
+                        }
+                        synced || automatic
+                    }
+            if (!authorized && !explicitValues) return false
             withSharedAvatars {
-                if (connections.get().clientFor(networkId) !== client ||
-                    (
-                        event.openedAtNanos != 0L && sharedAvatarsEnabledAtNanos != 0L &&
-                            event.openedAtNanos - sharedAvatarsEnabledAtNanos < 0L
-                    )
-                ) {
+                if (connections.get().clientFor(networkId) !== client || openedBeforeAvatarsEnabled(event)) {
                     return@withSharedAvatars
                 }
                 val cache = avatarCache(networkId, client)
-                val selfNick = event.selfNickAtOpen ?: ready.nick
-                val target = if (event.target == "*") selfNick else event.target
-                if (!explicitValues) {
-                    val authorized =
-                        metadataLock.withLock {
-                            val currentTarget = cache.currentNick(target, event.openingSequence)
-                            val key = client.metadataKey(networkId, "SYNC", currentTarget)
-                            val expected = expectedMetadataSnapshots[key]
-                            val sync = if (event.joinResponseLabel == null) pendingMetadata[key] else null
-                            val now = System.nanoTime()
-                            // Closing after a trigger does not make a batch that opened earlier its response.
-                            val synced =
-                                sync?.writtenAt?.let { sentAt ->
-                                    now - sentAt <= METADATA_SNAPSHOT_WINDOW_NS &&
-                                        (event.openedAtNanos == 0L || event.openedAtNanos - sentAt >= 0L)
-                                } == true
-                            val automatic = expected?.authorizes(event, now) == true
-                            if (!positiveOnly) {
-                                if (automatic) expectedMetadataSnapshots.remove(key)
-                                if (synced || (automatic && sync?.refresh == true && sync.writtenAt == null)) removeMetadataRequest(key)
-                            }
-                            synced || automatic
-                        }
-                    if (!authorized) return@withSharedAvatars
-                }
-                applyMetadataSnapshot(networkId, cache, selfNick, target, event, positiveOnly, explicitValues)
+                applyMetadataSnapshot(networkId, cache, selfNick, target, event, positiveOnly, explicitValues, omissions)
             }
+            return omissions && target != "*ALL"
+        }
+
+        private fun openedBeforeAvatarsEnabled(event: IrcEvent.MetadataSnapshot): Boolean {
+            val openedAt = event.openedAtNanos
+            return openedAt != 0L && sharedAvatarsEnabledAtNanos != 0L && openedAt - sharedAvatarsEnabledAtNanos < 0L
         }
 
         private suspend fun applyMetadataSnapshot(
@@ -684,10 +684,11 @@ class AvatarCoordinator
             event: IrcEvent.MetadataSnapshot,
             positiveOnly: Boolean,
             explicitValues: Boolean,
+            omissions: Boolean,
         ) {
             val client = cache.client
             val normalize = client.isupport::normalize
-            val seen = hashSetOf<String>()
+            val seen = if (omissions) hashSetOf<String>() else null
             for (message in event.messages) {
                 if (positiveOnly && message.command != "761") continue
                 if (explicitValues && message.command != "761" && message.command != "766") continue
@@ -704,13 +705,13 @@ class AvatarCoordinator
                     }
                 if (positiveOnly && metadata !is AvatarMetadataEvent.Changed) continue
                 when (metadata) {
-                    is AvatarMetadataEvent.Changed -> seen += normalize(cache.currentNick(metadata.target, message.wireSequence))
-                    is AvatarMetadataEvent.Removed -> seen += normalize(cache.currentNick(metadata.target, message.wireSequence))
+                    is AvatarMetadataEvent.Changed -> seen?.add(normalize(cache.currentNick(metadata.target, message.wireSequence)))
+                    is AvatarMetadataEvent.Removed -> seen?.add(normalize(cache.currentNick(metadata.target, message.wireSequence)))
                     is AvatarMetadataEvent.SyncLater -> continue
                 }
                 storeAvatar(networkId, metadata, cache, message.wireSequence)
             }
-            if (positiveOnly || explicitValues || event.messages.any { it.command == "FAIL" }) return
+            if (seen == null || event.messages.any { it.command == "FAIL" }) return
 
             val omitted = AvatarOmission(seen, event.openingSequence)
             val scope = hashSetOf(normalize(cache.currentNick(target, event.openingSequence)))
@@ -777,7 +778,10 @@ class AvatarCoordinator
             selfNick: String? = message.selfNickAtRead ?: ready?.nick,
         ): Boolean =
             message.source?.user == null && message.source?.host == null && selfNick != null &&
-                message.params.firstOrNull()?.let { isupport.normalize(it) == isupport.normalize(selfNick) } == true
+                message.params.firstOrNull()?.let {
+                    isupport.normalize(it) == isupport.normalize(selfNick) ||
+                        (it == "*" && metadataVersion(ready?.caps.orEmpty()) == METADATA_V3_CAP)
+                } == true
 
         private fun IrcClient.resolveMetadataTarget(
             target: String,
@@ -814,6 +818,7 @@ class AvatarCoordinator
             if (operation == null) {
                 expectedMetadataSnapshots.keys.removeAll { it.networkId == networkId }
                 avatarSubscriptions.remove(networkId)
+                profileSubscriptions.remove(networkId)
             }
             val requests = pendingMetadata.iterator()
             while (requests.hasNext()) {
@@ -832,7 +837,6 @@ class AvatarCoordinator
             networkId: Long,
             client: IrcClient,
             message: IrcMessage,
-            expected: MetadataRequest? = null,
         ): Boolean {
             if (message.command != "775" || !client.isMetadataReply(message) || message.params.size !in 4..6) return false
             val seconds = metadataRetrySeconds(message.params[1]) ?: return false
@@ -840,8 +844,8 @@ class AvatarCoordinator
             return metadataLock.withLock {
                 val request = pendingMetadata[key] ?: return@withLock false
                 val writtenAt = request.writtenAt ?: return@withLock false
-                if (System.nanoTime() - writtenAt > METADATA_SNAPSHOT_WINDOW_NS || request.labeled != (expected != null) ||
-                    (expected != null && request !== expected) || request.message.params != message.params.subList(2, message.params.size)
+                if (System.nanoTime() - writtenAt > METADATA_SNAPSHOT_WINDOW_NS ||
+                    request.message.params != message.params.subList(2, message.params.size)
                 ) {
                     return@withLock false
                 }
@@ -862,55 +866,50 @@ class AvatarCoordinator
             request.retry =
                 scope.launch {
                     delay(delayMs)
-                    val labeled =
-                        metadataLock.withLock {
-                            if (pendingMetadata[key] !== request) return@withLock false
-                            request.retry = null
-                            request.retrySeconds = 0L
-                            val client = key.client
-                            val caps = client.ready?.caps.orEmpty()
-                            val allowed =
-                                when (request.message.params[1]) {
-                                    "SUB", "SYNC" -> {
-                                        prefs.config.first().showSharedAvatars && supportsMetadataSubscription(caps)
-                                    }
-
-                                    "UNSUB" -> {
-                                        !prefs.config.first().showSharedAvatars
-                                    }
-
-                                    "SET" -> {
-                                        val url = request.message.params.getOrNull(3)
-                                        val self = key.target == "*"
-                                        avatarWriteAllowed(caps, url, self) &&
-                                            (!self || prefs.selfSetting(key.networkId).first() == selfSettingFor(url))
-                                    }
-
-                                    else -> {
-                                        false
-                                    }
-                                }
-                            val active = connections.get().clientFor(key.networkId) === client && metadataVersion(caps) == METADATA_V3_CAP
-                            when {
-                                !active || !allowed -> {
-                                    removeMetadataRequest(key)
+                    metadataLock.withLock {
+                        if (pendingMetadata[key] !== request) return@withLock
+                        request.retry = null
+                        request.retrySeconds = 0L
+                        val client = key.client
+                        val caps = client.ready?.caps.orEmpty()
+                        val allowed =
+                            when (request.message.params[1]) {
+                                "SUB" -> {
+                                    prefs.config.first().showSharedAvatars && supportsMetadataSubscription(caps)
                                 }
 
-                                request.labeled && client.hasCap("labeled-response") -> {
-                                    request.writtenAt = System.nanoTime()
-                                    return@withLock true
+                                "SYNC" -> {
+                                    supportsMetadataSubscription(caps) &&
+                                        (hasProfileSubscriptions(key.networkId, client) || prefs.config.first().showSharedAvatars)
+                                }
+
+                                "UNSUB" -> {
+                                    !prefs.config.first().showSharedAvatars
+                                }
+
+                                "SET" -> {
+                                    val url = request.message.params.getOrNull(3)
+                                    avatarWriteAllowed(caps, url) && !prefs.profileOwnsSelfAvatar(key.networkId) &&
+                                        prefs.selfSetting(key.networkId).first() == selfSettingFor(url)
                                 }
 
                                 else -> {
-                                    request.labeled = false
-                                    if (!client.sendOptionalMetadata(request.message) { request.writtenAt = System.nanoTime() }) {
-                                        removeMetadataRequest(key)
-                                    }
+                                    false
                                 }
                             }
-                            false
+                        val active = connections.get().clientFor(key.networkId) === client && metadataVersion(caps) == METADATA_V3_CAP
+                        when {
+                            !active || !allowed -> {
+                                removeMetadataRequest(key)
+                            }
+
+                            else -> {
+                                if (!client.sendOptionalMetadata(request.message) { request.writtenAt = System.nanoTime() }) {
+                                    removeMetadataRequest(key)
+                                }
+                            }
                         }
-                    if (labeled) publishLabeledAvatar(key, request, v3 = true)
+                    }
                 }
         }
 
@@ -931,7 +930,7 @@ class AvatarCoordinator
                 val requests = pendingMetadata.iterator()
                 while (requests.hasNext()) {
                     val (key, request) = requests.next()
-                    if (key.networkId != networkId || key.client !== client || request.labeled) continue
+                    if (key.networkId != networkId || key.client !== client) continue
                     val refused =
                         when (event.code) {
                             "INVALID_TARGET", "KEY_NO_PERMISSION" -> {
@@ -1011,6 +1010,37 @@ class AvatarCoordinator
             }
         }
 
+        private fun hasProfileSubscriptions(
+            networkId: Long,
+            client: IrcClient,
+        ): Boolean = profileSubscriptions[networkId]?.let { it.client === client && it.keys.isNotEmpty() } == true
+
+        private suspend fun updateSubscriptions(
+            networkId: Long,
+            client: IrcClient,
+            show: Boolean,
+            refresh: Boolean = false,
+        ) = subscriptionLock.withLock {
+            val caps = client.ready?.caps ?: return@withLock
+            val version = metadataVersion(caps) ?: return@withLock
+            val slots = metadataCapabilityLimits(caps)?.maxSubscriptions ?: ProfileKey.entries.size
+            val roomForAvatar = show && slots > 0
+            val extras = ProfileKey.entries.filter { it != ProfileKey.AVATAR }.take(slots - if (roomForAvatar) 1 else 0)
+            val prior = profileSubscriptions[networkId]?.takeIf { it.client === client }?.keys.orEmpty()
+            val removed = prior - extras.toSet()
+            if (removed.isNotEmpty()) client.sendOptionalMetadata(profileSubscription("UNSUB", removed))
+            if (version == METADATA_CAP || roomForAvatar || refresh || !show) updateSubscription(networkId, client, show, refresh)
+            val added = extras - prior.toSet()
+            if (added.isEmpty() || client.sendOptionalMetadata(profileSubscription("SUB", added))) {
+                profileSubscriptions[networkId] = ProfileSubscriptions(client, extras)
+            }
+        }
+
+        private fun profileSubscription(
+            operation: String,
+            keys: List<ProfileKey>,
+        ) = IrcMessage(command = "METADATA", params = listOf("*", operation) + keys.map(ProfileKey::wireName))
+
         private suspend fun updateSubscription(
             networkId: Long,
             client: IrcClient,
@@ -1039,12 +1069,9 @@ class AvatarCoordinator
                 scope.launch {
                     try {
                         delay(metadata.retryAfterSeconds.coerceAtMost(MAX_SYNC_DELAY_SECONDS) * 1_000)
-                        if (!prefs.config.first().showSharedAvatars) return@launch
-                        connections
-                            .get()
-                            .clientFor(networkId)
-                            ?.takeIf { it.supportsV2Subscriptions() }
-                            ?.send(syncMetadataMessage(metadata.target))
+                        val client = connections.get().clientFor(networkId) ?: return@launch
+                        if (!hasProfileSubscriptions(networkId, client) && !prefs.config.first().showSharedAvatars) return@launch
+                        if (client.supportsV2Subscriptions()) client.send(syncMetadataMessage(metadata.target))
                     } finally {
                         delayedSyncs.remove(key)
                     }
@@ -1059,9 +1086,9 @@ class AvatarCoordinator
                     avatarCaches.clear()
                     store.clearAll()
                     metadataLock.withLock {
-                        expectedMetadataSnapshots.clear()
+                        expectedMetadataSnapshots.keys.removeAll { it.target == "*ALL" }
                         avatarSubscriptions.clear()
-                        val requests = pendingMetadata.keys.filter { it.operation == "SYNC" || it.operation == "SUB" }
+                        val requests = pendingMetadata.keys.filter { it.operation == "SUB" || (it.operation == "SYNC" && pendingMetadata[it]?.refresh == true) }
                         requests.forEach(::removeMetadataRequest)
                     }
                 }
@@ -1070,37 +1097,39 @@ class AvatarCoordinator
                 .get()
                 .connectionStates.value.keys) {
                 val client = connections.get().clientFor(networkId) ?: continue
-                updateSubscription(networkId, client, show, refresh = show)
+                updateSubscriptions(networkId, client, show, refresh = show)
             }
         }
 
         override suspend fun setSelfAvatar(
             networkId: Long,
             url: String?,
-        ): Boolean {
-            val validated = url?.let(::validateAvatarUrl)
-            if (url != null && validated == null) return false
-            prefs.setSelfSetting(networkId, selfSettingFor(validated))
-            val client = connections.get().clientFor(networkId) ?: return true
-            val selfNick = client.publishSelfAvatarIfReady(networkId, validated) ?: return true
-            if (metadataVersion(client.ready?.caps.orEmpty()) == METADATA_V3_CAP) return true
-            try {
-                withSharedAvatars {
-                    if (validated != null) {
-                        store.upsert(networkId, selfNick, account = null, url = validated)
-                    } else {
-                        store.remove(networkId, selfNick)
+        ): Boolean =
+            selfAvatarLock.withLock {
+                val validated = url?.let(::validateAvatarUrl)
+                if (url != null && validated == null) return@withLock false
+                prefs.setSelfSetting(networkId, selfSettingFor(validated))
+                prefs.setProfileOwnsSelfAvatar(networkId, false)
+                val client = connections.get().clientFor(networkId) ?: return@withLock true
+                val selfNick = client.publishSelfAvatarIfReady(networkId, validated) ?: return@withLock true
+                if (metadataVersion(client.ready?.caps.orEmpty()) == METADATA_V3_CAP) return@withLock true
+                try {
+                    withSharedAvatars {
+                        if (validated != null) {
+                            store.upsert(networkId, selfNick, account = null, url = validated)
+                        } else {
+                            store.remove(networkId, selfNick)
+                        }
+                    }
+                } catch (failure: Exception) {
+                    // The preference is already saved; temporary storage failures only affect the shared cache.
+                    when (failure) {
+                        is IOException, is SQLiteDiskIOException, is SQLiteFullException, is SQLiteCantOpenDatabaseException -> Unit
+                        else -> throw failure
                     }
                 }
-            } catch (failure: Exception) {
-                // The preference is already saved; temporary storage failures only affect the shared cache.
-                when (failure) {
-                    is IOException, is SQLiteDiskIOException, is SQLiteFullException, is SQLiteCantOpenDatabaseException -> Unit
-                    else -> throw failure
-                }
+                true
             }
-            return true
-        }
 
         private fun selfSettingFor(url: String?): SelfAvatarSetting = url?.let(SelfAvatarSetting::Set) ?: SelfAvatarSetting.ExplicitlyCleared
 
@@ -1136,10 +1165,52 @@ class AvatarCoordinator
                 false
             }
 
-        override suspend fun stopManagingSelfAvatar(networkId: Long) {
-            prefs.setSelfSetting(networkId, SelfAvatarSetting.Unmanaged)
-            forgetMetadataRequests(networkId, "SET", "*")
+        internal suspend fun explicitSelfAvatar(
+            networkId: Long,
+            action: suspend (() -> Unit) -> ProfileWriteResult,
+        ): ProfileWriteResult =
+            selfAvatarLock.withLock {
+                forgetMetadataRequests(networkId, "SET", "*")
+                val wasOwned = prefs.profileOwnsSelfAvatar(networkId)
+                var attempted = false
+                var result: ProfileWriteResult? = null
+                try {
+                    if (!wasOwned) prefs.setProfileOwnsSelfAvatar(networkId, true)
+                    action { attempted = true }.also { result = it }
+                } finally {
+                    if (!wasOwned && (!attempted || result != null && result != ProfileWriteResult.CONFIRMED && result != ProfileWriteResult.UNCONFIRMED)) {
+                        withContext(NonCancellable) { prefs.setProfileOwnsSelfAvatar(networkId, false) }
+                    }
+                }
+            }
+
+        internal suspend fun ingestProfileAvatar(
+            networkId: Long,
+            client: IrcClient,
+            target: String,
+            value: String?,
+            sequence: Long,
+        ) {
+            try {
+                withSharedAvatars {
+                    if (connections.get().clientFor(networkId) !== client) return@withSharedAvatars
+                    val change = value?.let { AvatarMetadataEvent.Changed(target, it) } ?: AvatarMetadataEvent.Removed(target)
+                    storeAvatar(networkId, change, avatarCache(networkId, client), sequence)
+                }
+            } catch (failure: Exception) {
+                when (failure) {
+                    is IOException, is SQLiteDiskIOException, is SQLiteFullException, is SQLiteCantOpenDatabaseException -> Unit
+                    else -> throw failure
+                }
+            }
         }
+
+        override suspend fun stopManagingSelfAvatar(networkId: Long) =
+            selfAvatarLock.withLock {
+                prefs.setSelfSetting(networkId, SelfAvatarSetting.Unmanaged)
+                prefs.setProfileOwnsSelfAvatar(networkId, false)
+                forgetMetadataRequests(networkId, "SET", "*")
+            }
 
         override suspend fun clearNetworkState(networkId: Long) {
             forgetMetadataRequests(networkId)
@@ -1150,6 +1221,7 @@ class AvatarCoordinator
             onlineMonitors.remove(networkId)
             selfWrites.remove(networkId)
             prefs.setSelfSetting(networkId, SelfAvatarSetting.Unmanaged)
+            prefs.setProfileOwnsSelfAvatar(networkId, false)
         }
 
         override suspend fun importConversationAvatar(
@@ -1162,12 +1234,7 @@ class AvatarCoordinator
             val imported =
                 withContext(Dispatchers.IO) { localAvatars.import(source) }
                     .getOrElse { return ConversationAvatarOutcome.Invalid }
-            val saved =
-                avatarEditLock.withLock {
-                    if (bufferDao.setAvatarOverride(room.id, imported) != 1) return@withLock false
-                    avatarEditGenerations.remove(room.id)
-                    true
-                }
+            val saved = bufferDao.setAvatarOverride(room.id, imported) == 1
             if (!saved) {
                 localAvatars.delete(imported)
                 return ConversationAvatarOutcome.Failed
@@ -1184,169 +1251,18 @@ class AvatarCoordinator
             val room =
                 bufferDao.observeById(bufferId)?.takeIf { it.type != BufferType.SERVER }
                     ?: return ConversationAvatarOutcome.Failed
-            val generation =
-                avatarEditLock.withLock {
-                    if (bufferDao.setAvatarOverride(room.id, validated) != 1) return ConversationAvatarOutcome.Failed
-                    if (room.type == BufferType.CHANNEL) markAvatarEdit(room.id) else null
-                }
+            if (bufferDao.setAvatarOverride(room.id, validated) != 1) return ConversationAvatarOutcome.Failed
             localAvatars.delete(room.avatarOverrideModel)
-            return if (room.type == BufferType.CHANNEL) {
-                publishChannelAvatar(room.id, room.networkId, room.displayName, validated, generation)
-            } else {
-                ConversationAvatarOutcome.LocalOnly
-            }
+            return ConversationAvatarOutcome.LocalOnly
         }
 
         override suspend fun resetConversationAvatar(bufferId: Long): ConversationAvatarOutcome {
             val room =
                 bufferDao.observeById(bufferId)?.takeIf { it.type != BufferType.SERVER }
                     ?: return ConversationAvatarOutcome.Failed
-            avatarEditLock.withLock {
-                if (bufferDao.setAvatarOverride(room.id, null) != 1) return ConversationAvatarOutcome.Failed
-                avatarEditGenerations.remove(room.id)
-            }
+            if (bufferDao.setAvatarOverride(room.id, null) != 1) return ConversationAvatarOutcome.Failed
             localAvatars.delete(room.avatarOverrideModel)
             return ConversationAvatarOutcome.LocalReset
-        }
-
-        override suspend fun shareConversationAvatar(bufferId: Long): ConversationAvatarOutcome {
-            val (room, url, generation) =
-                avatarEditLock.withLock {
-                    val room =
-                        bufferDao.observeById(bufferId)?.takeIf { it.type == BufferType.CHANNEL }
-                            ?: return ConversationAvatarOutcome.Invalid
-                    val url = room.avatarOverrideModel?.let(::validateAvatarUrl) ?: return ConversationAvatarOutcome.Invalid
-                    Triple(room, url, markAvatarEdit(room.id))
-                }
-            return publishChannelAvatar(room.id, room.networkId, room.displayName, url, generation)
-        }
-
-        override suspend fun clearSharedConversationAvatar(bufferId: Long): ConversationAvatarOutcome {
-            val room =
-                bufferDao.observeById(bufferId)?.takeIf { it.type == BufferType.CHANNEL }
-                    ?: return ConversationAvatarOutcome.Invalid
-            return publishChannelAvatar(room.id, room.networkId, room.displayName, null)
-        }
-
-        private fun markAvatarEdit(roomId: Long): Long = (++avatarEditGeneration).also { avatarEditGenerations[roomId] = it }
-
-        private suspend fun publishChannelAvatar(
-            roomId: Long,
-            networkId: Long,
-            target: String,
-            url: String?,
-            editGeneration: Long? = null,
-        ): ConversationAvatarOutcome {
-            val client = connections.get().clientFor(networkId) ?: return ConversationAvatarOutcome.LocalOnly
-            val caps = client.ready?.caps ?: return ConversationAvatarOutcome.LocalOnly
-            val message = channelAvatarMessage(target, url)
-            val key = client.metadataKey(networkId, message)
-            if (!avatarWriteAllowed(caps, url, self = false)) {
-                metadataLock.withLock { removeMetadataRequest(key) }
-                return ConversationAvatarOutcome.LocalOnly
-            }
-            if (!client.hasCap("labeled-response")) {
-                return if (client.sendAvatarOperation(networkId, message)) {
-                    ConversationAvatarOutcome.RequestSent
-                } else {
-                    ConversationAvatarOutcome.LocalOnly
-                }
-            }
-            val v3 = metadataVersion(caps) == METADATA_V3_CAP
-            val request = MetadataRequest(message, roomId, editGeneration = editGeneration)
-            if (v3) {
-                avatarEditLock.withLock {
-                    if (editGeneration != null && avatarEditGenerations[roomId] != editGeneration) {
-                        return ConversationAvatarOutcome.LocalOnly
-                    }
-                    metadataLock.withLock {
-                        removeMetadataRequest(key)
-                        pendingMetadata[key] = request
-                    }
-                }
-            }
-            return publishLabeledAvatar(key, request, v3)
-        }
-
-        private suspend fun publishLabeledAvatar(
-            key: MetadataRequestKey,
-            request: MetadataRequest,
-            v3: Boolean,
-        ): ConversationAvatarOutcome {
-            val client = key.client
-            val networkId = key.networkId
-            val url = request.message.params.getOrNull(3)
-            if (v3 && metadataLock.withLock { pendingMetadata[key] !== request }) return ConversationAvatarOutcome.LocalOnly
-            val response =
-                try {
-                    client.sendLabeled(request.message)
-                } catch (cancelled: CancellationException) {
-                    if (v3) {
-                        withContext(NonCancellable) {
-                            metadataLock.withLock {
-                                if (pendingMetadata[key] === request) removeMetadataRequest(key)
-                            }
-                        }
-                    }
-                    throw cancelled
-                } catch (_: Exception) {
-                    emptyList()
-                }
-            if (v3) {
-                for (reply in response) {
-                    if (handleRateLimit(networkId, client, reply, expected = request)) return ConversationAvatarOutcome.RequestSent
-                }
-                val current =
-                    metadataLock.withLock {
-                        (pendingMetadata[key] === request).also { if (it) removeMetadataRequest(key) }
-                    }
-                if (!current) return ConversationAvatarOutcome.LocalOnly
-            }
-            if (avatarMetadataRejected(response)) return ConversationAvatarOutcome.LocalOnly
-            val (returned, sequence) =
-                response.firstNotNullOfOrNull { reply ->
-                    if (v3 && !client.isMetadataReply(reply)) return@firstNotNullOfOrNull null
-                    val event =
-                        parseAvatarMetadata(reply, v3, selfNick = reply.selfNickAtRead ?: client.ready?.nick)
-                            ?: return@firstNotNullOfOrNull null
-                    val target =
-                        when (event) {
-                            is AvatarMetadataEvent.Changed -> event.target
-                            is AvatarMetadataEvent.Removed -> event.target
-                            is AvatarMetadataEvent.SyncLater -> return@firstNotNullOfOrNull null
-                        }
-                    if (client.isupport.normalize(target) == key.target) event to reply.wireSequence else null
-                } ?: return ConversationAvatarOutcome.LocalOnly
-            if (v3) {
-                withSharedAvatars {
-                    if (connections.get().clientFor(networkId) !== client) return@withSharedAvatars
-                    storeAvatar(networkId, returned, avatarCache(networkId, client), sequence)
-                }
-            }
-            return when {
-                url == null && returned is AvatarMetadataEvent.Removed -> {
-                    ConversationAvatarOutcome.SharedCleared
-                }
-
-                url != null && returned is AvatarMetadataEvent.Changed -> {
-                    val roomId = checkNotNull(request.roomId)
-                    if (v3) {
-                        avatarEditLock.withLock {
-                            if (request.editGeneration != null && avatarEditGenerations[roomId] == request.editGeneration) {
-                                bufferDao.replaceChannelAvatarOverride(roomId, url, returned.url)
-                                avatarEditGenerations.remove(roomId)
-                            }
-                        }
-                    } else {
-                        bufferDao.setAvatarOverride(roomId, returned.url)
-                    }
-                    ConversationAvatarOutcome.Shared
-                }
-
-                else -> {
-                    ConversationAvatarOutcome.LocalOnly
-                }
-            }
         }
 
         override fun publishingAvailable(networkId: Long): Boolean {
@@ -1359,6 +1275,7 @@ class AvatarCoordinator
             const val MAX_SYNC_DELAY_SECONDS = 60L * 60L
             const val MIN_METADATA_RETRY_MS = 250L
             const val METADATA_SNAPSHOT_WINDOW_NS = 30_000_000_000L
+            val avatarNumericCommands = setOf("761", "766", "774")
             val avatarRawCommands = setOf("METADATA", "761", "766", "770", "771", "774", "775")
         }
     }

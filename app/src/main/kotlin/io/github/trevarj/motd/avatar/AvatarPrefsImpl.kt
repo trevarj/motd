@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -42,9 +43,23 @@ class AvatarPrefsImpl
         ) {
             store.edit { it[selfKey(networkId)] = encodeSelfSetting(setting) }
         }
+
+        override suspend fun profileOwnsSelfAvatar(networkId: Long): Boolean = store.data.first()[profileOwnerKey(networkId)] == true
+
+        override suspend fun setProfileOwnsSelfAvatar(
+            networkId: Long,
+            owns: Boolean,
+        ) {
+            store.edit { prefs ->
+                val key = profileOwnerKey(networkId)
+                if (owns) prefs[key] = true else prefs.remove(key)
+            }
+        }
     }
 
 private fun selfKey(networkId: Long) = stringPreferencesKey("self_avatar_$networkId")
+
+private fun profileOwnerKey(networkId: Long) = booleanPreferencesKey("profile_owns_self_avatar_$networkId")
 
 internal fun encodeSelfSetting(setting: SelfAvatarSetting): String =
     when (setting) {

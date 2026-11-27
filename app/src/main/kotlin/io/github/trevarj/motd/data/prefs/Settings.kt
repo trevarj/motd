@@ -329,6 +329,7 @@ data class Settings(
     val nickColorPalette: NickColorPalette = NickColorPalette.THEME,
     val nickMentionStyle: NickMentionStyle = NickMentionStyle.BOLD,
     val nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
+    val profileDisplayNameFirst: Boolean = false,
     /** Normalized nick -> a legacy hue/position 0..359 or a tagged exact color. */
     val nickColorOverrides: Map<String, Int> = emptyMap(),
     /** Normalized nicks. friends and fools are kept disjoint by the repository. */
@@ -455,6 +456,8 @@ interface SettingsRepository {
     suspend fun setTypingIndicatorPlacement(placement: TypingIndicatorPlacement)
 
     suspend fun setNicknameTapAction(action: NicknameTapAction)
+
+    suspend fun setProfileDisplayNameFirst(enabled: Boolean)
 
     /** [hue] is a palette position 0..359 (coerced) or a tagged exact color; null removes. */
     suspend fun setNickColorOverride(

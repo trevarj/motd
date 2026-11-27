@@ -39,6 +39,7 @@ import io.github.trevarj.motd.avatar.conversationAvatarModel
 import io.github.trevarj.motd.avatar.expandAvatarUrl
 import io.github.trevarj.motd.data.prefs.AvatarShape
 import io.github.trevarj.motd.data.prefs.AvatarStyle
+import io.github.trevarj.motd.data.prefs.normalizeNick
 import io.github.trevarj.motd.ui.theme.LocalAvatarShape
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
@@ -133,6 +134,7 @@ fun Avatar(
     networkId: Long? = null,
     account: String? = null,
     conversationModel: String? = null,
+    profileColor: Color? = null,
 ) {
     // Avatars keep their generated/override color even when nick coloring is disabled (an all-gray
     // avatar column would be unusable, a confirmed design decision); avatar() ignores the flag.
@@ -140,7 +142,9 @@ fun Avatar(
     // Hide means hide: return before the sizing Box so this composable reserves no space at all,
     // and so no remote override sneaks an image back in.
     if (style == AvatarStyle.NONE) return
-    val nick = LocalNickColors.current.avatar(name)
+    val colors = LocalNickColors.current
+    val profileAccent = profileColor?.takeUnless { isChannel || normalizeNick(name) in colors.overrides }
+    val nick = profileAccent ?: colors.avatar(name)
     val avatarShape = LocalAvatarShape.current
     val shape: Shape = if (!isChannel && avatarShape == AvatarShape.DEFAULT) CircleShape else avatarShape.shape(isChannel)
     val override = conversationAvatarModel(conversationModel, null, size.value.toInt())
@@ -164,6 +168,7 @@ fun Avatar(
                         IrcChannelBadge(name, size, Modifier)
                     } else {
                         IrcSpriteV2Avatar(name, size, Modifier)
+                        if (profileAccent != null) Box(Modifier.size(size).border(1.dp, profileAccent, shape))
                     }
                 }
 

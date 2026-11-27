@@ -48,6 +48,7 @@ import io.github.trevarj.motd.dickord.DickordPortalRowLookup
 import io.github.trevarj.motd.dickord.DickordPortalScreen
 import io.github.trevarj.motd.dickord.DickordPortalViewModel
 import io.github.trevarj.motd.dickord.isDickordPortalConversation
+import io.github.trevarj.motd.profile.ProfileTarget
 import io.github.trevarj.motd.ui.about.AboutScreen
 import io.github.trevarj.motd.ui.channelinfo.ChannelInfoScreen
 import io.github.trevarj.motd.ui.channellist.ChannelListScreen
@@ -76,6 +77,7 @@ import io.github.trevarj.motd.ui.invite.CreateInviteScreen
 import io.github.trevarj.motd.ui.invite.JoinInviteScreen
 import io.github.trevarj.motd.ui.invite.QrInviteScannerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingScreen
+import io.github.trevarj.motd.ui.profile.ProfileEditorScreen
 import io.github.trevarj.motd.ui.search.SearchScreen
 import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
 import io.github.trevarj.motd.ui.settings.BackupRestoreScreen
@@ -360,6 +362,7 @@ fun MotdNavGraph(
                                         null
                                     },
                                 onOpenChannelInfo = { navController.navigate(ChannelInfoRoute(it)) },
+                                onOpenUserProfile = { navController.navigate(UserProfileRoute(it)) },
                                 onOpenWallpaperWorkshop = { navController.navigate(WallpaperWorkshopRoute(it)) },
                                 onOpenSearch = { navController.navigate(SearchRoute(it)) },
                                 onOpenScheduledMessages = {
@@ -653,6 +656,21 @@ fun MotdNavGraph(
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
                 onOpenNetworkTools = { navController.navigate(NetworkToolsRoute(it)) },
                 onOpenAccountSetup = { navController.navigate(AccountSetupRoute(it)) },
+                onOpenUserProfile = { navController.navigate(UserProfileRoute(it)) },
+            )
+        }
+        composable<UserProfileRoute> { entry ->
+            ProfileEditorScreen(
+                target = ProfileTarget.Self(entry.toRoute<UserProfileRoute>().networkId),
+                onBack = { navController.popBackStack() },
+                onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION)) },
+            )
+        }
+        composable<ChannelProfileRoute> { entry ->
+            ProfileEditorScreen(
+                target = ProfileTarget.Channel(entry.toRoute<ChannelProfileRoute>().bufferId),
+                onBack = { navController.popBackStack() },
+                onOpenNetworkSettings = { navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION)) },
             )
         }
         composable<NetworkToolsRoute> { entry ->
@@ -702,6 +720,7 @@ fun MotdNavGraph(
                 // Member "Message" action opens the DM's QUERY buffer.
                 onOpenBuffer = { navController.navigate(ChatRoute(it)) },
                 onCreateInvite = { navController.navigate(CreateInviteRoute(it)) },
+                onOpenChannelProfile = { navController.navigate(ChannelProfileRoute(it)) },
                 onOpenNetworkSettings = {
                     navController.navigate(NetworkSettingsRoute(it, NetworkSettingsTarget.CONNECTION))
                 },

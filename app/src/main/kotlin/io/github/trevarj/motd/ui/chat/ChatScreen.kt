@@ -89,6 +89,7 @@ import androidx.compose.material.icons.outlined.Link
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.PeopleOutline
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Sync
@@ -267,6 +268,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.profile.ProfileKey
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.HistorySyncStatus
 import io.github.trevarj.motd.service.NotificationMode
@@ -306,6 +308,8 @@ import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
+import io.github.trevarj.motd.ui.profile.ircIdentityLabels
+import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -435,6 +439,7 @@ fun ChatScreen(
     onBack: () -> Unit = {},
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit = {},
+    onOpenUserProfile: ((Long) -> Unit)? = null,
     onOpenSearch: (Long) -> Unit = {},
     onOpenMedia: (url: String, networkId: Long?, isVideo: Boolean) -> Unit = { _, _, _ -> },
     // /msg and /query resolve-or-create a QUERY buffer via the VM, then navigate to it.
@@ -756,6 +761,7 @@ fun ChatScreen(
                 ChatTitleTarget.NONE -> {}
             }
         },
+        onOpenUserProfile = onOpenUserProfile,
         onOpenSearch = onOpenSearch,
         onOpenConversationLinks = viewModel::openConversationLinks,
         onOpenMedia = { url, isVideo -> onOpenMedia(url, state.buffer?.networkId, isVideo) },
@@ -1305,6 +1311,7 @@ internal fun ChatContent(
     onBack: () -> Unit,
     showBack: Boolean = true,
     onOpenChannelInfo: (Long) -> Unit,
+    onOpenUserProfile: ((Long) -> Unit)? = null,
     onOpenSearch: (Long) -> Unit,
     onOpenConversationLinks: (() -> Unit)? = null,
     onOpenMedia: (url: String, isVideo: Boolean) -> Unit,
@@ -1769,10 +1776,7 @@ internal fun ChatContent(
                 val message =
                     when (outcome) {
                         ConversationAvatarOutcome.LocalOnly -> R.string.avatar_result_local_only
-                        ConversationAvatarOutcome.Shared -> R.string.avatar_result_shared
-                        ConversationAvatarOutcome.RequestSent -> R.string.avatar_result_request_sent
                         ConversationAvatarOutcome.LocalReset -> R.string.avatar_result_reset
-                        ConversationAvatarOutcome.SharedCleared -> R.string.avatar_result_shared_cleared
                         ConversationAvatarOutcome.Invalid -> R.string.avatar_result_invalid
                         ConversationAvatarOutcome.Failed -> R.string.avatar_result_failed
                     }
@@ -3905,6 +3909,17 @@ internal fun ChatContent(
                         },
                     )
                 }
+                if (onOpenUserProfile != null && buffer?.type == BufferType.CHANNEL && !activeDickordChannel) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_user_profile"),
+                        text = { Text(stringResource(R.string.profile_user_title)) },
+                        leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
+                        onClick = {
+                            overflowOpen = false
+                            onOpenUserProfile(buffer.networkId)
+                        },
+                    )
+                }
                 if (onOpenConversationLinks != null && (buffer?.type == BufferType.CHANNEL || buffer?.type == BufferType.QUERY)) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_open_links"),
@@ -4237,16 +4252,18 @@ internal fun ChatContent(
                                         dickordEnabled,
                                         includeTyping = typingIndicatorPlacement == io.github.trevarj.motd.data.prefs.TypingIndicatorPlacement.HEADER,
                                     )
+                                val profileNetworkId =
+                                    buffer?.networkId?.takeIf {
+                                        buffer.type != BufferType.SERVER &&
+                                            !isDickordPortalConversation(buffer.type, buffer.displayName) &&
+                                            !isDickordRelayNick(buffer.displayName)
+                                    }
+                                val profile = rememberIrcProfile(profileNetworkId, buffer?.displayName.orEmpty())
+                                val (primaryTitle, secondaryTitle) = ircIdentityLabels(conversationLabel.orEmpty(), profile[ProfileKey.DISPLAY_NAME])
                                 Column(modifier = Modifier.padding(start = if (hideAvatar) 0.dp else 10.dp).weight(1f)) {
                                     if (compactHeader && subtitleModel is ChatSubtitleModel.Text && subtitleModel.isMemberCount) {
                                         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Text(
-                                                text = conversationLabel.orEmpty(),
-                                                modifier = Modifier.weight(1f, fill = false),
-                                                style = MaterialTheme.typography.titleSmall,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
+                                            ChatHeaderIdentity(primaryTitle, secondaryTitle, compactHeader, Modifier.weight(1f, fill = false))
                                             Text(
                                                 text = subtitleModel.value,
                                                 style = MaterialTheme.typography.bodySmall,
@@ -4255,12 +4272,7 @@ internal fun ChatContent(
                                             )
                                         }
                                     } else {
-                                        Text(
-                                            text = conversationLabel.orEmpty(),
-                                            style = if (compactHeader) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
+                                        ChatHeaderIdentity(primaryTitle, secondaryTitle, compactHeader)
                                         AnimatedContent(
                                             targetState = subtitleModel,
                                             transitionSpec = {
@@ -6042,6 +6054,35 @@ internal fun composerNeedsMemberNicks(value: TextFieldValue): Boolean {
     val token = nickTokenAt(text, value.selection.end) ?: return false
     val atPrefixed = token.start < text.length && text[token.start] == '@'
     return token.text.length >= 2 || atPrefixed
+}
+
+@Composable
+private fun ChatHeaderIdentity(
+    primary: String,
+    secondary: String?,
+    compact: Boolean,
+    modifier: Modifier = Modifier,
+) {
+    val titleStyle = if (compact) MaterialTheme.typography.titleSmall else MaterialTheme.typography.titleMedium
+    if (secondary == null) {
+        Text(primary, modifier = modifier, style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    } else {
+        Row(
+            modifier = modifier,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(primary, modifier = Modifier.weight(1f, fill = false), style = titleStyle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(
+                secondary,
+                modifier = Modifier.weight(1f, fill = false),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
 }
 
 const val CHAT_HISTORY_SYNC_FAILURE_TAG = "chat_history_sync_indicator"

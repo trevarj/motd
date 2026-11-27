@@ -45,6 +45,7 @@ data class MessageContext(
     val isHistoryContext: Boolean = false,
     /** Client-only IRCv3 tags, retained for feature-local protocol consumers. */
     val clientTags: Map<String, String> = emptyMap(),
+    val wireSequence: Long = 0L,
 )
 
 sealed interface IrcEvent {
@@ -295,6 +296,7 @@ sealed interface IrcEvent {
 
     data class MonitorOffline(
         val nicks: List<String>,
+        val wireSequence: Long = 0L,
     ) : IrcEvent
 
     data class MonitorList(

@@ -899,6 +899,9 @@ class NotificationReplyReadinessTest {
                 messageNotifier = notifier,
                 chatSoundPlayer = ChatSoundPlayer.Noop,
                 avatarCoordinator = avatarCoordinator,
+                profiles =
+                    io.github.trevarj.motd.profile
+                        .IrcProfileRepository(db, Lazy { manager }, avatarCoordinator),
                 pushHealthStore = NoopPushHealthStore,
                 diagnostics = DiagnosticLogger.Noop,
                 scope = scope,

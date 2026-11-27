@@ -1,12 +1,17 @@
 package io.github.trevarj.motd.ui.chat
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Message
@@ -29,12 +34,16 @@ import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -44,6 +53,8 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.dickord.dickordNickLabel
+import io.github.trevarj.motd.dickord.isDickordRelayNick
+import io.github.trevarj.motd.profile.ProfileKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.channelinfo.BanTargetDialog
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
@@ -51,6 +62,11 @@ import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
+import io.github.trevarj.motd.ui.components.openChatLinkInBrowser
+import io.github.trevarj.motd.ui.profile.LocalIrcProfileRepository
+import io.github.trevarj.motd.ui.profile.ircIdentityLabels
+import io.github.trevarj.motd.ui.profile.rememberIrcProfile
+import io.github.trevarj.motd.ui.profile.safeProfileHomepage
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
@@ -103,6 +119,16 @@ internal fun NickActionSheet(
     var kickTarget by remember { mutableStateOf(false) }
     var banTarget by remember { mutableStateOf(false) }
     val canEditAvatar = canEditConversationAvatar && !relayIdentity
+    val profileNetworkId = networkId.takeUnless { relayIdentity || isDickordRelayNick(nick) }
+    val repository = LocalIrcProfileRepository.current
+    if (profileNetworkId != null && repository != null) {
+        LaunchedEffect(repository, profileNetworkId, nick) { repository.refreshUser(profileNetworkId, nick) }
+    }
+    val profile = rememberIrcProfile(profileNetworkId, nick)
+    val (primaryName, secondaryName) = ircIdentityLabels(dickordNickLabel(nick, relayIdentity), profile[ProfileKey.DISPLAY_NAME])
+    val isBot = whois?.isBot == true || ProfileKey.BOT in profile
+    val colorValue = profile[ProfileKey.COLOR]
+    val profileColor = remember(colorValue) { colorValue?.let(::parseColorHex)?.let { Color(it) } }
 
     // Root tag disambiguates from MessageActionSheet when both could be open.
     ModalBottomSheet(
@@ -113,14 +139,18 @@ internal fun NickActionSheet(
     ) {
         SheetSystemBars()
         Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
-            // Header: avatar + nick + whois summary (or the fallback line when whois is unavailable).
+            // Avatar, both names if supplied, and profile/WHOIS details.
             ListItem(
-                headlineContent = { Text(botDisplayName(dickordNickLabel(nick, relayIdentity), whois?.isBot == true)) },
+                headlineContent = { Text(botDisplayName(primaryName, isBot)) },
                 supportingContent = {
                     if (relayIdentity) {
                         Text(stringResource(R.string.dickord_relay_identity))
                     } else {
-                        WhoisSummary(whois, presence)
+                        Column {
+                            secondaryName?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+                            NickProfileSummary(profile, profileColor)
+                            WhoisSummary(whois, presence)
+                        }
                     }
                 },
                 leadingContent =
@@ -133,6 +163,7 @@ internal fun NickActionSheet(
                                 size = 40.dp,
                                 networkId = networkId,
                                 conversationModel = conversationModel,
+                                profileColor = profileColor,
                                 modifier =
                                     if (canEditAvatar) {
                                         Modifier.testTag("nick_sheet_avatar").clickable(onClick = onEditConversationAvatar)
@@ -315,6 +346,53 @@ internal fun NickKickDialog(
             TextButton(colors = readableTextButtonColors(), onClick = onDismiss) { Text(stringResource(R.string.action_cancel)) }
         },
     )
+}
+
+@Composable
+private fun NickProfileSummary(
+    profile: Map<ProfileKey, String>,
+    profileColor: Color?,
+) {
+    val style = MaterialTheme.typography.bodySmall
+    profile[ProfileKey.BOT]?.takeIf { it.isNotBlank() }?.let {
+        Text(stringResource(R.string.profile_bot_software, it), modifier = Modifier.testTag("nick_profile_bot"), style = style)
+    }
+    profile[ProfileKey.PRONOUNS]?.takeIf { it.isNotBlank() }?.let {
+        Text(stringResource(R.string.profile_user_pronouns, it), modifier = Modifier.testTag("nick_profile_pronouns"), style = style)
+    }
+    profile[ProfileKey.STATUS]?.takeIf { it.isNotBlank() }?.let {
+        Text(stringResource(R.string.profile_user_status, it), modifier = Modifier.testTag("nick_profile_status"), style = style)
+    }
+    if (profileColor != null) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Box(
+                Modifier
+                    .size(12.dp)
+                    .background(profileColor, CircleShape)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
+            )
+            Text(
+                stringResource(R.string.profile_user_color, profile[ProfileKey.COLOR].orEmpty()),
+                modifier = Modifier.testTag("nick_profile_color"),
+                style = style,
+            )
+        }
+    }
+    val homepage = profile[ProfileKey.HOMEPAGE]
+    val link = remember(homepage) { homepage?.let(::safeProfileHomepage) }
+    if (link != null) {
+        val context = LocalContext.current
+        Text(
+            stringResource(R.string.profile_user_homepage, link),
+            modifier =
+                Modifier
+                    .testTag("nick_profile_homepage")
+                    .clickable(onClickLabel = stringResource(R.string.chat_link_open_browser)) { context.openChatLinkInBrowser(link) }
+                    .padding(vertical = 4.dp),
+            color = MaterialTheme.colorScheme.primary,
+            style = style,
+        )
+    }
 }
 
 /** WHOIS summary lines, or the "details in server messages" fallback while whois is null. */

@@ -120,6 +120,7 @@ fun ChatSettingsScreen(
         onShowComposerFormattingTools = viewModel::setShowComposerFormattingTools,
         onShowVoiceMessageButton = viewModel::setShowVoiceMessageButton,
         onNicknameTapAction = viewModel::setNicknameTapAction,
+        onProfileDisplayNameFirst = viewModel::setProfileDisplayNameFirst,
         onChatSoundsEnabled = viewModel::setChatSoundsEnabled,
         onVisibleReplyPrefix = viewModel::setVisibleReplyPrefix,
         onSwipeToReplyEnabled = viewModel::setSwipeToReplyEnabled,
@@ -171,6 +172,7 @@ fun ChatSettingsContent(
     onShowComposerFormattingTools: (Boolean) -> Unit,
     onShowVoiceMessageButton: (Boolean) -> Unit,
     onNicknameTapAction: (NicknameTapAction) -> Unit,
+    onProfileDisplayNameFirst: (Boolean) -> Unit,
     onChatSoundsEnabled: (Boolean) -> Unit,
     onVisibleReplyPrefix: (Boolean) -> Unit,
     onSwipeToReplyEnabled: (Boolean) -> Unit,
@@ -235,6 +237,16 @@ fun ChatSettingsContent(
                     )
                 }
             }
+            HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
+            SwitchRow(
+                title = stringResource(R.string.settings_profile_display_name_first),
+                subtitle = stringResource(R.string.settings_profile_display_name_first_summary),
+                checked = settings.profileDisplayNameFirst,
+                onCheckedChange = onProfileDisplayNameFirst,
+                switchTag = "settings_profile_display_name_first",
+                requestedTarget = target?.name,
+                targetName = SettingsTarget.PROFILE_DISPLAY_NAME_FIRST.name,
+            )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
                 title = stringResource(R.string.settings_show_redacted_messages),
@@ -754,6 +766,7 @@ private fun ChatSettingsPreview() {
             onShowComposerFormattingTools = {},
             onShowVoiceMessageButton = {},
             onNicknameTapAction = {},
+            onProfileDisplayNameFirst = {},
             onChatSoundsEnabled = {},
             onVisibleReplyPrefix = {},
             onSwipeToReplyEnabled = {},

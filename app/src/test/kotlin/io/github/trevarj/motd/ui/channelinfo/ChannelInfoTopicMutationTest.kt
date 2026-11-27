@@ -922,6 +922,10 @@ class ChannelInfoTopicMutationTest {
 
         override suspend fun setNicknameTapAction(action: io.github.trevarj.motd.data.prefs.NicknameTapAction) = Unit
 
+        override suspend fun setProfileDisplayNameFirst(enabled: Boolean) {
+            settings.value = settings.value.copy(profileDisplayNameFirst = enabled)
+        }
+
         override suspend fun setChatSoundsEnabled(enabled: Boolean) = Unit
 
         override suspend fun setHistorySyncDepth(d: io.github.trevarj.motd.data.prefs.HistorySyncDepth) = Unit

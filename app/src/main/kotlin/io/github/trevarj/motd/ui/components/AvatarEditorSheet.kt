@@ -15,8 +15,6 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Link
-import androidx.compose.material.icons.outlined.Public
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.ListItemDefaults
@@ -33,8 +31,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.isLocalMediaUri
@@ -61,13 +57,10 @@ fun AvatarEditorSheet(
     onUpload: () -> Unit,
     onUrl: (String) -> Unit,
     onReset: () -> Unit,
-    onShare: () -> Unit = {},
-    onClearShared: () -> Unit = {},
 ) {
     if (!open) return
     var url by remember(identity, networkId, currentModel) { mutableStateOf(currentModel?.takeIf { validateAvatarUrl(it) != null }.orEmpty()) }
     var invalid by remember(identity, networkId) { mutableStateOf(false) }
-    var confirmClear by remember(identity, networkId) { mutableStateOf(false) }
     var localProposal by remember(identity, networkId, currentModel) { mutableStateOf<Uri?>(null) }
     var localImportError by remember(identity, networkId, currentModel) { mutableStateOf(false) }
     var importOwner by remember { mutableStateOf<Triple<String, Long?, String?>?>(null) }
@@ -153,44 +146,8 @@ fun AvatarEditorSheet(
                 tag = "avatar_editor_reset",
                 onClick = onReset,
             )
-            if (isChannel) {
-                HorizontalDivider()
-                AvatarEditorAction(
-                    icon = Icons.Outlined.Public,
-                    title = stringResource(R.string.avatar_share),
-                    tag = "avatar_editor_share",
-                    onClick = onShare,
-                )
-                AvatarEditorAction(
-                    icon = Icons.Filled.Delete,
-                    title = stringResource(R.string.avatar_clear_shared),
-                    tag = "avatar_editor_clear_shared",
-                ) { confirmClear = true }
-            }
             TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.padding(horizontal = 8.dp).testTag("avatar_editor_cancel")) { Text(stringResource(R.string.action_cancel)) }
         }
-    }
-
-    if (confirmClear) {
-        AlertDialog(
-            onDismissRequest = { confirmClear = false },
-            modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("avatar_editor_clear_dialog"),
-            title = { Text(stringResource(R.string.avatar_clear_shared_title)) },
-            text = { Text(stringResource(R.string.avatar_clear_shared_body)) },
-            confirmButton = {
-                TextButton(
-                    colors = readableTextButtonColors(),
-                    onClick = {
-                        confirmClear = false
-                        onClearShared()
-                    },
-                    modifier = Modifier.testTag("avatar_editor_clear_confirm"),
-                ) { Text(stringResource(R.string.avatar_clear_shared)) }
-            },
-            dismissButton = {
-                TextButton(colors = readableTextButtonColors(), onClick = { confirmClear = false }) { Text(stringResource(R.string.action_cancel)) }
-            },
-        )
     }
 }
 

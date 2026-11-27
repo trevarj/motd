@@ -543,32 +543,155 @@ extensions, but not `draft/chathistory`. App recovery must therefore accept
 ZNC's native playback and must not issue CHATHISTORY merely because the Ergo
 upstream supports it.
 
-## Avatar metadata fixture
+## IRCv3 profile and legacy avatar fixtures
 
-The dependency-free plaintext IRC fixture advertises a publish-capable
-`draft/metadata-2`, creates `#avatars`, and logs every client/server line. Use it
-for physical subscription, SYNC, publish/remove, image, and fallback checks:
+For the complete profiles journey, use the two-client fixture on an authorized
+device with fictional data. The device's IRC connection and avatar HTTPS
+requests use a fixture-only SOCKS5 route; the host peer uses direct loopback.
+The proxy accepts only `profile.test:6670` and `profile.test:443`, uses no DNS
+or Internet, and serves two different images. Leave application HTTPS
+destination checks and certificate verification enabled.
+
+In a Nix shell with Python 3, OpenSSL and adb, set `SERIAL` to the explicit
+authorized device id and keep `PROFILE_STATE` for both terminals:
 
 ```sh
-nix shell nixpkgs#python3 -c python3 \
-  test/e2e/fixtures/avatar-metadata-server.py
-adb reverse tcp:6670 tcp:6670
+: "${SERIAL:?Set the authorized device serial explicitly}"
+adb -s "$SERIAL" get-state
+export PROFILE_STATE="$(mktemp -d)"
+export PROFILE_VERSION=3
+umask 077
+openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+  -subj /CN=profile.test -addext subjectAltName=DNS:profile.test \
+  -keyout "$PROFILE_STATE/key.pem" -out "$PROFILE_STATE/cert.pem"
+openssl x509 -in "$PROFILE_STATE/cert.pem" -noout -fingerprint -sha256
+adb -s "$SERIAL" reverse tcp:16770 tcp:16770
+python3 test/e2e/fixtures/avatar-metadata-server.py --profile "$PROFILE_VERSION" \
+  --tls-cert "$PROFILE_STATE/cert.pem" --tls-key "$PROFILE_STATE/key.pem" \
+  --socks-port 16770 --log "$PROFILE_STATE/wire.log"
 ```
 
-Add a custom IRC network in the debug app with host `127.0.0.1`, port `6670`,
-TLS off, authentication None, and any valid identity. Confirm the plaintext
-warning because the connection exists only over `adb reverse`. The fixture
-publishes a remote HTTPS avatar containing `{size}` and writes its transcript
-to `/tmp/motd-avatar-metadata.log` by default. Network settings should allow a
-self HTTPS URL to be published and cleared. Turning off **Show shared user
-avatars** should send `METADATA * UNSUB avatar`, clear the remote image, and
-show the monogram fallback; restore it before finishing.
+In a second terminal set `PROFILE_STATE` to that same path and choose the same
+version. The peer registers as `fixturepeer`, subscribes to all seven keys and
+joins `#profiles` on a separate IRC socket:
+
+```sh
+python3 test/e2e/fixtures/avatar-metadata-server.py --profile "$PROFILE_VERSION" \
+  --tls-cert "$PROFILE_STATE/cert.pem" --peer
+```
+
+Add a custom network in the debug app: host `profile.test`, port `6670`, TLS on,
+nickname `profilephone`, authentication None. Initial direct lookup is expected
+to fail: select **Save anyway**, then in that network's settings expand
+Connection / Obfuscation and save SOCKS5 host `127.0.0.1`, port `16770`. Connect
+and accept the fixture's TLS leaf only after matching the printed fingerprint.
+Join `#Profiles`; the fixture preserves the spelling already created by the
+peer and resolves both spellings to the same channel. The phone starts at `+o`.
+Leave device-managed self-avatar sync off; turn shared avatars on for the image
+check.
+
+In **Network Settings → User profile**, enter and explicitly publish each of the
+following. After publishing, reopen User profile via the channel overflow and
+check **Current server value**. For the channel fields use **Channel info →
+Channel profile**. The peer should see an unsolicited update for every row.
+While editing, no SET should appear until Publish or Remove is tapped.
+
+| Target | Key | Fictional value |
+| --- | --- | --- |
+| `profilephone` | `avatar` | `https://profile.test/self.png?s={size}` |
+| `profilephone` | `bot` | `Fixture Bot` |
+| `profilephone` | `color` | `#3F51B5` |
+| `profilephone` | `display-name` | `Fixture Phone` |
+| `profilephone` | `homepage` | `https://example.org/profile` |
+| `profilephone` | `pronouns` | `they/them` |
+| `profilephone` | `status` | `Ready to chat` |
+| `#profiles` | `avatar` | `https://profile.test/channel.png?s={size}` |
+| `#profiles` | `display-name` | `Fixture Room` |
+
+In the peer terminal enter `METADATA profilephone GET avatar bot color display-name homepage pronouns status`
+and `METADATA #PROFILES GET avatar display-name`. Each response is a `metadata`
+batch with one `761` per published field. After explicitly removing all nine
+fields in the app, repeat both GETs: require one `766` per field. For each UI
+operation the wire log identifies the app's outgoing SET (`C[profilephone]`),
+its matching server reply (`S[profilephone]`), and the unsolicited delivery
+(`S[fixturepeer]`, `761`/`766` in v3 or `METADATA` in v2). v2 peer removals
+have no value argument. Verify `HTTPS ... GET /self.png?s=…` and
+`/channel.png?s=…` with status `200`, and the actual distinct images, using
+**Preview** in the corresponding editor if needed.
+
+Use the peer console for live permission and independent-user checks:
+Publish a channel display name first so the read-only screen has a value to
+show and the denial has a previous value to preserve.
+
+```text
+MODE #profiles -o profilephone
+MODE #profiles +v profilephone
+METADATA #profiles SET display-name :Should be denied
+MODE #profiles +q profilephone
+FIXTURE REJECT #profiles display-name
+METADATA * SET display-name :Fixture Observer
+METADATA * SET bot :Fixture Peer Bot
+METADATA * SET color :#3F51B5
+METADATA * SET homepage :https://example.org/observer
+METADATA * SET pronouns :they/them
+METADATA * SET status :Watching the channel
+METADATA * SET avatar :https://profile.test/self.png?s={size}
+PRIVMSG #profiles :Profile fixture message
+```
+
+Pause after `-o` and again after `+v`: the phone shows read-only values with
+neither write control. The peer's unauthorized SET receives
+`FAIL METADATA KEY_NO_PERMISSION`. After `+q` (above operator in advertised
+`PREFIX=(qov)!@+`), the phone regains editing. The `FIXTURE REJECT` command makes
+only the next matching SET fail despite the visible role; the editor must report
+the denial and keep its current server value. Try again to confirm success. Check
+the peer's nick sheet and name presentation in the timeline while ensuring its
+IRC nick stays visible. In **Settings → Chat**, toggle **Display names first**;
+try both orders and restore the original. Turn off shared-avatar consent and
+confirm the remote image falls back, even if the URL remains visible in
+metadata; restore consent afterward. Every peer key can be independently
+cleared with `METADATA * SET <key>`. Remove the temporary channel display name
+before finishing. Disconnect/reconnect and check the new wire segment contains
+no unprompted profile SETs.
+
+To rerun in v2, stop the fixture and peer and repeat with `PROFILE_VERSION=2`
+and fresh wire log output (a restart starts with no published values). Keep the
+same certificate and key when reusing the app's verified pin. To finish, delete
+only the disposable network, stop both terminals, and remove its reverse:
+
+```sh
+adb -s "$SERIAL" reverse --remove tcp:16770
+```
+
+The required `bootstrappedNavigationSettingsAndBouncerSmoke` instrumentation
+journey also runs an isolated pinned loopback IRC fixture with no host or ADB
+changes. It exercises both User profile entry points, Channel Info navigation,
+published/removed values, a denied write, and member/voice/operator/higher
+prefix transitions, checking exact SET arguments against the fixture's wire
+history.
+
+For the previous avatar-only smoke, omit `--profile`. The plaintext fixture
+advertises v2, creates `#avatars` and publishes a remote HTTPS avatar with a
+`{size}` placeholder; it can use an external endpoint and is not the isolated
+profile journey:
+
+```sh
+python3 test/e2e/fixtures/avatar-metadata-server.py
+adb -s "$SERIAL" reverse tcp:6670 tcp:6670
+```
+
+Add a custom network at `127.0.0.1:6670`, TLS off, authentication None, and any
+valid identity. Confirm the plaintext warning for this local reverse only.
+Publish and clear a self HTTPS URL. Turning off **Show shared user avatars**
+should send `METADATA * UNSUB avatar`, clear the remote image and show the
+monogram fallback. Restore the preference; the transcript defaults to
+`/tmp/motd-avatar-metadata.log`.
 
 Delete the disposable network, remove the reverse, and stop the fixture with
 Ctrl-C:
 
 ```sh
-adb reverse --remove tcp:6670
+adb -s "$SERIAL" reverse --remove tcp:6670
 ```
 
 ## IRCv3 Ready fixture

@@ -76,6 +76,7 @@ import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.transport.TransportFactory
 import io.github.trevarj.motd.obfs.VlessLink
+import io.github.trevarj.motd.profile.IrcProfileRepository
 import io.github.trevarj.motd.push.PushHealthStore
 import io.github.trevarj.motd.push.WebPushRegistrar
 import io.github.trevarj.motd.push.pushSuspendedNetworkIds
@@ -847,6 +848,7 @@ class ConnectionManagerImpl
         private val messageNotifier: MessageNotifier,
         private val chatSoundPlayer: ChatSoundPlayer,
         private val avatarCoordinator: AvatarCoordinator,
+        private val profiles: IrcProfileRepository,
         private val pushHealthStore: PushHealthStore,
         private val diagnostics: DiagnosticLogger,
         @ApplicationScope private val scope: CoroutineScope,
@@ -1603,12 +1605,14 @@ class ConnectionManagerImpl
                         if (events.size == 1) {
                             handleConnectionEvent(id, events.single())
                         } else {
+                            clientFor(id)?.let { client -> events.forEach { profiles.onEvent(id, client, it) } }
                             eventProcessor.processPeerPresenceBatch(id, events)
                         }
                     }
                 },
                 onConnectionChanged = { id, connection ->
                     registry.actorConnection(id, generation, connection)
+                    if (registry.isCurrent(id, generation)) profiles.onClientChanged(id, clientFor(id))
                 },
                 onLag = { id, lag -> setLag(id, lag) },
                 onStopped = { id -> registry.actorStopped(id, generation) },
@@ -1651,12 +1655,12 @@ class ConnectionManagerImpl
         ) {
             val metadataRouting =
                 (event as? IrcEvent.MetadataSnapshot)?.let { eventProcessor.routeMetadataSnapshot(networkId, it) }
-            avatarCoordinator.onEvent(
-                networkId,
-                event,
-                positiveMetadataOnly = metadataRouting == EventProcessor.MetadataSnapshotRouting.POSITIVE_ONLY,
-                explicitMetadataValues = metadataRouting == EventProcessor.MetadataSnapshotRouting.EXPLICIT_VALUES,
-            )
+            val positiveMetadataOnly = metadataRouting == EventProcessor.MetadataSnapshotRouting.POSITIVE_ONLY
+            val explicitMetadataValues = metadataRouting == EventProcessor.MetadataSnapshotRouting.EXPLICIT_VALUES
+            clientFor(networkId)?.let {
+                profiles.onEvent(networkId, it, event, positiveMetadataOnly, explicitMetadataValues)
+            }
+            if (event !is IrcEvent.MetadataSnapshot) avatarCoordinator.onEvent(networkId, event)
             eventProcessor.process(networkId, event)
             if (clientFor(networkId)?.latestSelfMembershipEvent === event) {
                 processedMembershipEvents[networkId] = event
@@ -2240,6 +2244,7 @@ class ConnectionManagerImpl
                 }
             avatarCoordinator.onReady(row.id, client)
             if (!isCurrent()) return
+            profiles.onReady(row.id, client)
             reconcileMonitor(
                 row.id,
                 client,

@@ -146,9 +146,8 @@ class AvatarEditorSheetUiTest {
     }
 
     @Test
-    fun validatesUrl_resetsLocal_andConfirmsSharedClear() {
+    fun channelAvatarValidatesUrlAndOnlyOffersLocalReset() {
         var resets = 0
-        var clears = 0
         var savedUrl: String? = null
         compose.setContent {
             MotdTheme {
@@ -164,7 +163,6 @@ class AvatarEditorSheetUiTest {
                     onUpload = {},
                     onUrl = { savedUrl = it },
                     onReset = { resets += 1 },
-                    onClearShared = { clears += 1 },
                 )
             }
         }
@@ -177,13 +175,7 @@ class AvatarEditorSheetUiTest {
         compose.runOnIdle { assertEquals("https://avatar.invalid/proposed.png", savedUrl) }
 
         compose.onNodeWithTag("avatar_editor_reset").performScrollTo().performClick()
-        compose.onNodeWithTag("avatar_editor_clear_shared").performScrollTo().performClick()
-        compose.onNodeWithTag("avatar_editor_clear_dialog").assertIsDisplayed()
-        compose.onNodeWithTag("avatar_editor_clear_confirm").performClick()
-
-        compose.runOnIdle {
-            assertEquals(1, resets)
-            assertEquals(1, clears)
-        }
+        compose.onNodeWithTag("avatar_editor_clear_shared").assertDoesNotExist()
+        compose.runOnIdle { assertEquals(1, resets) }
     }
 }

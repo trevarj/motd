@@ -57,6 +57,7 @@ import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.gesture.radial.GestureOrbHost
 import io.github.trevarj.motd.invite.JoinInviteCodec
+import io.github.trevarj.motd.profile.IrcProfileRepository
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.ConnectionManagerImpl
 import io.github.trevarj.motd.service.DeliveryMode
@@ -75,6 +76,8 @@ import io.github.trevarj.motd.ui.components.RemoteMediaNetworkMonitor
 import io.github.trevarj.motd.ui.components.automaticRemoteMediaAllowed
 import io.github.trevarj.motd.ui.nav.MotdNavGraph
 import io.github.trevarj.motd.ui.nav.NotificationTarget
+import io.github.trevarj.motd.ui.profile.LocalIrcProfileRepository
+import io.github.trevarj.motd.ui.profile.LocalProfileDisplayNameFirst
 import io.github.trevarj.motd.ui.share.PaletteIntentIntake
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.splash.SplashOverlayRequest
@@ -125,6 +128,8 @@ class MainActivity :
     @Inject lateinit var db: MotdDatabase
 
     @Inject lateinit var connectionManager: ConnectionManager
+
+    @Inject lateinit var ircProfileRepository: IrcProfileRepository
 
     @Inject lateinit var notificationPermission: NotificationPermissionStatus
 
@@ -288,6 +293,8 @@ class MainActivity :
                         LocalDickordLabsEnabled provides dickordEnabled,
                         LocalAutomaticRemoteMedia provides automaticRemoteMedia,
                         LocalNetworkMediaHttp provides networkMediaHttp,
+                        LocalIrcProfileRepository provides ircProfileRepository,
+                        LocalProfileDisplayNameFirst provides settings.profileDisplayNameFirst,
                         LocalRemoteAvatars provides
                             RemoteAvatarState(
                                 enabled = uiState.avatarConfig.showSharedAvatars && uiState.contentPreviews.showImages,

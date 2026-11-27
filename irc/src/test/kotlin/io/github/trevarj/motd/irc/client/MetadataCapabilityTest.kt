@@ -171,6 +171,34 @@ class MetadataCapabilityTest {
             assertTrue(events.indexOf(joined) < events.indexOf(snapshot))
         }
 
+    @Test fun labeledMetadataGetKeepsTheSequenceOfItsBatchOpening() =
+        runTest {
+            val transport = FakeTransport()
+            val client =
+                IrcClient(
+                    IrcClientConfig("irc.example.org", 6697, true, "motd", "motd", "MOTD"),
+                    transport.factory(),
+                    backgroundScope,
+                )
+            client.start()
+            runCurrent()
+            transport.feed(":srv CAP * LS :batch draft/metadata-3")
+            transport.feed(":srv CAP motd ACK :batch draft/metadata-3")
+            transport.feed(":srv 001 motd :Welcome")
+            transport.feed(":srv CAP motd NEW :labeled-response")
+            transport.feed(":srv CAP motd ACK :labeled-response")
+            runCurrent()
+
+            val get = async { client.sendLabeledMetadataGet(IrcMessage.parse("METADATA * GET avatar")) {} }
+            runCurrent()
+            val label = transport.sent.single { " METADATA * GET avatar" in it }.substringBefore(' ')
+            transport.feed("$label :srv BATCH +get metadata motd")
+            transport.feed("@batch=get :srv 766 motd motd avatar :Key not set")
+            transport.feed(":srv BATCH -get")
+            val (opening, messages) = get.await()
+            assertTrue(opening in 1 until messages.single().wireSequence)
+        }
+
     @Test fun metadataWriteFenceRunsAfterEarlierOutboundWriteAndBeforeSync() =
         runTest {
             val transport = FakeTransport()

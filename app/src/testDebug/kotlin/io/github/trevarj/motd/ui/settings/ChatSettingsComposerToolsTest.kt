@@ -99,6 +99,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = { formatting = it },
                     onShowVoiceMessageButton = { settings.value = settings.value.copy(showVoiceMessageButton = it) },
                     onNicknameTapAction = { settings.value = settings.value.copy(nicknameTapAction = it) },
+                    onProfileDisplayNameFirst = { settings.value = settings.value.copy(profileDisplayNameFirst = it) },
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = { reply.value = reply.value.copy(visibleChannelPrefix = it) },
                     onSwipeToReplyEnabled = { reply.value = reply.value.copy(swipeToReplyEnabled = it) },
@@ -126,6 +127,10 @@ class ChatSettingsComposerToolsTest {
         compose.onNodeWithTag("settings_target_highlight_PRESENCE", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("settings_presence_picker", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag("settings_switch_direct_media_proxied", useUnmergedTree = true).assertDoesNotExist()
+        val displayNamesFirst = compose.onNodeWithText("Display names first")
+        displayNamesFirst.performScrollTo().assertIsOff().performClick()
+        displayNamesFirst.assertIsOn().performClick()
+        displayNamesFirst.assertIsOff()
         compose
             .onNodeWithText("Emoji tool")
             .performScrollTo()
@@ -198,6 +203,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = {},
                     onShowVoiceMessageButton = {},
                     onNicknameTapAction = {},
+                    onProfileDisplayNameFirst = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},
@@ -255,6 +261,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = {},
                     onShowVoiceMessageButton = {},
                     onNicknameTapAction = {},
+                    onProfileDisplayNameFirst = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},
@@ -328,6 +335,7 @@ class ChatSettingsComposerToolsTest {
                     onShowComposerFormattingTools = {},
                     onShowVoiceMessageButton = {},
                     onNicknameTapAction = {},
+                    onProfileDisplayNameFirst = {},
                     onChatSoundsEnabled = {},
                     onVisibleReplyPrefix = {},
                     onSwipeToReplyEnabled = {},
@@ -426,6 +434,7 @@ class ChatSettingsComposerToolsTest {
                             onShowComposerFormattingTools = {},
                             onShowVoiceMessageButton = {},
                             onNicknameTapAction = {},
+                            onProfileDisplayNameFirst = {},
                             onChatSoundsEnabled = {},
                             onVisibleReplyPrefix = {},
                             onSwipeToReplyEnabled = {},

@@ -129,6 +129,7 @@ enum class SettingsTarget {
     COMPOSER_FORMATTING,
     VOICE_MESSAGE_BUTTON,
     NICKNAME_TAP_ACTION,
+    PROFILE_DISPLAY_NAME_FIRST,
     REPLY_PREFIX,
     SWIPE_TO_REPLY,
     DIRECT_CONNECTIONS,
@@ -321,6 +322,14 @@ enum class ChatSoundCue { SEND, RECEIVE }
 @Serializable data object MentionsRoute
 
 @Serializable data class ChannelInfoRoute(
+    val bufferId: Long,
+)
+
+@Serializable data class UserProfileRoute(
+    val networkId: Long,
+)
+
+@Serializable data class ChannelProfileRoute(
     val bufferId: Long,
 )
 

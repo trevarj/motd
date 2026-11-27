@@ -434,7 +434,6 @@ class NickSheetKickUiTest {
         listOf(
             "Message",
             "Invite to channel",
-            "Edit chat avatar",
             "Give op",
             "Take op",
             "Give voice",

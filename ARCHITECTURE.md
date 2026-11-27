@@ -739,6 +739,12 @@ flowchart TD
   videos are negative-cached; denied or transient endpoint failures remain
   retryable. Watch-page HTML is never used as a fallback because YouTube can
   redirect it to an empty browser-support page.
+- IRC profiles keep server values scoped to the live network identity. Explicit
+  field writes require a correlated acknowledgment or exact readback; no new
+  profile edits are queued for reconnect. Channel writes recheck joined state
+  and the live PREFIX rank, and the server remains the final authority.
+  Presentation order never changes canonical nicks, channel targets, or mentions.
+  Shared avatar publication and device-only conversation overrides remain separate.
 - The app ships as a single Google-free build with no product flavors; push
   delivery is UnifiedPush only. The E2E build is x86_64-compatible and
   intentionally omits the arm64-only libbox JNI.

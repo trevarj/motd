@@ -28,6 +28,7 @@ import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Forum
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
@@ -81,6 +82,8 @@ import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.decodeDickordChannelDescriptor
 import io.github.trevarj.motd.dickord.isDickordPortalConversation
+import io.github.trevarj.motd.dickord.isDickordRelayNick
+import io.github.trevarj.motd.profile.ProfileKey
 import io.github.trevarj.motd.service.ChannelWatchDuration
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.RosterLoadState
@@ -101,6 +104,8 @@ import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
+import io.github.trevarj.motd.ui.profile.ircIdentityLabels
+import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
@@ -123,6 +128,7 @@ fun ChannelInfoScreen(
     onBack: () -> Unit = {},
     onOpenBuffer: (Long) -> Unit = {},
     onCreateInvite: (Long) -> Unit = {},
+    onOpenChannelProfile: ((Long) -> Unit)? = null,
     onOpenNetworkSettings: (Long) -> Unit = {},
     onOpenNetworkTools: ((Long) -> Unit)? = null,
     viewModel: ChannelInfoViewModel = hiltViewModel(),
@@ -243,10 +249,7 @@ fun ChannelInfoScreen(
             val message =
                 when (outcome) {
                     ConversationAvatarOutcome.LocalOnly -> R.string.avatar_result_local_only
-                    ConversationAvatarOutcome.Shared -> R.string.avatar_result_shared
-                    ConversationAvatarOutcome.RequestSent -> R.string.avatar_result_request_sent
                     ConversationAvatarOutcome.LocalReset -> R.string.avatar_result_reset
-                    ConversationAvatarOutcome.SharedCleared -> R.string.avatar_result_shared_cleared
                     ConversationAvatarOutcome.Invalid -> R.string.avatar_result_invalid
                     ConversationAvatarOutcome.Failed -> R.string.avatar_result_failed
                 }
@@ -280,6 +283,7 @@ fun ChannelInfoScreen(
         onRetryMembers = viewModel::retryMembers,
         onQueryChange = viewModel::setQuery,
         onEditAvatar = { avatarEditorOpen = true },
+        onOpenChannelProfile = onOpenChannelProfile,
         onCreateInvite = { onCreateInvite(bufferId) },
         notificationSummary = notificationSummary,
         onChannelNotificationMode = viewModel::setChannelNotificationMode,
@@ -314,14 +318,6 @@ fun ChannelInfoScreen(
         },
         onReset = {
             viewModel.resetAvatar()
-            avatarEditorOpen = false
-        },
-        onShare = {
-            viewModel.shareAvatar()
-            avatarEditorOpen = false
-        },
-        onClearShared = {
-            viewModel.clearSharedAvatar()
             avatarEditorOpen = false
         },
     )
@@ -480,6 +476,7 @@ fun ChannelInfoContent(
     onRetryMembers: () -> Unit = {},
     onQueryChange: (String) -> Unit = {},
     onEditAvatar: () -> Unit = {},
+    onOpenChannelProfile: ((Long) -> Unit)? = null,
     onCreateInvite: () -> Unit = {},
     notificationSummary: ChannelNotificationPresentation = ChannelNotificationPresentation(),
     onChannelNotificationMode: (NotificationMode?) -> Unit = {},
@@ -498,6 +495,7 @@ fun ChannelInfoContent(
     var foolsExpanded by remember { mutableStateOf(false) }
     val buffer = state.buffer
     val joinedChannel = buffer?.type == BufferType.CHANNEL && buffer.joined && buffer.pendingCloseAt == null
+    val dickordEnabled = LocalDickordLabsEnabled.current
     // Visible query lives in local IME state so keystrokes aren't dropped and the cursor is
     // preserved; the ViewModel query drives the filter only. Seeded once from incoming state.
     var queryText by rememberSaveable(stateSaver = TextFieldValue.Saver) {
@@ -552,6 +550,22 @@ fun ChannelInfoContent(
                 )
             }
             if (buffer?.type == BufferType.CHANNEL) {
+                if (onOpenChannelProfile != null &&
+                    (!dickordEnabled || !isDickordPortalConversation(buffer.type, buffer.displayName))
+                ) {
+                    item(key = "channel-profile") {
+                        ListItem(
+                            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            headlineContent = { Text(stringResource(R.string.profile_channel_title)) },
+                            leadingContent = { Icon(Icons.Outlined.Forum, contentDescription = null) },
+                            modifier =
+                                Modifier
+                                    .semantics { testTagsAsResourceId = true }
+                                    .testTag("channel_profile")
+                                    .clickable(role = Role.Button) { onOpenChannelProfile(buffer.id) },
+                        )
+                    }
+                }
                 item(key = "notifications") {
                     NotificationSummaryRow(presentation = notificationSummary, onClick = { showNotifyPicker = true })
                 }
@@ -986,6 +1000,14 @@ private fun ChannelHeader(
             } else {
                 name
             }
+        val profileNetworkId =
+            buffer?.networkId?.takeIf {
+                buffer.type != BufferType.SERVER &&
+                    !isDickordPortalConversation(buffer.type, name) &&
+                    !isDickordRelayNick(name)
+            }
+        val profile = rememberIrcProfile(profileNetworkId, name)
+        val (primaryTitle, secondaryTitle) = ircIdentityLabels(displayName, profile[ProfileKey.DISPLAY_NAME])
         val hideAvatar = avatarsHidden()
         if (!hideAvatar) {
             Avatar(
@@ -998,12 +1020,15 @@ private fun ChannelHeader(
             )
         }
         Text(
-            text = displayName,
+            text = primaryTitle,
             style = MaterialTheme.typography.headlineSmall,
             fontWeight = FontWeight.Bold,
             // The 12dp gap only exists to separate the name from the avatar above it.
             modifier = Modifier.padding(top = if (hideAvatar) 0.dp else 12.dp),
         )
+        secondaryTitle?.let {
+            Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        }
         // Topic + edit affordance (CHANNEL buffers only). Shown even when the topic is blank so an
         // op can set an initial topic.
         if (buffer?.type == BufferType.CHANNEL) {
@@ -1152,8 +1177,18 @@ private fun MemberRow(
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    val profile = rememberIrcProfile(networkId.takeUnless { isDickordRelayNick(member.nick) }, member.nick)
+    val (primaryName, secondaryName) = ircIdentityLabels(member.nick, profile[ProfileKey.DISPLAY_NAME])
+    val isBot = member.isBot || ProfileKey.BOT in profile
+    val prefix = member.prefixes.take(1)
     ListItem(
-        headlineContent = { Text(member.prefixes.take(1) + botDisplayName(member.nick, member.isBot)) },
+        headlineContent = {
+            Text(botDisplayName(if (primaryName == member.nick) prefix + primaryName else primaryName, isBot))
+        },
+        supportingContent =
+            secondaryName?.let { name ->
+                { Text(if (name == member.nick) prefix + name else name) }
+            },
         // Dropping the whole slot (rather than an empty one) lets the nick start at the content edge.
         leadingContent =
             if (avatarsHidden()) {

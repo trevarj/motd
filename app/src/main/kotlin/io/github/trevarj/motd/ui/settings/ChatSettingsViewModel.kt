@@ -120,6 +120,8 @@ class ChatSettingsViewModel
 
         fun setNicknameTapAction(value: NicknameTapAction) = launch { settingsRepository.setNicknameTapAction(value) }
 
+        fun setProfileDisplayNameFirst(enabled: Boolean) = launch { settingsRepository.setProfileDisplayNameFirst(enabled) }
+
         fun setChatSoundsEnabled(value: Boolean) = launch { settingsRepository.setChatSoundsEnabled(value) }
 
         fun setVisibleReplyPrefix(value: Boolean) = launch { replyPrefs.setVisibleChannelPrefix(value) }

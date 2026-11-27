@@ -993,6 +993,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 settingsRepository.setNickMentionStyle(it.nickMentionStyle)
                 settingsRepository.setNicknameTapAction(it.nicknameTapAction)
+                settingsRepository.setProfileDisplayNameFirst(it.profileDisplayNameFirst)
                 current.nickColorOverrides.keys
                     .filter { nick -> nick !in it.nickColorOverrides }
                     .forEach { nick -> settingsRepository.setNickColorOverride(nick, null) }

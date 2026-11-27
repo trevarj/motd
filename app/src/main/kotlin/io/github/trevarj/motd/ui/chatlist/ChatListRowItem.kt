@@ -64,6 +64,8 @@ import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.dickord.dickordChannelLabel
 import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.dickord.isDickordChannel
+import io.github.trevarj.motd.dickord.isDickordRelayNick
+import io.github.trevarj.motd.profile.ProfileKey
 import io.github.trevarj.motd.service.PresenceState
 import io.github.trevarj.motd.ui.components.AdvertisedActivityDot
 import io.github.trevarj.motd.ui.components.Avatar
@@ -78,6 +80,8 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.avatarsHidden
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.resolveIs24Hour
+import io.github.trevarj.motd.ui.profile.ircIdentityLabels
+import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
@@ -228,12 +232,24 @@ fun ChatListRowItem(
     avatarIsChannel: Boolean = row.type == BufferType.CHANNEL,
     avatarModel: String? = row.avatarOverrideModel,
     interactionsEnabled: Boolean = true,
+    showIrcProfile: Boolean = false,
 ) {
     // Resolved per-nick color (also used to tint the friend star), matching sender coloring.
     val nickColor = LocalNickColors.current.nick(row.displayName, MaterialTheme.colorScheme.onSurfaceVariant)
     val spacing = LocalSpacing.current
     val dickordEnabled = LocalDickordLabsEnabled.current
     val activeDickordChannel = dickordEnabled && isDickordChannel(row.displayName)
+    val profileNetwork =
+        row.networkId.takeIf {
+            showIrcProfile && displayTitle == null &&
+                when (row.type) {
+                    BufferType.CHANNEL -> !isDickordChannel(row.displayName)
+                    BufferType.QUERY -> !isDickordRelayNick(row.displayName)
+                    else -> false
+                }
+        }
+    val displayName = rememberIrcProfile(profileNetwork, row.displayName)[ProfileKey.DISPLAY_NAME]
+    val profileLabels = displayName?.let { ircIdentityLabels(row.displayName, it) }
     // Chat-list time always shows regardless of the in-chat "show timestamps" toggle.
     val context = LocalContext.current
     val timestampConfig = LocalTimestampConfig.current
@@ -333,7 +349,7 @@ fun ChatListRowItem(
                     )
                 }
                 Text(
-                    text = displayTitle ?: dickordChannelLabel(row.displayName, dickordEnabled),
+                    text = displayTitle ?: profileLabels?.first ?: dickordChannelLabel(row.displayName, dickordEnabled),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = if (isUnread) FontWeight.Bold else FontWeight.Medium,
                     color = readingColor,
@@ -405,6 +421,15 @@ fun ChatListRowItem(
                     Spacer(Modifier.width(6.dp))
                     SyncStatusBadgeContent(syncIndicator)
                 }
+            }
+            profileLabels?.second?.let { secondary ->
+                Text(
+                    text = secondary,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = previewColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
             Spacer(Modifier.size(2.dp))
             Row(

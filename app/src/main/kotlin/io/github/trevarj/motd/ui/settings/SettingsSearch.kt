@@ -204,6 +204,7 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_composer_formatting_tools, R.string.settings_composer_formatting_tools_desc, "bold italic input", SettingsSearchPage.CHAT, SettingsTarget.COMPOSER_FORMATTING),
         spec(R.string.settings_voice_message_button, R.string.settings_voice_message_button_desc, "microphone record audio IRC", SettingsSearchPage.CHAT, SettingsTarget.VOICE_MESSAGE_BUTTON),
         spec(R.string.settings_nickname_tap_action, R.string.settings_nickname_tap_action_desc, "nick mention insert user menu tap", SettingsSearchPage.CHAT, SettingsTarget.NICKNAME_TAP_ACTION),
+        spec(R.string.settings_profile_display_name_first, R.string.settings_profile_display_name_first_summary, "IRC identity profile nick channel name order", SettingsSearchPage.CHAT, SettingsTarget.PROFILE_DISPLAY_NAME_FIRST),
         spec(R.string.settings_reply_prefix, R.string.settings_reply_prefix_desc, "channel", SettingsSearchPage.CHAT, SettingsTarget.REPLY_PREFIX),
         spec(R.string.settings_swipe_to_reply, R.string.settings_swipe_to_reply_desc, "message gesture reply swipe", SettingsSearchPage.CHAT, SettingsTarget.SWIPE_TO_REPLY),
         spec(R.string.settings_direct_connections, R.string.settings_direct_connections_summary, "dcc files peer", SettingsSearchPage.SECURITY, SettingsTarget.DIRECT_CONNECTIONS),

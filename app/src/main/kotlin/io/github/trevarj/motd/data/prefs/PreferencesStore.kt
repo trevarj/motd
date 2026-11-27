@@ -60,6 +60,7 @@ internal object PrefKeys {
     val NICK_MENTION_STYLE = stringPreferencesKey("nick_mention_style")
     val TYPING_INDICATOR_PLACEMENT = stringPreferencesKey("typing_indicator_placement")
     val NICKNAME_TAP_ACTION = stringPreferencesKey("nickname_tap_action")
+    val PROFILE_DISPLAY_NAME_FIRST = booleanPreferencesKey("profile_display_name_first")
     val NICK_COLOR_OVERRIDES = stringPreferencesKey("nick_color_overrides")
     val FRIEND_NICKS = stringPreferencesKey("friend_nicks")
     val FOOL_NICKS = stringPreferencesKey("fool_nicks")
@@ -212,6 +213,7 @@ class DataStoreSettingsRepository
                     nickColorPalette = nickColorPaletteFromPreference(prefs[PrefKeys.NICK_COLOR_PALETTE]),
                     nickMentionStyle = nickMentionStyleFromPreference(prefs[PrefKeys.NICK_MENTION_STYLE]),
                     nicknameTapAction = nicknameTapActionFromPreference(prefs[PrefKeys.NICKNAME_TAP_ACTION]),
+                    profileDisplayNameFirst = prefs[PrefKeys.PROFILE_DISPLAY_NAME_FIRST] ?: false,
                     nickColorOverrides = decodeNickColorOverrides(prefs[PrefKeys.NICK_COLOR_OVERRIDES]),
                     friends = decodeNickSet(prefs[PrefKeys.FRIEND_NICKS]),
                     fools = fools,
@@ -347,6 +349,10 @@ class DataStoreSettingsRepository
 
         override suspend fun setNicknameTapAction(action: NicknameTapAction) {
             store.edit { it[PrefKeys.NICKNAME_TAP_ACTION] = action.name }
+        }
+
+        override suspend fun setProfileDisplayNameFirst(enabled: Boolean) {
+            store.edit { it[PrefKeys.PROFILE_DISPLAY_NAME_FIRST] = enabled }
         }
 
         override suspend fun setNickColorOverride(

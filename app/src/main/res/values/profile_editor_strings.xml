@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="profile_user_title">User profile</string>
+    <string name="profile_channel_title">Channel profile</string>
+    <string name="profile_network_entry_summary">View and publish your IRCv3 profile on this network</string>
+    <string name="profile_editor_loading">Loading profile…</string>
+    <string name="profile_editor_identity">IRC identity: %1$s</string>
+    <string name="profile_editor_network">Network: %1$s</string>
+    <string name="profile_editor_user_scope">These fields are shared with other IRC users on this network. Publishing does not change your IRC nickname or device-only avatar overrides.</string>
+    <string name="profile_editor_channel_scope">These fields are shared with other IRC users on this network. Publishing does not change the IRC channel name or device-only avatar overrides.</string>
+    <string name="profile_editor_offline">Connect to this network to view or change server values.</string>
+    <string name="profile_editor_unsupported">This connection does not support IRCv3 profile metadata.</string>
+    <string name="profile_editor_read_only">Read-only. Join the channel and have operator privileges or higher to edit its profile.</string>
+    <string name="profile_editor_unavailable_value">Unavailable</string>
+    <string name="profile_editor_not_set">Not set</string>
+    <string name="profile_editor_current_value">Current server value</string>
+    <string name="profile_editor_publish">Publish</string>
+    <string name="profile_editor_remove">Remove</string>
+    <string name="profile_editor_sending">Waiting for the server…</string>
+    <string name="profile_editor_confirmed">The server confirmed the change.</string>
+    <string name="profile_editor_unconfirmed">The server did not confirm the outcome. Check the current value before trying again.</string>
+    <string name="profile_editor_rejected">The server denied the change.</string>
+    <string name="profile_editor_invalid">This value is not valid for this field or exceeds the network’s limits.</string>
+    <string name="profile_editor_no_access">You no longer have permission to change this profile.</string>
+    <string name="profile_editor_edit_help">Publish sends your draft. Remove clears the value on the server.</string>
+    <string name="profile_editor_avatar">Avatar</string>
+    <string name="profile_editor_bot">Bot software</string>
+    <string name="profile_editor_color">Color</string>
+    <string name="profile_editor_display_name">Display name</string>
+    <string name="profile_editor_homepage">Homepage</string>
+    <string name="profile_editor_pronouns">Pronouns</string>
+    <string name="profile_editor_status">Status</string>
+    <string name="profile_editor_bot_help">Software name for a bot account. Remove this field if you are not a bot.</string>
+    <string name="profile_editor_color_help">Enter a hex color (for example, #3F51B5).</string>
+    <string name="profile_editor_homepage_help">Enter the full URL starting with https:// or http://.</string>
+    <string name="profile_editor_upload_help">Upload an image to fill in the URL. Nothing is shared on IRC until you publish.</string>
+    <string name="profile_editor_managed_avatar_help">Publishing or removing your avatar here stops this device from reapplying its previous managed avatar. You can set a new managed avatar in Network Settings.</string>
+</resources>

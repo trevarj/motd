@@ -460,10 +460,6 @@ class ChannelInfoViewModel
 
         fun resetAvatar() = avatarAction(avatarController::resetConversationAvatar)
 
-        fun shareAvatar() = avatarAction(avatarController::shareConversationAvatar)
-
-        fun clearSharedAvatar() = avatarAction(avatarController::clearSharedConversationAvatar)
-
         private fun avatarAction(action: suspend (Long) -> ConversationAvatarOutcome) =
             viewModelScope.launch {
                 val roomId = state.value.buffer?.id ?: return@launch

@@ -168,6 +168,18 @@ Mentions insert at the cursor or replace the selection. The `: ` suffix is used
 only at whole-message start, never merely because text wraps or follows an
 earlier nonblank line.
 
+On a server that supports IRCv3 metadata, open **User profile** from a channel's
+overflow menu or from Network Settings. Publish or remove each field separately:
+avatar, display name, bot software, color, homepage, pronouns, and status. These
+are shared with the IRC network, not saved as offline changes. A profile status
+doesn't set IRC Away.
+
+**Channel info → Channel profile** shows the shared avatar and display name.
+Channel operators and higher ranks can edit them when the server permits it.
+The chat avatar editor still sets a device-only override. **Settings → Chat**
+lets you choose whether the real IRC name or the display name is shown first.
+Mentions and commands always use the real IRC identity.
+
 Appearance's nickname mention style applies None, Bold, or Chip consistently to
 known nicknames and your recorded highlight nickname in message bodies, excluding
 links and inline code. The message-level mention cue remains independent.

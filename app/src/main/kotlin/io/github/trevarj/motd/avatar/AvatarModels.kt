@@ -36,6 +36,13 @@ interface AvatarPrefs {
         networkId: Long,
         setting: SelfAvatarSetting,
     )
+
+    suspend fun profileOwnsSelfAvatar(networkId: Long): Boolean = false
+
+    suspend fun setProfileOwnsSelfAvatar(
+        networkId: Long,
+        owns: Boolean,
+    ) = Unit
 }
 
 interface AvatarStore {

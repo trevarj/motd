@@ -3246,6 +3246,7 @@ internal fun SelectableChatListRow(
                 active = active,
                 syncIndicator = syncIndicator,
                 activityRecoveryInProgress = activityRecoveryInProgress,
+                showIrcProfile = true,
             )
         }
     }

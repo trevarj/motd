@@ -109,6 +109,7 @@ fun NetworkSettingsScreen(
     onOpenBuffer: (Long) -> Unit = {},
     onOpenNetworkTools: (Long) -> Unit = {},
     onOpenAccountSetup: (Long) -> Unit = {},
+    onOpenUserProfile: (Long) -> Unit = {},
     viewModel: NetworkSettingsViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(networkId) { viewModel.init(networkId) }
@@ -151,6 +152,7 @@ fun NetworkSettingsScreen(
         onOpenServerMessages = { viewModel.openServerBuffer(onOpenBuffer) },
         onOpenNetworkTools = { onOpenNetworkTools(networkId) },
         onOpenAccountSetup = { onOpenAccountSetup(networkId) },
+        onOpenUserProfile = { onOpenUserProfile(networkId) },
         onSaveAvatar = viewModel::saveAvatar,
         onStopManagingAvatar = viewModel::stopManagingAvatar,
     )
@@ -186,6 +188,7 @@ fun NetworkSettingsContent(
     onOpenServerMessages: () -> Unit = {},
     onOpenNetworkTools: () -> Unit = {},
     onOpenAccountSetup: () -> Unit = {},
+    onOpenUserProfile: () -> Unit = {},
     onSaveAvatar: (String?) -> Unit = {},
     onStopManagingAvatar: () -> Unit = {},
     snackbarHostState: SnackbarHostState? = null,
@@ -232,6 +235,16 @@ fun NetworkSettingsContent(
                 modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_display_name"),
             )
             AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
+        }
+        if (state.entity?.let { it.role != NetworkRole.BOUNCER_ROOT } == true) {
+            SettingsGroup {
+                SettingsNavigationRow(
+                    title = stringResource(R.string.profile_user_title),
+                    summary = stringResource(R.string.profile_network_entry_summary),
+                    modifier = Modifier.testTag("network_user_profile"),
+                    onClick = onOpenUserProfile,
+                )
+            }
         }
         if (state.entity?.role == NetworkRole.BOUNCER_CHILD) {
             SettingsTarget(target?.name, NetworkSettingsTarget.CONNECTION.name) { targetModifier ->

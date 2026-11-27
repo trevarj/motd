@@ -71,6 +71,7 @@ class EventMapper(
             serverTimeSource = parsedTime.source,
             isHistoryContext = "draft/chathistory-context" in msg.tags,
             clientTags = msg.tags.filterKeys { it.startsWith('+') },
+            wireSequence = msg.wireSequence,
         )
     }
 
@@ -297,7 +298,7 @@ class EventMapper(
             }
 
             "731" -> {
-                IrcEvent.MonitorOffline(monitorTargets(msg))
+                IrcEvent.MonitorOffline(monitorTargets(msg), msg.wireSequence)
             }
 
             "732" -> {

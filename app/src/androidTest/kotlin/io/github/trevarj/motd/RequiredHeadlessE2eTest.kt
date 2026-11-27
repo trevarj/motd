@@ -80,6 +80,7 @@ import io.github.trevarj.motd.e2e.MessageRunProbe
 import io.github.trevarj.motd.e2e.PaletteLinkFixture
 import io.github.trevarj.motd.e2e.ScenarioHolder
 import io.github.trevarj.motd.e2e.TimelineDiagnostics
+import io.github.trevarj.motd.e2e.exerciseHostedProfileMetadata
 import io.github.trevarj.motd.e2e.robots.BouncerRobot
 import io.github.trevarj.motd.e2e.robots.ChatListRobot
 import io.github.trevarj.motd.e2e.robots.ChatRobot
@@ -878,6 +879,9 @@ class RequiredHeadlessE2eTest {
     @Test
     fun bootstrappedNavigationSettingsAndBouncerSmoke() {
         val (bootstrap, network) = launchBootstrapped()
+        exerciseHostedProfileMetadata(compose, bootstrap, milestones) {
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+        }
         val roomId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
         val settings = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
         val originalSettings = runBlocking { settings.settings.first() }
