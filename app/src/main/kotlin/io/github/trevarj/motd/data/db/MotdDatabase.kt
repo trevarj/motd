@@ -6,6 +6,8 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import io.github.trevarj.motd.data.notes.NickNoteEntity
+import io.github.trevarj.motd.data.notes.NickNotesDao
 import io.github.trevarj.motd.data.saved.SavedMessageEntity
 import io.github.trevarj.motd.data.saved.SavedMessageRedactionEntity
 import io.github.trevarj.motd.data.saved.SavedMessagesDao
@@ -30,6 +32,7 @@ import io.github.trevarj.motd.data.saved.SavedMessagesDao
         ScheduledMessageEntity::class,
         SavedMessageEntity::class,
         SavedMessageRedactionEntity::class,
+        NickNoteEntity::class,
         EventAliasEntity::class,
         EventRedirectEntity::class,
         EventObservationEntity::class,
@@ -44,7 +47,7 @@ import io.github.trevarj.motd.data.saved.SavedMessagesDao
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 55,
+    version = 56,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -66,6 +69,8 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun scheduledMessageDao(): ScheduledMessageDao
 
     internal abstract fun savedMessagesDao(): SavedMessagesDao
+
+    internal abstract fun nickNotesDao(): NickNotesDao
 
     abstract fun memberDao(): MemberDao
 
@@ -1237,6 +1242,24 @@ val MIGRATION_54_55 =
         }
     }
 
+val MIGRATION_55_56 =
+    object : Migration(55, 56) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `nick_notes` (
+                    `networkId` INTEGER NOT NULL,
+                    `kind` TEXT NOT NULL,
+                    `value` TEXT NOT NULL,
+                    `text` TEXT NOT NULL,
+                    PRIMARY KEY(`networkId`, `kind`, `value`),
+                    FOREIGN KEY(`networkId`) REFERENCES `networks`(`id`) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1304,6 +1327,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_52_53,
         MIGRATION_53_54,
         MIGRATION_54_55,
+        MIGRATION_55_56,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
@@ -1358,6 +1382,7 @@ internal val UNOBSERVED_TABLES =
         "history_backfill_cursors",
         "history_cursors",
         "network_history_cursors",
+        "nick_notes",
         "pending_folder_assignments",
         "saved_message_redactions",
     )

@@ -52,6 +52,8 @@ import io.github.trevarj.motd.data.db.ReactionEntity
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.notes.NickNoteKey
+import io.github.trevarj.motd.data.notes.NickNoteKind
 import io.github.trevarj.motd.data.prefs.AvatarStyle
 import io.github.trevarj.motd.data.prefs.ChatWallpaper
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
@@ -3788,6 +3790,99 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun private_note_uses_fresh_labeled_whois_for_the_current_nick_sheet() =
+        runTest {
+            val nick = "[Alice]"
+            val requests = Channel<String>(Channel.UNLIMITED)
+            val transport =
+                RecordingTransport { line ->
+                    val message = IrcMessage.parse(line)
+                    if (message.command == "WHOIS") requests.send(requireNotNull(message.tags["label"]))
+                }
+
+            suspend fun reply(
+                label: String,
+                vararg numerics: String,
+            ) {
+                transport.feed("@label=$label :srv BATCH +reply labeled-response")
+                for (numeric in numerics) transport.feed("@batch=reply :srv $numeric")
+                transport.feed(":srv BATCH -reply")
+            }
+
+            val client = testClient(transport)
+            client.start()
+            runCurrent()
+            transport.feed(":srv CAP * LS :message-tags batch labeled-response")
+            transport.feed(":srv CAP me ACK :message-tags batch labeled-response")
+            transport.feed(":srv 001 me :Welcome")
+            runCurrent()
+            assertTrue(client.hasCap("labeled-response"))
+
+            val persistedNick = IrcIdentityRules().normalize(nick)
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, caseMapping = "rfc1459"))
+            db.userDao().upsert(UserEntity(networkId = network.id, nick = persistedNick, account = "cachedAccount"))
+            val vm = viewModel(channel, FakeConnectionManager(network.id, client = client))
+            vm.state.first { it.buffer != null }
+            vm.openNickSheet(nick)
+            vm.nickSheet.first { it?.cached?.account == "cachedAccount" }
+            val end = "318 me [ALICE] :End of WHOIS"
+            reply(requests.receive(), "330 me [ALICE] profileAccount :is logged in as", end)
+            vm.nickSheet.first { it?.whois?.account == "profileAccount" }
+            transport.feed(":srv 005 me CASEMAPPING=ascii :are supported by this server")
+            runCurrent()
+
+            val current = async { vm.privateNoteTarget(nick) }
+            val currentLabel = requests.receive()
+            assertFalse(current.isCompleted)
+            reply(currentLabel, "330 me [ALICE] newAccount :is logged in as", end)
+            assertEquals(NickNoteKey(network.id, NickNoteKind.ACCOUNT, "newAccount"), current.await()?.key)
+
+            val nicknameKey = NickNoteKey(network.id, NickNoteKind.NICKNAME, "[alice]")
+            for (numerics in listOf(
+                arrayOf("330 me {ALICE} wrongNick :is logged in as", end),
+                arrayOf("330 me [ALICE] missingEnd :is logged in as", "318 me {ALICE} :End of WHOIS"),
+                arrayOf("330 me [ALICE] :invalid account", end),
+                arrayOf("330 me [ALICE] * :is logged in as", end),
+                arrayOf("330 me [ALICE] rejected :is logged in as", "401 me [ALICE] :No such nick", end),
+                emptyArray(),
+            )) {
+                val unverified = async { vm.privateNoteTarget(nick) }
+                reply(requests.receive(), *numerics)
+                assertEquals(nicknameKey, unverified.await()?.key)
+            }
+            assertNull(vm.privateNoteTarget("[alice]"))
+
+            val timedOut = async { vm.privateNoteTarget(nick) }
+            requests.receive()
+            assertEquals(nicknameKey, timedOut.await()?.key)
+
+            val previous = async { vm.privateNoteTarget(nick) }
+            val previousLabel = requests.receive()
+            vm.dismissNickSheet()
+            vm.openNickSheet(nick)
+            reply(previousLabel, "330 me [ALICE] previousSession :is logged in as", end)
+            assertNull(previous.await())
+            reply(requests.receive(), end)
+
+            var cancelledCallerContinued = false
+            val cancelled =
+                launch {
+                    vm.privateNoteTarget(nick)
+                    cancelledCallerContinued = true
+                }
+            requests.receive()
+            cancelled.cancelAndJoin()
+            assertFalse(cancelledCallerContinued)
+
+            val disconnected = async { vm.privateNoteTarget(nick) }
+            requests.receive()
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(network.id, caseMapping = "ascii"))
+            client.stop()
+            assertEquals(nicknameKey, disconnected.await()?.key)
+            assertEquals(nicknameKey, vm.privateNoteTarget(nick)?.key)
+        }
+
+    @Test
     fun `nick sheet without IRC details keeps raw identity and cancels cached lookup`() =
         runTest {
             val manager = FakeConnectionManager(network.id, state = IrcClientState.Disconnected)
@@ -3825,6 +3920,8 @@ class ChatViewModelTest {
             assertEquals(clientRequests, manager.clientForCalls)
             assertEquals(memberRequests, manager.memberRequests.size)
             assertEquals(memberObservations, buffers.memberObservations)
+            assertNull(vm.privateNoteTarget(rawNick))
+            assertFalse(isPrivateNoteNick("#channel", IrcIdentityRules()))
         }
 
     @Test

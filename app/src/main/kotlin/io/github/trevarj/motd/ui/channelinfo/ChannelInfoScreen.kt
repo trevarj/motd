@@ -93,7 +93,10 @@ import io.github.trevarj.motd.ui.chat.InviteUserSheet
 import io.github.trevarj.motd.ui.chat.LagTone
 import io.github.trevarj.motd.ui.chat.NickActionSheet
 import io.github.trevarj.motd.ui.chat.NickIgnoreActions
+import io.github.trevarj.motd.ui.chat.NickNoteEditor
+import io.github.trevarj.motd.ui.chat.isPrivateNoteNick
 import io.github.trevarj.motd.ui.chat.lagTone
+import io.github.trevarj.motd.ui.chat.rememberNickNoteTarget
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
@@ -148,6 +151,7 @@ fun ChannelInfoScreen(
     val presenceStates by viewModel.presenceStates.collectAsStateWithLifecycle()
     val notificationSummary by viewModel.notificationSummary.collectAsStateWithLifecycle()
     var editingFool by remember { mutableStateOf<String?>(null) }
+    var privateNote by rememberNickNoteTarget(bufferId)
 
     val snackbarHostState = remember { SnackbarHostState() }
     LaunchedEffect(viewModel, onBack, resources) {
@@ -384,6 +388,17 @@ fun ChannelInfoScreen(
                 viewModel.dismissNickSheet()
                 editingFool = sheet.nick
             },
+            onPrivateNote =
+                if (isPrivateNoteNick(sheet.nick, state.identityRules)) {
+                    {
+                        viewModel.privateNoteTarget(sheet.nick)?.let { target ->
+                            viewModel.dismissNickSheet()
+                            privateNote = target
+                        }
+                    }
+                } else {
+                    null
+                },
             ignoreActions =
                 sheet.ignore?.let { ignore ->
                     NickIgnoreActions(
@@ -411,6 +426,10 @@ fun ChannelInfoScreen(
             hostLoading = resolvingHost,
             onNickSelected = viewModel::resolveHostFor,
         )
+    }
+
+    privateNote?.let { target ->
+        NickNoteEditor(target, onDismiss = { privateNote = null })
     }
 
     val currentInviteChannel =

@@ -507,6 +507,7 @@ fun ChatScreen(
     var inviteNick by rememberSaveable { mutableStateOf<String?>(null) }
     var inviteChannelOpen by rememberSaveable { mutableStateOf(false) }
     var editingFool by rememberSaveable { mutableStateOf<String?>(null) }
+    var privateNote by rememberNickNoteTarget(bufferId)
     // Prefills aimed at the already-open conversation are drained without another screen entry.
     LaunchedEffect(viewModel) {
         viewModel.composerPrefills.collect { composerPrefillRequest = System.nanoTime() to it }
@@ -1090,6 +1091,17 @@ fun ChatScreen(
                 viewModel.dismissNickSheet()
                 editingFool = sheet.nick
             },
+            onPrivateNote =
+                if (isPrivateNoteNick(sheet.nick, identityRules)) {
+                    {
+                        viewModel.privateNoteTarget(sheet.nick)?.let { target ->
+                            viewModel.dismissNickSheet()
+                            privateNote = target
+                        }
+                    }
+                } else {
+                    null
+                },
             ignoreActions =
                 sheet.ignore?.let { ignore ->
                     NickIgnoreActions(
@@ -1124,6 +1136,10 @@ fun ChatScreen(
                 avatarEditorOpen = true
             },
         )
+    }
+
+    privateNote?.let { target ->
+        NickNoteEditor(target, onDismiss = { privateNote = null })
     }
 
     val currentInviteChannel =

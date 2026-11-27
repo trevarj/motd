@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Shield
 import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Block
+import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.GroupAdd
 import androidx.compose.material.icons.outlined.StarBorder
@@ -45,6 +46,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,6 +67,8 @@ import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
+import io.github.trevarj.motd.data.notes.NickNoteKey
+import io.github.trevarj.motd.data.notes.NickNoteKind
 import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.dickord.isDickordRelayNick
 import io.github.trevarj.motd.profile.ProfileKey
@@ -81,6 +86,7 @@ import io.github.trevarj.motd.ui.profile.safeProfileHomepage
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
+import kotlinx.coroutines.launch
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
@@ -91,6 +97,21 @@ internal data class NickIgnoreActions(
     val onToggle: () -> Unit,
     val onManage: (() -> Unit)?,
 )
+
+@Composable
+internal fun rememberNickNoteTarget(bufferId: Long) = rememberSaveable(bufferId, stateSaver = NickNoteTargetSaver) { mutableStateOf<NickNoteTarget?>(null) }
+
+private val NickNoteTargetSaver =
+    listSaver<NickNoteTarget?, Any>(
+        save = { target -> target?.let { listOf(it.key.networkId, it.key.kind.name, it.key.value, it.displayIdentity) }.orEmpty() },
+        restore = {
+            if (it.isEmpty()) {
+                null
+            } else {
+                NickNoteTarget(NickNoteKey(it[0] as Long, NickNoteKind.valueOf(it[1] as String), it[2] as String), it[3] as String)
+            }
+        },
+    )
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalComposeUiApi::class)
 @Composable
@@ -126,6 +147,7 @@ internal fun NickActionSheet(
     canEditConversationAvatar: Boolean = false,
     onEditConversationAvatar: () -> Unit = {},
     relayIdentity: Boolean = false,
+    onPrivateNote: (suspend () -> Unit)? = null,
 ) {
     var kickTarget by remember { mutableStateOf(false) }
     var banTarget by remember { mutableStateOf(false) }
@@ -222,6 +244,28 @@ internal fun NickActionSheet(
             }
             if (showMention) {
                 NickAction(Icons.Outlined.AlternateEmail, stringResource(R.string.nick_sheet_mention), onMention)
+            }
+            if (!relayIdentity && !isDickordRelayNick(nick) && !isSelf && onPrivateNote != null) {
+                var verifying by remember(nick, networkId) { mutableStateOf(false) }
+                val scope = rememberCoroutineScope()
+                NickAction(
+                    Icons.Outlined.Description,
+                    stringResource(if (verifying) R.string.nick_private_note_verifying else R.string.nick_private_note),
+                    onClick = {
+                        if (!verifying) {
+                            verifying = true
+                            scope.launch {
+                                try {
+                                    onPrivateNote()
+                                } finally {
+                                    verifying = false
+                                }
+                            }
+                        }
+                    },
+                    tag = "nick_sheet_private_note",
+                    enabled = !verifying,
+                )
             }
             if (!relayIdentity && !isSelf) {
                 onInviteToChannel?.let { invite ->

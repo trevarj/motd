@@ -38,6 +38,7 @@ import io.github.trevarj.motd.service.RosterLoadState
 import io.github.trevarj.motd.ui.chat.ComposerDraftStore
 import io.github.trevarj.motd.ui.chat.ComposerPrefill
 import io.github.trevarj.motd.ui.chat.NickIgnoreState
+import io.github.trevarj.motd.ui.chat.NickNoteTarget
 import io.github.trevarj.motd.ui.chat.NickSheetController
 import io.github.trevarj.motd.ui.chat.NickSheetState
 import io.github.trevarj.motd.ui.chat.parseWhois
@@ -605,6 +606,8 @@ class ChannelInfoViewModel
                     }
                 }
         }
+
+        internal suspend fun privateNoteTarget(nick: String): NickNoteTarget? = nickSheets.privateNoteTarget(nick, connectionManager)
 
         fun dismissNickSheet() {
             nickDetailsJob?.cancel()

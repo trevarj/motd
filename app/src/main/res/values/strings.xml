@@ -1945,6 +1945,8 @@
     <!-- Nick action sheet + whois (WP-V3, §5.8) -->
     <string name="nick_sheet_message">Message</string>
     <string name="nick_sheet_mention">Mention</string>
+    <string name="nick_private_note">Private note</string>
+    <string name="nick_private_note_verifying">Checking IRC account…</string>
     <string name="nick_sheet_invite_to_channel">Invite to channel</string>
     <string name="nick_sheet_add_friend">Add to friends</string>
     <string name="nick_sheet_remove_friend">Remove from friends</string>
@@ -1966,6 +1968,15 @@
     <string name="nick_sheet_kick_reason_hint">Reason (optional)</string>
     <string name="nick_sheet_ban_title">Ban %1$s?</string>
     <string name="nick_sheet_details_in_server">Details in server messages</string>
+    <string name="nick_note_account_source">Verified account: %1$s</string>
+    <string name="nick_note_nickname_source">Nickname only: %1$s</string>
+    <string name="nick_note_local_scope">Stored only on this device, for this network.</string>
+    <string name="nick_note_field">Note</string>
+    <string name="nick_note_character_count">%1$d / %2$d</string>
+    <string name="nick_note_loading">Loading note…</string>
+    <string name="nick_note_saving">Saving note…</string>
+    <string name="nick_note_read_failed">Couldn’t load this note. Try again.</string>
+    <string name="nick_note_write_failed">Couldn’t save changes to this note. Try again.</string>
     <string name="whois_userhost">%1$s@%2$s</string>
     <string name="whois_account">Account: %1$s</string>
     <string name="whois_server">Server: %1$s</string>

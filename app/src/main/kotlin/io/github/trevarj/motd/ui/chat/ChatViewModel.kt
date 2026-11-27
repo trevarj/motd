@@ -3062,6 +3062,8 @@ class ChatViewModel
             }
         }
 
+        internal suspend fun privateNoteTarget(nick: String): NickNoteTarget? = nickSheets.privateNoteTarget(nick, connectionManager)
+
         fun dismissNickSheet() {
             nickDetailsJob?.cancel()
             nickDetailsJob = null

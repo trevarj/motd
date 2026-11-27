@@ -5,6 +5,8 @@ import io.github.trevarj.motd.data.db.NetworkDao
 import io.github.trevarj.motd.data.db.NetworkIdentityDao
 import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.data.notes.NickNoteKey
+import io.github.trevarj.motd.data.notes.NickNoteKind
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.hasExactNickIgnore
 import io.github.trevarj.motd.data.repo.isExactIgnoreNick
@@ -13,6 +15,7 @@ import io.github.trevarj.motd.irc.client.IrcClient
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.IrcMessage
+import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.PresenceState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -20,6 +23,8 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -65,6 +70,11 @@ class NickIgnoreState internal constructor(
     val failed: Boolean = false,
 )
 
+internal fun isPrivateNoteNick(
+    nick: String,
+    rules: IrcIdentityRules,
+): Boolean = isExactIgnoreNick(nick, rules) && !isDickordRelayNick(nick)
+
 internal class NickSheetController(
     private val scope: CoroutineScope,
     private val connections: StateFlow<Map<Long, IrcClientState>>,
@@ -103,6 +113,11 @@ internal class NickSheetController(
 
     fun networkFor(expected: NickIgnoreState): Long? = session?.networkFor(expected)
 
+    suspend fun privateNoteTarget(
+        expectedNick: String,
+        connectionManager: ConnectionManager,
+    ): NickNoteTarget? = session?.privateNoteTarget(expectedNick, connectionManager)
+
     internal inner class Session(
         private val nick: String,
         private val room: BufferEntity?,
@@ -115,6 +130,67 @@ internal class NickSheetController(
 
         fun update(transform: (NickSheetState) -> NickSheetState) {
             if (session === this) _state.value = _state.value?.let(transform)
+        }
+
+        suspend fun privateNoteTarget(
+            expectedNick: String,
+            connectionManager: ConnectionManager,
+        ): NickNoteTarget? {
+            val target = room ?: return null
+
+            fun sessionIsCurrent(): Boolean {
+                val current = currentRoom()
+                return session === this && current != null && current.id == target.id && current.networkId == target.networkId
+            }
+
+            if (expectedNick != nick || !sessionIsCurrent()) return null
+            val networkId = target.networkId
+            val persisted = identities.byNetwork(networkId)
+            if (!sessionIsCurrent()) return null
+
+            val client = connectionManager.clientFor(networkId)
+            val ready = client?.state?.value as? IrcClientState.Ready
+            val initialRules = identityRules(ready, persisted)
+            if (!isPrivateNoteNick(nick, initialRules)) return null
+
+            val generation = client?.criticalEvents
+            val lines =
+                if (client != null && ready != null) {
+                    try {
+                        client.whois(nick)
+                    } catch (_: Exception) {
+                        emptyList()
+                    }
+                } else {
+                    emptyList()
+                }
+            currentCoroutineContext().ensureActive()
+            if (!sessionIsCurrent()) return null
+
+            val lastReady = connectionManager.clientFor(networkId)?.state?.value as? IrcClientState.Ready
+            val latestIdentity =
+                if (ready != null && (lastReady?.isupport?.get("CASEMAPPING") == null || lastReady.isupport["CHANTYPES"] == null)) {
+                    identities.byNetwork(networkId)
+                } else {
+                    persisted
+                }
+            if (!sessionIsCurrent()) return null
+            val currentClient = connectionManager.clientFor(networkId)
+            val currentReady = currentClient?.state?.value as? IrcClientState.Ready
+            val rules = identityRules(currentReady, latestIdentity)
+            if (!isPrivateNoteNick(nick, rules)) return null
+            val normalizedNick = rules.normalize(nick)
+            if (
+                client != null &&
+                currentClient === client &&
+                currentReady != null &&
+                client.criticalEvents === generation &&
+                initialRules.caseMapping == rules.caseMapping
+            ) {
+                val account = confirmedWhoisAccount(lines, normalizedNick, rules)
+                if (account != null) return NickNoteTarget(NickNoteKey(networkId, NickNoteKind.ACCOUNT, account), account)
+            }
+            return NickNoteTarget(NickNoteKey(networkId, NickNoteKind.NICKNAME, normalizedNick), nick)
         }
 
         suspend fun loadWhois(
@@ -148,13 +224,7 @@ internal class NickSheetController(
 
         private fun eligibleRules(ready: IrcClientState.Ready?): IrcIdentityRules? {
             val configured = configuredNick ?: return null
-            val rules =
-                IrcIdentityRules.from(
-                    ready?.isupport?.get("CASEMAPPING")
-                        ?: persisted?.caseMapping.takeUnless { ready?.removedIsupport?.contains("CASEMAPPING") == true },
-                    ready?.isupport?.get("CHANTYPES")
-                        ?: persisted?.chanTypes.takeUnless { ready?.removedIsupport?.contains("CHANTYPES") == true },
-                )
+            val rules = identityRules(ready, persisted)
             val selfNick = ready?.nick?.takeIf { it.isNotBlank() } ?: persisted?.selfNick?.takeIf { it.isNotBlank() } ?: configured
             return rules.takeIf { isExactIgnoreNick(nick, it) && it.normalize(nick) != it.normalize(selfNick) }
         }
@@ -201,6 +271,35 @@ internal class NickSheetController(
             }
         }
     }
+}
+
+private fun identityRules(
+    ready: IrcClientState.Ready?,
+    persisted: NetworkIdentityEntity?,
+): IrcIdentityRules =
+    IrcIdentityRules.from(
+        ready?.isupport?.get("CASEMAPPING")
+            ?: persisted?.caseMapping.takeUnless { ready?.removedIsupport?.contains("CASEMAPPING") == true },
+        ready?.isupport?.get("CHANTYPES")
+            ?: persisted?.chanTypes.takeUnless { ready?.removedIsupport?.contains("CHANTYPES") == true },
+    )
+
+private fun confirmedWhoisAccount(
+    lines: List<IrcMessage>,
+    normalizedNick: String,
+    rules: IrcIdentityRules,
+): String? {
+    var ended = false
+    var account: String? = null
+    for (line in lines) {
+        if (line.command == "FAIL" || (line.command.length == 3 && line.command.first() in '4'..'5')) return null
+        if (line.params.getOrNull(1)?.let(rules::normalize) != normalizedNick) continue
+        when (line.command) {
+            "318" -> ended = true
+            "330" -> if (!ended) account = line.params.getOrNull(2)
+        }
+    }
+    return account?.takeIf { ended && it.isNotEmpty() && it != "*" && it.none { ch -> ch.isWhitespace() || ch.isISOControl() } }
 }
 
 /** WHOIS is the fresher overlay; cached WHOX/NAMES data fills fields it did not return. */
