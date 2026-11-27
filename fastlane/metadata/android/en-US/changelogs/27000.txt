@@ -1,0 +1,6 @@
+- Edit IRC profiles and channel metadata, save messages, and keep private nick notes.
+- Filter searches, set selective ignores and keyword alerts, and see reactions in Activity.
+- Review shared files as a batch, reuse uploads, and compress oversized videos on device.
+- Set quiet hours or mute alerts while away. Browse live channel listings with sorting.
+- Use hardware chat shortcuts, reclaim your nick, and route private notices without opening a DM.
+- Keep your scroll position when sending.
