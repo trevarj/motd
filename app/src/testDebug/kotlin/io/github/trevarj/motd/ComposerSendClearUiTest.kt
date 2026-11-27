@@ -47,6 +47,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
@@ -90,6 +91,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performScrollToNode
@@ -207,6 +209,8 @@ import io.github.trevarj.motd.ui.components.recordMessageWallpaper
 import io.github.trevarj.motd.ui.components.rememberMessageTimeFormatter
 import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.withStripedMessageWallpaper
+import io.github.trevarj.motd.ui.nav.ChatKeyboardAction
+import io.github.trevarj.motd.ui.nav.ChatKeyboardNavigate
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.theme.LocalLottieMotionEnabled
@@ -497,6 +501,7 @@ class ComposerSendClearUiTest {
         onBack: () -> Unit = {},
         showBack: Boolean = true,
         onOpenConversationList: (() -> Unit)? = null,
+        onKeyboardNavigate: ChatKeyboardNavigate? = null,
         historySyncStatus: HistorySyncStatus = HistorySyncStatus.Idle,
         onOpenChannelInfo: (Long) -> Unit = {},
         onSenderClick: (String) -> Unit = {},
@@ -599,6 +604,7 @@ class ComposerSendClearUiTest {
                             onBack = onBack,
                             showBack = showBack,
                             onOpenConversationList = onOpenConversationList,
+                            onKeyboardNavigate = onKeyboardNavigate,
                             historySyncStatus = historySyncStatus,
                             onOpenChannelInfo = onOpenChannelInfo,
                             onSenderClick = onSenderClick,
@@ -5078,6 +5084,89 @@ class ComposerSendClearUiTest {
 
         assertEquals(listOf("hello"), submitted)
         compose.onNodeWithText("hello").assertDoesNotExist()
+    }
+
+    @Test
+    fun keyboardCompletionRefreshesSpeakersAfterSameSizePagingUpdate() {
+        val row = translationMessage().copy(ircFormattedText = null)
+        val replacement = row.copy(sender = "alicia")
+        val pages = MutableStateFlow(PagingData.from(listOf(row)))
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            pages = pages,
+            memberNicks = listOf("alice", "alicia"),
+        ) { _, _ -> error("Completion must not send") }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        field.performTextInput("@al")
+        compose.mainClock.advanceTimeBy(350)
+        val first = compose.onNodeWithTag("autocomplete_item_0")
+        first.assert(hasText("alice"))
+        compose.runOnIdle { pages.value = PagingData.from(listOf(replacement)) }
+        compose.waitUntil(5_000) { compose.onAllNodes(hasTestTag("autocomplete_item_0") and hasText("alicia")).fetchSemanticsNodes().isNotEmpty() }
+
+        fun tab() {
+            field.performKeyInput {
+                keyDown(Key.Tab)
+                keyUp(Key.Tab)
+            }
+        }
+        tab()
+        field.assertTextEquals("alicia: ")
+        compose.runOnIdle { pages.value = PagingData.from(listOf(replacement.copy(text = "Updated body"))) }
+        compose.onNodeWithText("Updated body", substring = true).assertIsDisplayed()
+        tab()
+        field.assertTextEquals("alice: ")
+    }
+
+    @Test
+    fun keyboardCommandsUseTheFocusedChatAndRespectComposerTools() {
+        val actions = mutableListOf<ChatKeyboardAction>()
+        val persisted = mutableListOf<String>()
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            memberNicks = listOf("alice", "alicia"),
+            onDraftChanged = { persisted += it },
+            onKeyboardNavigate = { action, fromHardware ->
+                assertEquals(action == ChatKeyboardAction.NEXT_UNREAD, fromHardware)
+                actions.add(action)
+            },
+        ) { _, _ -> error("A shortcut must not submit the draft") }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        field.performTextInput("@al")
+        compose.mainClock.advanceTimeBy(350)
+        compose.onNodeWithTag("autocomplete_item_0").assertIsDisplayed()
+        field.performKeyInput {
+            keyDown(Key.Tab)
+            keyUp(Key.Tab)
+        }
+        field.assertTextEquals("alice: ")
+        compose.runOnIdle { assertEquals("alice: ", persisted.last()) }
+
+        fun nextUnread() {
+            field.performKeyInput {
+                keyDown(Key.CtrlLeft)
+                keyDown(Key.ShiftLeft)
+                keyDown(Key.F8)
+                keyUp(Key.F8)
+                keyUp(Key.ShiftLeft)
+                keyUp(Key.CtrlLeft)
+            }
+        }
+        nextUnread()
+        val tools = compose.onNodeWithTag("chat_composer_tools")
+        tools.performClick()
+        compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        nextUnread()
+        field.assertTextEquals("alice: ")
+        compose.runOnIdle { assertEquals(listOf(ChatKeyboardAction.NEXT_UNREAD), actions) }
+        tools.performClick()
+        compose.onNodeWithTag("chat_overflow").performClick()
+        compose.onNodeWithTag("chat_keyboard_shortcuts").performClick()
+        compose.onNodeWithTag("chat_keyboard_previous").performClick()
+        compose.runOnIdle { assertEquals(listOf(ChatKeyboardAction.NEXT_UNREAD, ChatKeyboardAction.PREVIOUS), actions) }
     }
 
     @Test

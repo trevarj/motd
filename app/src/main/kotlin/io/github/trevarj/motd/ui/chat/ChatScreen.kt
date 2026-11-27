@@ -156,6 +156,7 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -281,7 +282,6 @@ import io.github.trevarj.motd.ui.ai.AiTextViewModel
 import io.github.trevarj.motd.ui.ai.source
 import io.github.trevarj.motd.ui.channelinfo.ModeCatalog
 import io.github.trevarj.motd.ui.components.AudioMiniPlayer
-import io.github.trevarj.motd.ui.components.AutocompletePanel
 import io.github.trevarj.motd.ui.components.Avatar
 import io.github.trevarj.motd.ui.components.AvatarEditorSheet
 import io.github.trevarj.motd.ui.components.ChannelNotificationPresentation
@@ -309,6 +309,10 @@ import io.github.trevarj.motd.ui.components.rememberMessageWallpaperBackdrop
 import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.components.typingText
+import io.github.trevarj.motd.ui.nav.ChatKeyboardNavigate
+import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsDialog
+import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsIcon
+import io.github.trevarj.motd.ui.nav.chatKeyboardAction
 import io.github.trevarj.motd.ui.profile.ircIdentityLabels
 import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.profile.rememberProfileMetadataSupported
@@ -435,7 +439,7 @@ internal fun dismissKeyboardBeforeNavigating(
 
 /** Stateful entry: wires the ViewModel, lifecycle mark-read, and navigation. */
 @Composable
-fun ChatScreen(
+internal fun ChatScreen(
     bufferId: Long,
     appearance: AppearanceConfig,
     onOpenPalette: (PaletteDocument, String) -> Unit,
@@ -462,6 +466,8 @@ fun ChatScreen(
     presentations: ChatPresentationRegistry? = null,
     onOpenScheduledMessages: ((Long) -> Unit)? = null,
     onOpenNetworkTools: ((Long) -> Unit)? = null,
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
+    onKeyboardBlockedChange: (Boolean) -> Unit = {},
 ) {
     val savedMessages = hiltViewModel<SavedMessagesViewModel>()
     val scheduledComposer =
@@ -684,8 +690,14 @@ fun ChatScreen(
             WallpaperChatChoiceKind.PATTERN -> wallpaperChoice.pattern?.let { wallpaperPatternLabel(it, appearance) }
             null -> null
         }
+    val conversationLinks by viewModel.conversationLinks.collectAsStateWithLifecycle()
     ChatContent(
         state = state,
+        onKeyboardNavigate = onKeyboardNavigate,
+        onKeyboardBlockedChange = onKeyboardBlockedChange,
+        keyboardOverlayOpen =
+            avatarEditorOpen || avatarUploadOpen || inviteNick != null || inviteChannelOpen || editingFool != null ||
+                privateNote != null || nickSheet != null || conversationLinks != null || dccSendReview != null || dccSendFailure != null,
         ebooksHelperRoomId = ebooksHelperRoomId,
         ebooksDccOffers = ebooksDccOffers,
         items = items,
@@ -944,7 +956,6 @@ fun ChatScreen(
         onReadAloudSaveOptions = viewModel::saveReadAloudOptions,
         onReadAloudPreview = viewModel::previewReadAloud,
     )
-    val conversationLinks by viewModel.conversationLinks.collectAsStateWithLifecycle()
     state.buffer?.takeIf { it.type == BufferType.CHANNEL || it.type == BufferType.QUERY }?.let { room ->
         conversationLinks?.let { links ->
             ConversationLinksSheet(
@@ -1325,6 +1336,9 @@ internal fun ChatContent(
     state: ChatState,
     items: LazyPagingItems<MessageEntity>,
     composerEnabled: Boolean,
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
+    onKeyboardBlockedChange: (Boolean) -> Unit = {},
+    keyboardOverlayOpen: Boolean = false,
     presentation: ChatPresentation? = null,
     presentationLease: io.github.trevarj.motd.data.repo.ChatPageCache.Lease? = null,
     presentationRevision: Long = 0L,
@@ -1956,6 +1970,8 @@ internal fun ChatContent(
         }
         var longDraftPrompt by rememberSaveable { mutableStateOf(false) }
         var overflowOpen by rememberSaveable { mutableStateOf(false) }
+        var shortcutsOpen by remember(traceBufferId) { mutableStateOf(false) }
+        var composerOverlayOpen by remember { mutableStateOf(false) }
         val scheduleFocus = LocalFocusManager.current
         val scheduleKeyboard = LocalSoftwareKeyboardController.current
         var scheduledDraft by remember(traceBufferId) { mutableStateOf<ScheduledDraft?>(null) }
@@ -3918,24 +3934,51 @@ internal fun ChatContent(
                 onMarkRead(newest)
             }
         }
-        val recentSpeakers =
-            remember(items.itemCount) {
-                // Exclude system-event senders and self so recency ranking reflects real conversation
-                // partners. Only the newest rows matter for recency, so cap the scan (the list
-                // is reverse-laid-out, so index 0.. are the newest) to stay cheap on large loaded windows.
-                (0 until minOf(items.itemCount, 60))
-                    .mapNotNull { items.peek(it) }
-                    .filterNot { isSystemKind(it.kind) || it.isSelf }
-                    .map { it.sender }
+        val recentSpeakers: List<String> by remember(items) {
+            derivedStateOf {
+                val snapshot = items.itemSnapshotList
+                buildList {
+                    for (index in 0 until minOf(snapshot.size, 60)) {
+                        val message = snapshot[index] ?: continue
+                        if (!message.isSelf && !isSystemKind(message.kind)) add(message.sender)
+                    }
+                }
             }
+        }
         val compactHeader by remember {
             derivedStateOf {
                 // Keep 48dp controls out until the animated bar can contain them without jumping.
                 36.dp + (TopAppBarDefaults.TopAppBarExpandedHeight - 36.dp) * headerExpansion.value < 48.dp
             }
         }
+        val ordinaryChat =
+            !keyboardOverlayOpen && !overflowOpen && !shortcutsOpen && activeSelectionId == null && sheetRequest == null &&
+                !conversationLayoutSheetOpen && !notificationSheetOpen && !presenceModeSheetOpen && !historySyncModeSheetOpen &&
+                !longDraftPrompt && scheduledDraft == null && !scheduleAttachmentPending &&
+                !readAloudOptionsOpen && redactionTarget == null && reactionPickerTarget == null && translationTarget == null &&
+                forwardState == null && aiTextState == AiTextUiState.Closed && !ebooksOffersOpen && !ebooksHelpOpen &&
+                ebooksResults == null && ebooksResultsError == null && pendingDccAccept == null
+        val keyboardBlocked = !ordinaryChat || composerOverlayOpen
+        DisposableEffect(keyboardBlocked, onKeyboardBlockedChange) {
+            onKeyboardBlockedChange(keyboardBlocked)
+            onDispose { if (keyboardBlocked) onKeyboardBlockedChange(false) }
+        }
+        if (shortcutsOpen && onKeyboardNavigate != null) {
+            ChatKeyboardShortcutsDialog(onAction = { onKeyboardNavigate(it, false) }, onDismiss = { shortcutsOpen = false })
+        }
         val conversationActionsMenu: @Composable () -> Unit = {
             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chat_overflow_menu")) {
+                if (onKeyboardNavigate != null) {
+                    DropdownMenuItem(
+                        modifier = Modifier.testTag("chat_keyboard_shortcuts"),
+                        text = { Text(stringResource(R.string.chat_keyboard_shortcuts)) },
+                        leadingIcon = { ChatKeyboardShortcutsIcon() },
+                        onClick = {
+                            overflowOpen = false
+                            shortcutsOpen = true
+                        },
+                    )
+                }
                 if (compactHeader) {
                     if (titleClickLabel != null) {
                         DropdownMenuItem(
@@ -4238,7 +4281,10 @@ internal fun ChatContent(
         Scaffold(
             modifier =
                 Modifier
-                    .onGloballyPositioned { selectionHostOrigin = it.positionInWindow() }
+                    .onKeyEvent { event ->
+                        !keyboardBlocked && onKeyboardNavigate != null &&
+                            chatKeyboardAction(event)?.let { onKeyboardNavigate(it, true) } == true
+                    }.onGloballyPositioned { selectionHostOrigin = it.positionInWindow() }
                     .pointerInput(activeSelectionId) {
                         if (activeSelectionId != null) {
                             awaitEachGesture {
@@ -4603,7 +4649,7 @@ internal fun ChatContent(
                                     )
                                     val isChannelBuffer = state.buffer?.type == BufferType.CHANNEL
                                     val completions =
-                                        remember(composerText, memberNicks, recentSpeakers, isChannelBuffer) {
+                                        remember(composerText, memberNicks, recentSpeakers, isChannelBuffer, nickNormalizer) {
                                             autocompleteFor(
                                                 composerText,
                                                 memberNicks,
@@ -4815,26 +4861,15 @@ internal fun ChatContent(
                                         onVoiceHoldStop = onVoiceHoldStop,
                                         onVoiceHoldCancel = onVoiceHoldCancel,
                                         onVoiceLock = onVoiceLock,
-                                        autocomplete =
-                                            if (showAutocomplete && completions.isNotEmpty()) {
-                                                val candidates = completions.map { it.display }
-                                                val isCommand = completions.firstOrNull()?.isCommand == true
-                                                val completionNetworkId = state.buffer?.networkId
-                                                val panel: @Composable () -> Unit = {
-                                                    AutocompletePanel(
-                                                        candidates = candidates,
-                                                        isCommand = isCommand,
-                                                        networkId = completionNetworkId,
-                                                        onPick = { picked ->
-                                                            composerText = applyPick(composerText, picked)
-                                                            onDraftChanged(composerText.text)
-                                                        },
-                                                    )
-                                                }
-                                                panel
-                                            } else {
-                                                null
-                                            },
+                                        autocomplete = remember(showAutocomplete, completions) { if (showAutocomplete) completions.map { it.display } else emptyList() },
+                                        completionNetworkId = state.buffer?.networkId,
+                                        completionSource = remember(traceBufferId, memberNicks, recentSpeakers, nickNormalizer, isChannelBuffer) { Any() },
+                                        onAutocompletePick = {
+                                            composerText = it
+                                            onDraftChanged(it.text)
+                                        },
+                                        keyboardShortcutsEnabled = ordinaryChat,
+                                        onKeyboardOverlayChanged = { composerOverlayOpen = it },
                                     )
                                 }
                             },

@@ -551,6 +551,7 @@ class ChatListViewModel
         // Both panes use the same tab selection and Unread scope, including after recreation.
         internal val folderSelection = savedStateHandle.getMutableStateFlow<Long?>(KEY_SELECTED_FOLDER, null)
         internal val unreadFilter = savedStateHandle.getMutableStateFlow<ChatListUnreadScope?>(KEY_UNREAD_SCOPE, null)
+        internal val foolsExpansion = MutableStateFlow(false)
 
         private val nickSuggestionRequest = MutableStateFlow<NickSuggestionRequest?>(null)
         val nickSuggestions: StateFlow<NickSuggestions> =

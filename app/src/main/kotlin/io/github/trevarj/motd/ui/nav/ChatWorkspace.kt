@@ -77,10 +77,12 @@ internal fun ChatWorkspace(
     listWidth: MutableFloatState,
     listPane: @Composable (twoPane: Boolean) -> Unit,
     detailPane: (@Composable (showBack: Boolean) -> Unit)? = null,
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
 ) {
     BoxWithConstraints(
         modifier =
             Modifier
+                .chatKeyboardFocusHandoff(onKeyboardNavigate)
                 .fillMaxSize()
                 .windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Horizontal)),
     ) {

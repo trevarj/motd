@@ -66,6 +66,7 @@ import io.github.trevarj.motd.ui.chatlist.ChatListViewModel
 import io.github.trevarj.motd.ui.chatlist.FolderEditorScreen
 import io.github.trevarj.motd.ui.chatlist.ManageFoldersScreen
 import io.github.trevarj.motd.ui.chatlist.isNormalChatListReady
+import io.github.trevarj.motd.ui.chatlist.keyboardTarget
 import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
 import io.github.trevarj.motd.ui.feed.ActivityScreen
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
@@ -222,6 +223,9 @@ fun MotdNavGraph(
                         viewModel = chatListViewModel,
                         appContentVisible = chatListVisible,
                         suppressOnboarding = incomingActive,
+                        onKeyboardNavigate = { action, hardware ->
+                            navController.openKeyboardChat(entry, replaceCurrentChat = false, fromHardware = hardware) { chatListViewModel.keyboardTarget(action, null) }
+                        },
                         onDefaultBufferAvailable = { bufferId ->
                             if (twoPane && !openedDefault && navController.currentBackStackEntry == entry) {
                                 openedDefault = true
@@ -255,6 +259,11 @@ fun MotdNavGraph(
                         navController = navController,
                         portalViewModel = portalViewModel,
                         chatListViewModel = chatListViewModel,
+                        onKeyboardNavigate = { action, hardware ->
+                            navController.openKeyboardChat(entry, replaceCurrentChat = false, fromHardware = hardware) {
+                                if (chatListVisible) action.target(portalViewModel.state.value, null) else null
+                            }
+                        },
                     )
                 },
             )
@@ -301,8 +310,21 @@ fun MotdNavGraph(
                     CircularProgressIndicator()
                 }
             } else {
+                var listBlocksKeyboard by remember { mutableStateOf(false) }
+                var detailBlocksKeyboard by remember { mutableStateOf(false) }
+                val current = foundRow?.bufferId ?: route.bufferId
+                val keyboardNavigate: ChatKeyboardNavigate = { action, hardware ->
+                    navController.openKeyboardChat(entry, replaceCurrentChat = true, fromHardware = hardware) {
+                        when {
+                            !chatListVisible || rowLookup is DickordPortalRowLookup.Loading || foundRow?.archived == true -> null
+                            portalOwned -> action.target(portalViewModel.state.value, current)
+                            else -> chatListViewModel.keyboardTarget(action, current)
+                        }
+                    }
+                }
                 ChatWorkspace(
                     listWidth = listWidth,
+                    onKeyboardNavigate = keyboardNavigate.takeIf { chatListVisible && !listBlocksKeyboard && !detailBlocksKeyboard && foundRow?.archived != true },
                     listPane = {
                         if (portalOwned) {
                             DickordPortalPane(
@@ -311,6 +333,7 @@ fun MotdNavGraph(
                                 chatListViewModel = chatListViewModel,
                                 selectedBufferId = requireNotNull(foundRow).bufferId,
                                 replaceCurrentChat = true,
+                                onKeyboardNavigate = keyboardNavigate.takeUnless { detailBlocksKeyboard },
                                 onDeleteSelectedConversation = {
                                     if (navController.currentBackStackEntry == entry) {
                                         navController.openDickordNavigator()
@@ -321,7 +344,9 @@ fun MotdNavGraph(
                             ChatListPane(
                                 navController = navController,
                                 viewModel = chatListViewModel,
-                                selectedBufferId = route.bufferId,
+                                selectedBufferId = current,
+                                onKeyboardNavigate = keyboardNavigate.takeUnless { detailBlocksKeyboard },
+                                onKeyboardBlockedChange = { listBlocksKeyboard = it },
                                 replaceCurrentChat = true,
                             )
                         }
@@ -357,6 +382,8 @@ fun MotdNavGraph(
                                 presentations = presentations,
                                 onBack = { navController.popBackStack() },
                                 showBack = showBack,
+                                onKeyboardNavigate = keyboardNavigate.takeIf { chatListVisible && !listBlocksKeyboard && foundRow?.archived != true },
+                                onKeyboardBlockedChange = { detailBlocksKeyboard = it },
                                 onOpenConversationList =
                                     if (portalOwned && showBack) {
                                         { navController.openDickordNavigator() }
@@ -941,10 +968,12 @@ private fun DickordPortalPane(
     selectedBufferId: Long? = null,
     replaceCurrentChat: Boolean = false,
     onDeleteSelectedConversation: () -> Unit = {},
+    onKeyboardNavigate: ChatKeyboardNavigate?,
 ) {
     DickordPortalScreen(
         viewModel = portalViewModel,
         selectedBufferId = selectedBufferId,
+        onKeyboardNavigate = onKeyboardNavigate,
         onBack = navController::returnToChatList,
         onOpenConversation = {
             navController.openChat(ChatRoute(it), replaceCurrentChat)
@@ -972,12 +1001,16 @@ private fun ChatListPane(
     suppressOnboarding: Boolean = false,
     appContentVisible: Boolean = true,
     onDefaultBufferAvailable: (Long) -> Unit = {},
+    onKeyboardNavigate: ChatKeyboardNavigate?,
+    onKeyboardBlockedChange: (Boolean) -> Unit = {},
 ) {
     val owner = LocalLifecycleOwner.current
     val currentEntry by navController.currentBackStackEntryAsState()
 
     ChatListScreen(
         viewModel = viewModel,
+        onKeyboardNavigate = onKeyboardNavigate,
+        onKeyboardBlockedChange = onKeyboardBlockedChange,
         onOpenBuffer = {
             navController.openChat(ChatRoute(it), replaceCurrentChat)
         },
@@ -1017,6 +1050,19 @@ private fun ChatListPane(
         // Observe the committed entry for composition and check it synchronously for queued actions.
         newConversationSheetActive = { currentEntry == owner && navController.currentBackStackEntry == owner },
     )
+}
+
+internal inline fun NavHostController.openKeyboardChat(
+    entry: NavBackStackEntry,
+    replaceCurrentChat: Boolean,
+    fromHardware: Boolean,
+    target: () -> Long?,
+): Boolean {
+    if (currentBackStackEntry != entry || !entry.lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return false
+    val id = target() ?: return false
+    openChat(ChatRoute(id), replaceCurrentChat)
+    if (fromHardware) currentBackStackEntry?.savedStateHandle?.set(CHAT_KEYBOARD_FOCUS, true)
+    return true
 }
 
 /**

@@ -11,7 +11,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toPixelMap
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.InputModeManager
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
@@ -32,6 +36,7 @@ import androidx.compose.ui.test.onAllNodesWithText
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.text.TextLayoutResult
@@ -47,6 +52,7 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.ui.components.LocalRemoteAvatars
 import io.github.trevarj.motd.ui.components.MESSAGE_TEXT_CONTRAST
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
+import io.github.trevarj.motd.ui.nav.target
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.contrastRatio
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -261,6 +267,48 @@ class DickordPortalUiTest {
             assertEquals(listOf(11L, 21L), opened)
             assertEquals(DICKORD_PORTAL_DMS_KEY, state.value.selectedGroupKey)
         }
+    }
+
+    @Test
+    fun keyboardWalksOnlyTheSelectedPortalGroupAndIgnoresArchive() {
+        val initial = portalState()
+        var state by mutableStateOf(initial.copy(selectedGroupKey = initial.groups[1].key))
+        val opened = mutableListOf<Long>()
+        var calls = 0
+        lateinit var inputMode: InputModeManager
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                inputMode = LocalInputModeManager.current
+                DickordPortalContent(
+                    state = state,
+                    onKeyboardNavigate = { action, hardware ->
+                        assertTrue(hardware)
+                        calls++
+                        action.target(state, opened.lastOrNull())?.let(opened::add) == true
+                    },
+                )
+            }
+        }
+        val focused = compose.onNodeWithTag("dickord_portal_refresh")
+        compose.runOnIdle { inputMode.requestInputMode(InputMode.Keyboard) }
+        focused.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+
+        fun next() =
+            focused.performKeyInput {
+                keyDown(Key.CtrlLeft)
+                keyDown(Key.F8)
+                keyUp(Key.F8)
+                keyUp(Key.CtrlLeft)
+            }
+        next()
+        next()
+        next()
+        compose.runOnIdle {
+            assertEquals(listOf(11L, 12L, 11L), opened)
+            state = state.copy(showArchived = true)
+        }
+        next()
+        compose.runOnIdle { assertEquals(3, calls) }
     }
 
     @Test

@@ -14,9 +14,11 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.LocalActivity
 import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.size
 import androidx.compose.material3.LocalRippleConfiguration
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.CompositionLocalProvider
@@ -29,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asAndroidBitmap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -63,12 +66,14 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performKeyInput
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
@@ -97,6 +102,7 @@ import io.github.trevarj.motd.data.prefs.UiIconSet
 import io.github.trevarj.motd.irc.format.IRC_BOLD
 import io.github.trevarj.motd.irc.format.IRC_COLOR
 import io.github.trevarj.motd.irc.format.IRC_HEX_COLOR
+import io.github.trevarj.motd.irc.format.IRC_RESET
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcTextStyle
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
@@ -657,7 +663,6 @@ class ComposerUiTest {
         val draft = mutableStateOf(TextFieldValue("ali", TextRange(3)))
         val candidates = List(20) { "alice$it" }
         val showAutocomplete = mutableStateOf(false)
-        var picked: String? = null
         compose.setContent {
             MotdTheme {
                 Composer(
@@ -666,17 +671,7 @@ class ComposerUiTest {
                     onSend = {},
                     enabled = true,
                     modifier = Modifier.offset { IntOffset(0, anchorY.value.roundToPx()) }.testTag("composer_anchor"),
-                    autocomplete =
-                        if (showAutocomplete.value) {
-                            {
-                                AutocompletePanel(
-                                    candidates = candidates,
-                                    onPick = { picked = it },
-                                )
-                            }
-                        } else {
-                            null
-                        },
+                    autocomplete = if (showAutocomplete.value) candidates else emptyList(),
                 )
             }
         }
@@ -803,11 +798,9 @@ class ComposerUiTest {
                 useUnmergedTree = true,
             ).performScrollToIndex(candidates.lastIndex)
         lastRow.assertIsDisplayed().performTouchInput { click() }
-        field.assertIsFocused().assertTextEquals("ali")
-        compose.runOnIdle {
-            assertEquals(candidates.last(), picked)
-            assertEquals(TextRange(3), draft.value.selection)
-        }
+        val completed = "${candidates.last()}: "
+        field.assertIsFocused().assertTextEquals(completed)
+        compose.runOnIdle { assertEquals(TextFieldValue(completed, TextRange(completed.length)), draft.value) }
 
         compose.mainClock.autoAdvance = false
         try {
@@ -821,7 +814,7 @@ class ComposerUiTest {
                 compose.mainClock.advanceTimeByFrame()
                 panel.assertDoesNotExist()
             }
-            field.assertIsFocused().assertTextEquals("ali")
+            field.assertIsFocused().assertTextEquals(completed)
         } finally {
             compose.mainClock.autoAdvance = true
         }
@@ -849,18 +842,12 @@ class ComposerUiTest {
                     onSend = {},
                     enabled = true,
                     modifier = Modifier.offset(y = 320.dp),
-                    autocomplete =
-                        if (showAutocomplete.value && panelCandidates.isNotEmpty()) {
-                            {
-                                AutocompletePanel(
-                                    candidates = panelCandidates,
-                                    isCommand = panelCandidates.first().startsWith('/'),
-                                    onPick = { picked = it },
-                                )
-                            }
-                        } else {
-                            null
-                        },
+                    autocomplete = if (showAutocomplete.value) panelCandidates else emptyList(),
+                    onAutocompletePick = {
+                        picked = it.text
+                        draftText.value = it.text
+                        draft.value = it
+                    },
                 )
             }
         }
@@ -876,7 +863,7 @@ class ComposerUiTest {
             compose.runOnIdle { assertEquals(TextRange(draftText.value.length), draft.value.selection) }
         }
 
-        // Match the consumer contract: no candidates means a null autocomplete slot.
+        // Exercise both hiding a nonempty source and clearing the source itself.
         for (removeSlot in listOf(true, false)) {
             val first = if (removeSlot) "alice" else "/join"
             val second = if (removeSlot) "alicia" else "/away"
@@ -942,10 +929,11 @@ class ComposerUiTest {
             compose.onNodeWithText(replacement).assertIsDisplayed()
             compose.onNodeWithText(first).assertDoesNotExist()
             assertInputUnchanged()
-            compose.mainClock.advanceTimeBy(1_000)
-            compose.onNodeWithTag("autocomplete_item_0").performClick()
-            compose.runOnIdle { assertEquals(replacement, picked) }
+            compose.onNodeWithTag("autocomplete_item_0").performTouchInput { click() }
+            compose.runOnIdle { assertEquals(if (removeSlot) "$replacement: " else "$replacement ", picked) }
+            compose.mainClock.advanceTimeByFrame()
             assertInputUnchanged()
+            compose.mainClock.advanceTimeBy(1_000)
 
             compose.runOnUiThread {
                 if (removeSlot) showAutocomplete.value = false else candidates.value = emptyList()
@@ -956,6 +944,165 @@ class ComposerUiTest {
             compose.onNodeWithTag("autocomplete_panel").assertDoesNotExist()
             assertInputUnchanged()
         }
+    }
+
+    @Test
+    fun keyboardCompletionCyclesFormattedTokenAndTouchPicksItsOwnRow() {
+        val original = TextFieldValue("hey a${IRC_BOLD}l! tail$IRC_RESET", TextRange(7))
+        val draft = mutableStateOf(original)
+        val candidates = listOf("alice", "alicia", "alina")
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    modifier = Modifier.offset(y = 320.dp),
+                    autocomplete = if (draft.value == original) candidates else emptyList(),
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+        field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+
+        fun tab(reverse: Boolean = false) {
+            field.performKeyInput {
+                if (reverse) keyDown(Key.ShiftLeft)
+                keyDown(Key.Tab)
+                if (reverse) advanceEventTime(650) // Holding the picked Tab neither cycles again nor inserts tabs.
+                keyUp(Key.Tab)
+                if (reverse) keyUp(Key.ShiftLeft)
+            }
+        }
+
+        fun assertPick(nick: String) {
+            field.assertIsFocused().assertTextEquals("hey $nick! tail")
+            compose.runOnIdle {
+                val parsed = parseIrcFormatting(draft.value.text)
+                assertEquals(4 + nick.length, parsed.visibleOffset(draft.value.selection.end))
+                assertTrue(!parsed.stateAtVisible(4).bold && parsed.stateAtVisible(parsed.visibleText.lastIndex).bold)
+            }
+        }
+        compose.onNodeWithTag("autocomplete_item_0").assertIsDisplayed()
+        tab(reverse = true)
+        assertPick("alina")
+        tab()
+        assertPick("alice")
+        tab()
+        assertPick("alicia")
+        compose.onNodeWithTag("autocomplete_item_0").performClick()
+        assertPick("alice")
+        compose.onNodeWithTag("autocomplete_panel").assertDoesNotExist()
+
+        compose.runOnIdle { draft.value = original }
+        tab()
+        assertPick("alice")
+        field.performKeyInput {
+            keyDown(Key.Escape)
+            keyUp(Key.Escape)
+        }
+        assertPick("alice")
+        compose.onNodeWithTag("autocomplete_panel").assertDoesNotExist()
+    }
+
+    @Test
+    fun keyboardCompletionKeepsTraversalAndResetsAfterFocusOrSelectionChange() {
+        val original = TextFieldValue("/j", TextRange(2))
+        val draft = mutableStateOf(original)
+        val rows = mutableStateOf(listOf("/join"))
+        compose.setContent {
+            MotdTheme {
+                Composer(
+                    value = draft.value,
+                    onValueChange = { draft.value = it },
+                    onSend = {},
+                    enabled = true,
+                    modifier = Modifier.offset(y = 320.dp),
+                    autocomplete = if (draft.value == original) rows.value else emptyList(),
+                )
+                Box(
+                    Modifier
+                        .offset(y = 470.dp)
+                        .size(48.dp)
+                        .focusable()
+                        .testTag("next_keyboard_control"),
+                )
+            }
+        }
+        val field = compose.onNodeWithTag("chat_composer_field")
+
+        fun focus() {
+            field.performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        }
+
+        fun tab() {
+            field.performKeyInput {
+                keyDown(Key.Tab)
+                keyUp(Key.Tab)
+            }
+        }
+
+        // Compare Ctrl+Tab with and without suggestions: leave the platform's own action intact.
+        fun ctrlTab(): Pair<TextFieldValue, Boolean> {
+            field.performKeyInput {
+                keyDown(Key.CtrlLeft)
+                keyDown(Key.Tab)
+                keyUp(Key.Tab)
+                keyUp(Key.CtrlLeft)
+            }
+            return compose.runOnIdle { draft.value } to field.fetchSemanticsNode().config[SemanticsProperties.Focused]
+        }
+        compose.runOnIdle { rows.value = emptyList() }
+        focus()
+        val withoutCandidates = ctrlTab()
+        compose.runOnIdle {
+            rows.value = listOf("/join")
+            draft.value = original
+        }
+        focus()
+        compose.onNodeWithTag("autocomplete_item_0").assertIsDisplayed()
+        assertEquals(withoutCandidates, ctrlTab())
+        compose.runOnIdle { draft.value = original }
+        focus()
+        compose.onNodeWithTag("autocomplete_item_0").assertIsDisplayed()
+        tab()
+        field.assertIsFocused().assertTextEquals("/join ")
+        tab()
+        field.assertIsNotFocused().assertTextEquals("/join ")
+
+        compose.runOnIdle {
+            rows.value = listOf("/join", "/joke")
+            draft.value = original
+        }
+        focus()
+        tab()
+        field.assertIsFocused().assertTextEquals("/join ")
+        compose.onNodeWithTag("next_keyboard_control").performSemanticsAction(SemanticsActions.RequestFocus) { it() }
+        field.assertIsNotFocused()
+        focus()
+        tab()
+        field.assertIsNotFocused().assertTextEquals("/join ")
+
+        compose.runOnIdle { draft.value = original }
+        focus()
+        tab()
+        compose.runOnIdle { draft.value = draft.value.copy(selection = TextRange.Zero) }
+        tab()
+        field.assertIsNotFocused().assertTextEquals("/join ")
+
+        compose.runOnIdle { draft.value = original }
+        focus()
+        val first = compose.onNodeWithTag("autocomplete_item_0").assertIsDisplayed().fetchSemanticsNode()
+        val pick = checkNotNull(first.config[SemanticsActions.OnClick].action)
+        val replace = checkNotNull(field.fetchSemanticsNode().config[SemanticsActions.SetText].action)
+        compose.runOnUiThread {
+            assertTrue(pick())
+            assertEquals("/join ", draft.value.text)
+            assertTrue(replace(AnnotatedString(original.text)))
+        }
+        field.assertIsFocused().assertTextEquals(original.text)
+        compose.runOnIdle { assertEquals(original, draft.value) }
     }
 
     @Test
@@ -971,6 +1118,7 @@ class ComposerUiTest {
                     onSend = {},
                     enabled = true,
                     modifier = Modifier.offset(y = 320.dp),
+                    autocomplete = if (draft.value.text.startsWith(":smi") && draft.value.selection.end == draft.value.text.length) listOf("smileyNick") else emptyList(),
                 )
             }
         }
@@ -983,6 +1131,20 @@ class ComposerUiTest {
         field.performTextInput("l")
         field.assertTextEquals(query)
         suggestion.assertIsDisplayed().performTouchInput { click() }
+        compose.runOnIdle {
+            assertEquals(TextFieldValue("☺️", TextRange("☺️".length)), draft.value)
+            draft.value = TextFieldValue(query, TextRange(query.length))
+        }
+        // A matching nickname must never steal Tab from the emoji rows actually on screen.
+        val emojiRows = SemanticsMatcher.keyIsDefined(SemanticsActions.OnClick) and hasAnyAncestor(hasTestTag("chat_composer_emoji_autocomplete"))
+        val emojiTexts = compose.onAllNodes(emojiRows)[0].fetchSemanticsNode().config[SemanticsProperties.Text]
+        val firstEmoji = emojiTexts.first().text
+        field.performKeyInput {
+            keyDown(Key.Tab)
+            keyUp(Key.Tab)
+        }
+        compose.runOnIdle { assertEquals(TextFieldValue(firstEmoji, TextRange(firstEmoji.length)), draft.value) }
+        suggestion.performClick()
         compose.runOnIdle {
             assertEquals(TextFieldValue("☺️", TextRange("☺️".length)), draft.value)
             draft.value = TextFieldValue(query, TextRange(query.length))

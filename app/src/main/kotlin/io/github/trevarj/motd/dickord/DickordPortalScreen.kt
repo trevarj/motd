@@ -65,6 +65,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
@@ -94,6 +95,8 @@ import io.github.trevarj.motd.ui.components.MentionBadge
 import io.github.trevarj.motd.ui.components.MutedActivityBadge
 import io.github.trevarj.motd.ui.components.RemoteAvatarState
 import io.github.trevarj.motd.ui.components.UnreadBadge
+import io.github.trevarj.motd.ui.nav.ChatKeyboardNavigate
+import io.github.trevarj.motd.ui.nav.chatKeyboardAction
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
 import io.github.trevarj.motd.ui.theme.LocalAvatarStyle
 import io.github.trevarj.motd.ui.theme.ensureContrast
@@ -121,6 +124,7 @@ internal fun DickordPortalScreen(
     onSetPinned: (Long, Boolean) -> Unit,
     onSetArchived: (Long, Boolean) -> Unit,
     onDeleteConversation: (ChatListRow) -> Unit,
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
@@ -147,6 +151,7 @@ internal fun DickordPortalScreen(
         onSetPinned = onSetPinned,
         onSetArchived = onSetArchived,
         onDeleteConversation = onDeleteConversation,
+        onKeyboardNavigate = onKeyboardNavigate,
     )
 }
 
@@ -169,6 +174,7 @@ internal fun DickordPortalContent(
     onSetPinned: (Long, Boolean) -> Unit = { _, _ -> },
     onSetArchived: (Long, Boolean) -> Unit = { _, _ -> },
     onDeleteConversation: (ChatListRow) -> Unit = {},
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
 ) {
     val dmsLabel = stringResource(R.string.dickord_dms)
     val pendingLabel = stringResource(R.string.dickord_portal_pending)
@@ -189,7 +195,14 @@ internal fun DickordPortalContent(
 
     Scaffold(
         containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
-        modifier = Modifier.fillMaxSize().testTag("screen_dickord_portal"),
+        modifier =
+            Modifier
+                .fillMaxSize()
+                .testTag("screen_dickord_portal")
+                .onKeyEvent { event ->
+                    state.enabled && !state.loading && !state.showArchived && onKeyboardNavigate != null &&
+                        chatKeyboardAction(event)?.let { onKeyboardNavigate(it, true) } == true
+                },
         snackbarHost = {
             if (snackbarHostState != null) SnackbarHost(snackbarHostState)
         },

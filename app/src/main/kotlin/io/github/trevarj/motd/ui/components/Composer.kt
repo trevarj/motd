@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.components
 
 import android.net.Uri
+import android.view.KeyEvent
 import android.view.ViewTreeObserver
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -109,6 +110,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -121,6 +123,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -134,6 +137,8 @@ import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.InputMode
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.FirstBaseline
@@ -150,6 +155,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.LocalViewConfiguration
@@ -194,12 +200,14 @@ import io.github.trevarj.motd.data.prefs.ComposerStyle
 import io.github.trevarj.motd.irc.format.IrcColor
 import io.github.trevarj.motd.irc.format.IrcEditorDocument
 import io.github.trevarj.motd.irc.format.IrcTextStyle
+import io.github.trevarj.motd.irc.format.containsIrcFormatting
 import io.github.trevarj.motd.irc.format.parseIrcFormatting
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.irc.format.readableForeground
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.ui.chat.COMMAND_HINTS
 import io.github.trevarj.motd.ui.chat.EmojiSearchEntry
+import io.github.trevarj.motd.ui.chat.applyPick
 import io.github.trevarj.motd.ui.chat.emojiSearchEntries
 import io.github.trevarj.motd.ui.chat.messageFormattingRange
 import io.github.trevarj.motd.ui.chat.remainingCommandParameters
@@ -437,6 +445,22 @@ internal fun voiceGestureTarget(
 
 private val LocalAutocompleteCanPick = staticCompositionLocalOf<(() -> Boolean)?> { null }
 
+private data class NativeEditorSnapshot(
+    val text: String,
+    val selection: TextRange,
+    val installRevision: Long,
+)
+
+private class CompletionCycle(
+    val original: TextFieldValue,
+    val candidates: List<String>,
+    val emojis: List<EmojiSearchEntry>,
+    val emojiDocument: IrcEditorDocument?,
+    val source: Any?,
+    val index: Int,
+    val applied: TextFieldValue,
+)
+
 private class ComposerAutocompleteContent(
     val panel: @Composable () -> Unit,
     val canPick: () -> Boolean,
@@ -492,7 +516,12 @@ fun Composer(
     // Window origin of the draft text itself (inside the field's decoration padding). The morph
     // send animation pins its stand-in line to this point so the typed glyphs never visibly move.
     onFieldTextPositioned: (Offset) -> Unit = {},
-    autocomplete: (@Composable () -> Unit)? = null,
+    autocomplete: List<String> = emptyList(),
+    completionNetworkId: Long? = null,
+    completionSource: Any? = null,
+    onAutocompletePick: (TextFieldValue) -> Unit = onValueChange,
+    keyboardShortcutsEnabled: Boolean = true,
+    onKeyboardOverlayChanged: (Boolean) -> Unit = {},
     knownNicks: Set<String> = emptySet(),
     identityRules: IrcIdentityRules = IrcIdentityRules(),
     ircFormattingEnabled: Boolean = false,
@@ -508,7 +537,8 @@ fun Composer(
             initialSelection = TextRange(initialEditor.second.first, initialEditor.second.last),
         )
     var editorDocument by remember { mutableStateOf(initialEditor.first) }
-    var lastEmittedRaw by remember { mutableStateOf(value.text) }
+    var lastEmitted by remember { mutableStateOf(value) }
+    var installRevision by remember { mutableLongStateOf(0L) }
     val latestValue by rememberUpdatedState(value)
     val latestOnValueChange by rememberUpdatedState(onValueChange)
     val context = LocalContext.current
@@ -543,22 +573,26 @@ fun Composer(
             }
         }
 
+    fun installRaw(next: TextFieldValue) {
+        val (document, selection) = IrcEditorDocument.fromRaw(next.text, next.selection.start, next.selection.end)
+        editorDocument = document
+        lastEmitted = next
+        installRevision++
+        textFieldState.edit {
+            if (!document.text.contentEquals(textFieldState.text)) replace(0, length, document.text)
+            this.selection = TextRange(selection.first, selection.last)
+        }
+    }
+
     // Apply presentation clears before drawing the send flight, not on a later coroutine frame.
     DisposableEffect(value.text, value.selection) {
-        if (value.text != lastEmittedRaw) {
-            val external = IrcEditorDocument.fromRaw(value.text, value.selection.start, value.selection.end)
-            editorDocument = external.first
-            lastEmittedRaw = value.text
-            textFieldState.edit {
-                replace(0, length, external.first.text)
-                selection = TextRange(external.second.first, external.second.last)
-            }
-        }
+        if (value != lastEmitted) installRaw(value)
         onDispose {}
     }
     LaunchedEffect(textFieldState) {
-        var previous = TextFieldValue(textFieldState.text.toString(), textFieldState.selection)
-        snapshotFlow { TextFieldValue(textFieldState.text.toString(), textFieldState.selection) }.collect { current ->
+        fun nativeSnapshot() = NativeEditorSnapshot(textFieldState.text.toString(), textFieldState.selection, installRevision)
+        var previous = nativeSnapshot()
+        snapshotFlow { nativeSnapshot() }.collect { current ->
             var nextDocument = editorDocument
             if (current.text != nextDocument.text) nextDocument = nextDocument.replaceText(current.text)
             if (current.selection != previous.selection || current.text != previous.text) {
@@ -567,8 +601,10 @@ fun Composer(
             editorDocument = nextDocument
             val raw = nextDocument.toRawValue(current.selection.start, current.selection.end)
             val outgoing = TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd))
-            lastEmittedRaw = raw.text
-            if (outgoing != latestValue) latestOnValueChange(outgoing)
+            if (outgoing != lastEmitted) {
+                lastEmitted = outgoing
+                latestOnValueChange(outgoing)
+            }
             previous = current
         }
     }
@@ -700,8 +736,8 @@ fun Composer(
             }
         }
         val raw = next.toRawValue(boundedSelection.start, boundedSelection.end)
-        lastEmittedRaw = raw.text
-        latestOnValueChange(TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd)))
+        lastEmitted = TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd))
+        latestOnValueChange(lastEmitted)
     }
 
     fun applyEditorValue(next: TextFieldValue) {
@@ -732,11 +768,26 @@ fun Composer(
         remember(emojiQuery, emojiSearchEntries) {
             emojiQuery?.let { searchEmojis(emojiSearchEntries, it.query) }.orEmpty()
         }
-    val hasAutocomplete = emojiSuggestions.isNotEmpty() || autocomplete != null
+    val keyboardOverlay = emojiPickerSession != null || transientToolsVisible || colorSheetVisible
+    DisposableEffect(keyboardOverlay, onKeyboardOverlayChanged) {
+        onKeyboardOverlayChanged(keyboardOverlay)
+        onDispose { if (keyboardOverlay) onKeyboardOverlayChanged(false) }
+    }
+    val canComplete =
+        keyboardShortcutsEnabled && enabled && inputFocused && !keyboardOverlay && LocalWindowInfo.current.isWindowFocused &&
+            textFieldState.composition == null && value.composition == null
+    var cycle by remember(canComplete) { mutableStateOf<CompletionCycle?>(null) }
+    var heldTabDownTime by remember(canComplete) { mutableLongStateOf(-1L) }
+    if (cycle?.let { it.applied != lastEmitted || it.source !== (if (it.emojis.isEmpty()) completionSource else emojiDataset) } == true) cycle = null
+    val session = cycle
+    val suggestions = session?.emojis ?: emojiSuggestions
+    val candidates = session?.candidates ?: autocomplete
+    val hasAutocomplete = suggestions.isNotEmpty() || candidates.isNotEmpty()
     // Keep autocomplete hidden for the entire restoration handoff. Otherwise it would introduce
     // another independently-sized panel above the input row while the IME is animating.
     val visiblePanel = composerPanel(emojiPickerSession != null, hasAutocomplete)
     val focusManager = LocalFocusManager.current
+    val inputModeManager = LocalInputModeManager.current
     val keyboard = LocalSoftwareKeyboardController.current
     val focusRequester = remember { FocusRequester() }
     // Reset on opening the next picker, not on close: measure can still see the old session
@@ -1035,18 +1086,41 @@ fun Composer(
     autocompleteVisibility.targetState = visiblePanel == ComposerPanel.AUTOCOMPLETE
     val autocompleteTransition = rememberTransition(autocompleteVisibility, label = "composerAutocomplete")
     val autocompleteEnabled by rememberUpdatedState(enabled)
-    val latestAutocomplete by rememberUpdatedState(autocomplete)
-    val latestEmojiSuggestions by rememberUpdatedState(emojiSuggestions)
+    val latestCandidates by rememberUpdatedState(candidates)
+    val latestEmojiSuggestions by rememberUpdatedState(suggestions)
+    var popupMounted by remember { mutableStateOf(false) }
+    val original = session?.original ?: value
+
+    fun pick(picked: String): TextFieldValue {
+        if (suggestions.isNotEmpty()) {
+            val (document, selection) = IrcEditorDocument.fromRaw(original.text, original.selection.start, original.selection.end)
+            val native = TextFieldValue(document.text, TextRange(selection.first, selection.last))
+            val query = activeEmojiQuery(native) ?: return original
+            val next = replaceEmojiQuery(native, query, picked)
+            val sourceDocument = session?.emojiDocument ?: editorDocument
+            val raw = sourceDocument.replaceText(next.text).toRawValue(next.selection.start, next.selection.end)
+            return TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd))
+        }
+        val pickedValue = applyPick(original, picked)
+        if (!containsIrcFormatting(pickedValue.text)) return pickedValue
+        val (document, selection) = IrcEditorDocument.fromRaw(pickedValue.text, pickedValue.selection.start, pickedValue.selection.end)
+        val raw = document.toRawValue(selection.first, selection.last)
+        return TextFieldValue(raw.text, TextRange(raw.selectionStart, raw.selectionEnd))
+    }
+
+    fun publishPick(result: TextFieldValue) {
+        installRaw(result)
+        if (suggestions.isEmpty()) onAutocompletePick(result) else latestOnValueChange(result)
+    }
     if (visiblePanel == ComposerPanel.AUTOCOMPLETE) {
-        val suggestions = emojiSuggestions
-        val query = emojiQuery
-        val panel: (@Composable () -> Unit)? =
-            if (suggestions.isNotEmpty() && query != null) {
+        val panel: @Composable () -> Unit =
+            if (suggestions.isNotEmpty()) {
                 {
                     EmojiAutocompletePanel(
                         suggestions = suggestions,
                         onPick = { suggestion ->
-                            applyEditorValue(replaceEmojiQuery(editorValue, query, suggestion.emoji))
+                            cycle = null
+                            publishPick(pick(suggestion.emoji))
                         },
                         color = composerFill,
                         contentColor = composerInk,
@@ -1054,26 +1128,82 @@ fun Composer(
                     )
                 }
             } else {
-                autocomplete
+                {
+                    AutocompletePanel(
+                        candidates = candidates,
+                        isCommand = candidates.firstOrNull()?.startsWith('/') == true,
+                        networkId = completionNetworkId,
+                        onPick = {
+                            cycle = null
+                            publishPick(pick(it))
+                        },
+                    )
+                }
             }
         val sourceEditor =
-            if (suggestions.isEmpty()) {
-                remember(value) {
-                    val draft = parseIrcFormatting(value.text)
-                    TextFieldValue(draft.visibleText, TextRange(draft.visibleOffset(value.selection.start), draft.visibleOffset(value.selection.end)))
-                }
-            } else {
-                editorValue
+            remember(value) {
+                val draft = parseIrcFormatting(value.text)
+                TextFieldValue(draft.visibleText, TextRange(draft.visibleOffset(value.selection.start), draft.visibleOffset(value.selection.end)))
             }
         val canPick = {
             autocompleteVisibility.targetState && autocompleteEnabled && emojiPickerSession == null && latestValue == value && sourceEditor == editorValue &&
                 editorValue.selection == textFieldState.selection && editorValue.text.contentEquals(textFieldState.text) &&
-                latestEmojiSuggestions == suggestions && (suggestions.isNotEmpty() || latestAutocomplete === autocomplete)
+                latestEmojiSuggestions == suggestions && (suggestions.isNotEmpty() || latestCandidates == candidates)
         }
-        retainedAutocomplete = panel?.let { ComposerAutocompleteContent(it, canPick) }
+        retainedAutocomplete = ComposerAutocompleteContent(panel, canPick)
     }
     val autocompleteOpen = !autocompleteVisibility.isIdle || autocompleteVisibility.currentState
     if (!autocompleteOpen) retainedAutocomplete = null
+
+    fun completionKey(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_TAB && event.action == KeyEvent.ACTION_UP) {
+            val owned = heldTabDownTime == event.downTime
+            heldTabDownTime = -1L
+            return owned
+        }
+        if (!canComplete || textFieldState.composition != null || !textFieldState.selection.collapsed ||
+            event.action != KeyEvent.ACTION_DOWN || event.flags and KeyEvent.FLAG_SOFT_KEYBOARD != 0
+        ) {
+            return false
+        }
+        if (event.keyCode == KeyEvent.KEYCODE_ESCAPE && event.repeatCount == 0 && event.hasNoModifiers() && cycle != null) {
+            cycle = null
+            return true
+        }
+        if (event.keyCode != KeyEvent.KEYCODE_TAB || !(event.hasNoModifiers() || event.hasModifiers(KeyEvent.META_SHIFT_ON))) return false
+        if (event.repeatCount != 0) return heldTabDownTime == event.downTime
+        heldTabDownTime = -1L
+        if (popupMounted && retainedAutocomplete?.canPick?.invoke() == true) {
+            val rows = if (suggestions.isNotEmpty() && session == null) suggestions.map { it.emoji } else candidates
+            if (rows.isNotEmpty()) {
+                val step = if (event.isShiftPressed) -1 else 1
+                val previous = cycle?.index ?: if (event.isShiftPressed) 0 else -1
+                val index = (previous + step + rows.size) % rows.size
+                val result = pick(rows[index])
+                if (result != value || rows.size > 1) {
+                    heldTabDownTime = event.downTime
+                    cycle =
+                        if (rows.size > 1) {
+                            CompletionCycle(
+                                original,
+                                rows,
+                                suggestions,
+                                session?.emojiDocument ?: editorDocument.takeIf { suggestions.isNotEmpty() },
+                                if (suggestions.isEmpty()) completionSource else emojiDataset,
+                                index,
+                                result,
+                            )
+                        } else {
+                            null
+                        }
+                    publishPick(result)
+                    return true
+                }
+            }
+        }
+        inputModeManager.requestInputMode(InputMode.Keyboard)
+        return focusManager.moveFocus(if (event.isShiftPressed) FocusDirection.Previous else FocusDirection.Next)
+    }
     AutocompleteOverlayLayout(
         modifier = modifier.fillMaxWidth(),
         showOverlay = autocompleteOpen,
@@ -1093,6 +1223,10 @@ fun Composer(
                 val semantics = if (active) Modifier else Modifier.semantics { hideFromAccessibility() }
                 Box(Modifier.padding(horizontal = 8.dp, vertical = AutocompleteVerticalPadding).then(semantics)) {
                     if (content != null) {
+                        DisposableEffect(Unit) {
+                            popupMounted = true
+                            onDispose { popupMounted = false }
+                        }
                         val canPick = if (active) content.canPick else ({ false })
                         CompositionLocalProvider(LocalAutocompleteCanPick provides canPick, content = content.panel)
                     }
@@ -1267,12 +1401,16 @@ fun Composer(
                                             knownNicks = knownNicks,
                                             identityRules = identityRules,
                                             placeholder = placeholder,
-                                            onFocusChanged = { inputFocused = it },
+                                            onFocusChanged = {
+                                                inputFocused = it
+                                                if (!it) cycle = null
+                                            },
                                             onFocused = { dismissEmojiPicker() },
                                             modifier =
                                                 Modifier
                                                     .fillMaxWidth()
                                                     .heightIn(min = collapsedMinimumHeight)
+                                                    .onPreviewKeyEvent { completionKey(it.nativeKeyEvent) }
                                                     .focusRequester(focusRequester)
                                                     .then(imageContentModifier),
                                             onTextPositioned = onFieldTextPositioned,

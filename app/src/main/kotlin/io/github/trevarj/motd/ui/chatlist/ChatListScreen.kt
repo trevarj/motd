@@ -150,6 +150,7 @@ import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.onKeyEvent
 import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
 import androidx.compose.ui.input.nestedscroll.NestedScrollSource
 import androidx.compose.ui.input.nestedscroll.nestedScroll
@@ -224,6 +225,10 @@ import io.github.trevarj.motd.ui.components.UnreadBadge
 import io.github.trevarj.motd.ui.components.captureSurfaceBackdrop
 import io.github.trevarj.motd.ui.components.rememberSurfaceBackdropSource
 import io.github.trevarj.motd.ui.components.surfaceBackdrop
+import io.github.trevarj.motd.ui.nav.ChatKeyboardNavigate
+import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsDialog
+import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsIcon
+import io.github.trevarj.motd.ui.nav.chatKeyboardAction
 import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
@@ -249,7 +254,7 @@ import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
 /** Stateful entry: wires the ViewModel and drives navigation/empty-state. */
 @Composable
-fun ChatListScreen(
+internal fun ChatListScreen(
     onOpenBuffer: (Long) -> Unit = {},
     onOpenAudioOrigin: (AudioPlaybackOrigin) -> Unit = {},
     onOpenSettings: () -> Unit = {},
@@ -276,6 +281,8 @@ fun ChatListScreen(
     newConversationSheetActive: () -> Boolean = { true },
     onOpenScheduledMessages: (() -> Unit)? = null,
     onOpenSavedMessages: (() -> Unit)? = null,
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
+    onKeyboardBlockedChange: (Boolean) -> Unit = {},
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val community by viewModel.community.collectAsStateWithLifecycle()
@@ -348,6 +355,9 @@ fun ChatListScreen(
         state = state,
         unreadFilter = viewModel.unreadFilter,
         folderSelection = viewModel.folderSelection,
+        foolsExpansion = viewModel.foolsExpansion,
+        onKeyboardNavigate = onKeyboardNavigate.takeIf { appContentVisible && !(communityAllowed && community.picker) },
+        onKeyboardBlockedChange = onKeyboardBlockedChange,
         communityInvitation = {
             if (communityAllowed && community.invitation) {
                 CommunityInvitation(
@@ -463,7 +473,7 @@ data class ChatListUnreadScope(
 
 @OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
 @Composable
-fun ChatListContent(
+internal fun ChatListContent(
     state: ChatListState,
     communityInvitation: @Composable () -> Unit = {},
     syncIndicators: Map<Long, ChatListSyncIndicator> = emptyMap(),
@@ -537,6 +547,9 @@ fun ChatListContent(
     onOpenSavedMessages: (() -> Unit)? = null,
     unreadFilter: MutableStateFlow<ChatListUnreadScope?> = remember { MutableStateFlow(null) },
     folderSelection: MutableStateFlow<Long?> = remember { MutableStateFlow(null) },
+    foolsExpansion: MutableStateFlow<Boolean> = remember { MutableStateFlow(false) },
+    onKeyboardNavigate: ChatKeyboardNavigate? = null,
+    onKeyboardBlockedChange: (Boolean) -> Unit = {},
 ) {
     var archiveMode by rememberSaveable { mutableStateOf(false) }
     val swipeAction = if (archiveMode) ChatListSwipeAction.ARCHIVE else state.chatListSwipeAction
@@ -559,26 +572,9 @@ fun ChatListContent(
     val drawerState = rememberDrawerState(DrawerValue.Closed)
     // The per-row network tag is redundant once the list is scoped to one network.
     val showNetworkChip = state.networks.size > 1 && state.selectedNetworkId == null
-    val visibleRows = if (archiveMode) state.archivedRows else state.rows
-    val folderTabs = if (state.folderDisplayMode == FolderDisplayMode.TABS) presentFolderTabs(state.rows, state.folders) else emptyList()
-    val activityAsTab = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.FOLDER_TAB
-    val allTabRows = folderAllRows(state.rows, state.showFolderChatsInAll)
-    val showAllTab =
-        state.dickordEnabled ||
-            activityAsTab ||
-            allTabRows.isNotEmpty() ||
-            state.archivedRows.isNotEmpty() ||
-            state.invitations.any(ChatListInvitation::actionable) ||
-            folderTabs.isEmpty()
     val selectedFolderId by folderSelection.collectAsStateWithLifecycle()
-    val effectiveFolderId =
-        selectedFolderId
-            ?.takeIf { id -> folderTabs.any { it.folder.id == id } }
-            ?: folderTabs
-                .firstOrNull()
-                ?.folder
-                ?.id
-                ?.takeUnless { showAllTab }
+    val folderScope = remember(state, selectedFolderId) { ChatFolderScope(state, selectedFolderId) }
+    val effectiveFolderId = folderScope.folderId
     LaunchedEffect(state.loading, state.folderDisplayMode, selectedFolderId, effectiveFolderId) {
         if (!state.loading && state.folderDisplayMode == FolderDisplayMode.TABS && selectedFolderId != effectiveFolderId) {
             folderSelection.compareAndSet(selectedFolderId, effectiveFolderId)
@@ -588,12 +584,10 @@ fun ChatListContent(
     val unreadOnly = !state.loading && unreadScope?.let { it.networkId == state.selectedNetworkId && it.folderId == effectiveFolderId } == true
     val filterUnread = unreadOnly && !archiveMode && !invitationMode
     val scopedRows =
-        if (!archiveMode && !invitationMode && state.folderDisplayMode == FolderDisplayMode.TABS) {
-            effectiveFolderId?.let { id ->
-                state.rows.filter { it.folderId == id }
-            } ?: allTabRows
-        } else {
-            visibleRows
+        when {
+            archiveMode -> state.archivedRows
+            invitationMode -> state.rows
+            else -> folderScope.rows
         }
     val displayedRows = if (filterUnread) remember(scopedRows) { unreadChatRows(scopedRows) } else scopedRows
     var scrollToTopSignal by rememberSaveable { mutableIntStateOf(0) }
@@ -648,6 +642,20 @@ fun ChatListContent(
     var swipeRemoval by remember { mutableStateOf<ChatListRow?>(null) }
     var archiveRevealSignal by rememberSaveable(state.selectedNetworkId) { mutableStateOf(0) }
     var archiveSwipeUndoJob by remember { mutableStateOf<Job?>(null) }
+    var showShortcuts by remember { mutableStateOf(false) }
+    var moreOpen by remember { mutableStateOf(false) }
+    val keyboardBlocked =
+        archiveMode || invitationMode || selectionActive || drawerState.currentValue != DrawerValue.Closed ||
+            drawerState.targetValue != DrawerValue.Closed || showSheet || showMarkAllReadDialog || showFolderAssignment ||
+            showActivitySheet || confirmRemoval || swipeRemoval != null
+    val blocksDetailKeyboard = keyboardBlocked || moreOpen || showShortcuts
+    DisposableEffect(blocksDetailKeyboard) {
+        if (blocksDetailKeyboard) onKeyboardBlockedChange(true)
+        onDispose { if (blocksDetailKeyboard) onKeyboardBlockedChange(false) }
+    }
+    if (showShortcuts && !keyboardBlocked && onKeyboardNavigate != null) {
+        ChatKeyboardShortcutsDialog(onAction = { onKeyboardNavigate(it, false) }, onDismiss = { showShortcuts = false })
+    }
     val archivedSnackbarMessage = stringResource(R.string.chatlist_archived_snackbar)
     val unarchivedSnackbarMessage = stringResource(R.string.chatlist_unarchived_snackbar)
     val undoLabel = stringResource(R.string.chatlist_archive_undo)
@@ -762,7 +770,7 @@ fun ChatListContent(
                 )
             },
         ) {
-            val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || activityAsTab)
+            val folderTabsVisible = !archiveMode && !invitationMode && (folderScope.tabs.isNotEmpty() || state.dickordEnabled || folderScope.activityAsTab)
             val pinnedActivityVisible =
                 !archiveMode && !invitationMode && !filterUnread && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
             val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
@@ -781,7 +789,11 @@ fun ChatListContent(
             // The source lives exactly as long as the mounted scrolling list, including archive/no-folder modes.
             val folderBackdrop = pageBackdrop.takeUnless { showEmptyState }
             Scaffold(
-                modifier = Modifier.testTag("screen_chat_list"),
+                modifier =
+                    Modifier.testTag("screen_chat_list").onKeyEvent { event ->
+                        !keyboardBlocked && !moreOpen && !showShortcuts && onKeyboardNavigate != null &&
+                            chatKeyboardAction(event)?.let { onKeyboardNavigate(it, true) } == true
+                    },
                 containerColor = MaterialTheme.colorScheme.surface,
                 snackbarHost = { SnackbarHost(snackbarHostState) },
                 topBar = {
@@ -1047,7 +1059,6 @@ fun ChatListContent(
                                                     contentDescription = stringResource(R.string.chatlist_search),
                                                 )
                                             }
-                                            var moreOpen by remember { mutableStateOf(false) }
                                             Box {
                                                 IconButton(
                                                     onClick = { moreOpen = true },
@@ -1068,6 +1079,17 @@ fun ChatListContent(
                                                     }
                                                 }
                                                 DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chatlist_more_menu")) {
+                                                    if (onKeyboardNavigate != null) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.chat_keyboard_shortcuts)) },
+                                                            leadingIcon = { ChatKeyboardShortcutsIcon() },
+                                                            modifier = Modifier.testTag("chatlist_keyboard_shortcuts"),
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                showShortcuts = true
+                                                            },
+                                                        )
+                                                    }
                                                     if (!state.loading && !unreadOnly && scopedRows.any(::isUnreadChat)) {
                                                         DropdownMenuItem(
                                                             text = { Text(stringResource(R.string.chatlist_show_unread)) },
@@ -1245,6 +1267,7 @@ fun ChatListContent(
                                 recoveringActivityIds = recoveringActivityIds,
                                 friends = state.friends,
                                 fools = state.fools,
+                                foolsExpansion = foolsExpansion,
                                 multiNetwork = showNetworkChip,
                                 onOpenBuffer = onOpenBuffer,
                                 onReorderAnchored = onReorderAnchored,
@@ -1285,11 +1308,11 @@ fun ChatListContent(
                                         .testTag("chatlist_folder_overlay"),
                             ) {
                                 FolderTabStrip(
-                                    folders = folderTabs,
-                                    allSummary = summarizeFolder(allTabRows),
-                                    showAllTab = showAllTab,
+                                    folders = folderScope.tabs,
+                                    allSummary = summarizeFolder(folderScope.allRows),
+                                    showAllTab = folderScope.showAllTab,
                                     dickordSummary = state.dickordUnreadSummary,
-                                    activityEnabled = activityAsTab,
+                                    activityEnabled = folderScope.activityAsTab,
                                     mentionsCount = state.allMentions,
                                     mentionsIncomplete = state.allMentionsIncomplete,
                                     selectedFolderId = effectiveFolderId,
@@ -1979,6 +2002,7 @@ private fun ChatList(
     scrollToTopSignal: Int,
     topContentPaddingPx: Int,
     folderBackdrop: SurfaceBackdropSource?,
+    foolsExpansion: MutableStateFlow<Boolean>,
 ) {
     // Extract anchors only from authoritative scoped rows; all lower tiers exclude them.
     val presentation =
@@ -2006,8 +2030,7 @@ private fun ChatList(
         anchoredIds = moveAnchoredChat(anchoredIds, id, delta)
     }
 
-    // Fools section is collapsed by default; state is local to the screen (accepted).
-    var foolsExpanded by remember { mutableStateOf(false) }
+    val foolsExpanded by foolsExpansion.collectAsStateWithLifecycle()
     val listState = rememberLazyListState()
     var handledScrollToTopSignal by rememberSaveable { mutableIntStateOf(scrollToTopSignal) }
     LaunchedEffect(scrollToTopSignal) {
@@ -2607,7 +2630,7 @@ private fun ChatList(
                                     expanded = foolsExpanded,
                                     onToggle = {
                                         if (foolsExpanded) onRemoveSelection(sections.fools.map(ChatListRow::bufferId))
-                                        foolsExpanded = !foolsExpanded
+                                        foolsExpansion.value = !foolsExpanded
                                     },
                                 )
                             }

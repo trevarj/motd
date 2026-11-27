@@ -5,9 +5,14 @@ import io.github.trevarj.motd.data.db.ChatFolderEntity
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.FolderIconKind
 import io.github.trevarj.motd.data.db.IgnoredAutoGroupPatternEntity
+import io.github.trevarj.motd.data.prefs.FolderDisplayMode
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.service.isUnreadChat
 import io.github.trevarj.motd.ui.components.matchedChannelDevicon
+import io.github.trevarj.motd.ui.nav.ChatKeyboardAction
+import io.github.trevarj.motd.ui.nav.target
 
 /** Visible folder rollup. Expanded headers intentionally render only name/count. */
 data class ChatFolderSummary(
@@ -37,6 +42,75 @@ data class FolderChatListPresentation(
     val remaining: ChatListSections,
     val anchored: List<ChatListRow> = emptyList(),
 )
+
+/** Resolve the same visible tab even when the phone's list pane isn't composed. */
+internal class ChatFolderScope(
+    state: ChatListState,
+    selectedFolderId: Long?,
+) {
+    val tabs = if (state.folderDisplayMode == FolderDisplayMode.TABS) presentFolderTabs(state.rows, state.folders) else emptyList()
+    val allRows = folderAllRows(state.rows, state.showFolderChatsInAll)
+    val activityAsTab = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.FOLDER_TAB
+    val showAllTab =
+        state.dickordEnabled || activityAsTab || allRows.isNotEmpty() || state.archivedRows.isNotEmpty() ||
+            state.invitations.any(ChatListInvitation::actionable) || tabs.isEmpty()
+    val folderId =
+        selectedFolderId?.takeIf { id -> tabs.any { it.folder.id == id } }
+            ?: tabs
+                .firstOrNull()
+                ?.folder
+                ?.id
+                ?.takeUnless { showAllTab }
+    val rows =
+        when {
+            state.folderDisplayMode != FolderDisplayMode.TABS -> state.rows
+            folderId == null -> allRows
+            else -> state.rows.filter { it.folderId == folderId }
+        }
+}
+
+internal fun ChatListViewModel.keyboardTarget(
+    action: ChatKeyboardAction,
+    current: Long?,
+): Long? = state.value.keyboardTarget(action, current, folderSelection.value, unreadFilter.value, foolsExpansion.value)
+
+internal fun ChatListState.keyboardTarget(
+    action: ChatKeyboardAction,
+    current: Long?,
+    selectedFolderId: Long?,
+    unreadScope: ChatListUnreadScope?,
+    foolsExpanded: Boolean,
+): Long? {
+    if (loading) return null
+    val scope = ChatFolderScope(this, selectedFolderId)
+    val unreadOnly = unreadScope?.let { it.networkId == selectedNetworkId && it.folderId == scope.folderId } == true
+    val presentation =
+        presentChatFolders(
+            scope.rows,
+            if (folderDisplayMode == FolderDisplayMode.INLINE) folders else emptyList(),
+            friends,
+            fools,
+            current,
+        )
+    val ordered =
+        buildList {
+            addAll(presentation.anchored)
+            addAll(presentation.pinned)
+            presentation.folders.forEach { folder ->
+                if (folder.temporarilyExpanded && unreadOnly) {
+                    val anchor = folder.children.first { it.bufferId == current }
+                    // A read anchor still locates the walk, but can't expand a folder it no longer appears in.
+                    if (isUnreadChat(anchor)) addAll(folder.children) else add(anchor)
+                } else if (folder.expanded) {
+                    addAll(folder.children)
+                }
+            }
+            addAll(presentation.remaining.friends)
+            addAll(presentation.remaining.regular)
+            if (foolsExpanded) addAll(presentation.remaining.fools)
+        }
+    return action.target(ordered, current, unreadOnly)
+}
 
 fun presentChatFolders(
     rows: List<ChatListRow>,

@@ -1342,7 +1342,6 @@ class SettingsHomeAndPrimitivesUiTest {
         var variant by mutableStateOf(0)
         var reversed by mutableStateOf(false)
         var moved by mutableStateOf(false)
-        var picked: String? = null
         var draft by mutableStateOf(
             androidx.compose.ui.text.input
                 .TextFieldValue(""),
@@ -1393,18 +1392,7 @@ class SettingsHomeAndPrimitivesUiTest {
                                                 .IntOffset(0, (if (moved) 570.dp else 620.dp).roundToPx())
                                         }
                                     },
-                                autocomplete =
-                                    if (variant == 2) {
-                                        null
-                                    } else {
-                                        {
-                                            io.github.trevarj.motd.ui.components.AutocompletePanel(
-                                                candidates = listOf(if (variant == 0) "alice" else "/join"),
-                                                onPick = { picked = it },
-                                                isCommand = variant == 1,
-                                            )
-                                        }
-                                    },
+                                autocomplete = if (variant == 2) emptyList() else listOf(if (variant == 0) "alice" else "/join"),
                             )
                         }
                     }
@@ -1515,7 +1503,7 @@ class SettingsHomeAndPrimitivesUiTest {
             }
             if (nextVariant < 2) {
                 compose.onNodeWithTag("autocomplete_item_0").performClick()
-                compose.runOnIdle { assertEquals(if (nextVariant == 0) "alice" else "/join", picked) }
+                compose.runOnIdle { assertEquals(if (nextVariant == 0) "alice: " else "/join ", draft.text) }
             } else {
                 // The real emoji row (not a stand-in panel) must still replace the token.
                 compose.onAllNodes(hasClickAction() and hasAnyAncestor(hasTestTag(tag)))[0].performClick()

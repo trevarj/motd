@@ -2957,4 +2957,10 @@
     <string name="scheduled_duplicate_acknowledge">I understand this could send a duplicate</string>
     <string name="scheduled_requeue">Schedule again</string>
     <string name="scheduled_formatting_help">IRC formatting codes are shown as symbols while editing.</string>
+    <string name="chat_keyboard_shortcuts">Keyboard shortcuts</string>
+    <string name="chat_keyboard_previous">Previous chat · Ctrl+F7</string>
+    <string name="chat_keyboard_next">Next chat · Ctrl+F8</string>
+    <string name="chat_keyboard_previous_unread">Previous unread chat · Ctrl+Shift+F7</string>
+    <string name="chat_keyboard_next_unread">Next unread chat · Ctrl+Shift+F8</string>
+    <string name="chat_keyboard_completion">Complete a suggestion: Tab for next, Shift+Tab for previous.</string>
 </resources>
