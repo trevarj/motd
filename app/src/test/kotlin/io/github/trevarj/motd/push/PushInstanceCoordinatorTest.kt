@@ -303,11 +303,21 @@ class PushInstanceCoordinatorTest {
             url: String?,
         ) = Unit
 
-        override suspend fun setAutoRegainPreferredNick(
+        override suspend fun routePrivateNoticesToServer(id: Long): Boolean? = byId(id)?.routePrivateNoticesToServer
+
+        override suspend fun updateNetworkFlags(
             id: Long,
-            enabled: Boolean,
+            autoRegainPreferredNick: Boolean?,
+            routePrivateNoticesToServer: Boolean?,
         ) {
-            flow.value = flow.value.map { if (it.id == id) it.copy(autoRegainPreferredNick = enabled) else it }
+            flow.value =
+                flow.value.map {
+                    if (it.id != id) return@map it
+                    it.copy(
+                        autoRegainPreferredNick = autoRegainPreferredNick ?: it.autoRegainPreferredNick,
+                        routePrivateNoticesToServer = routePrivateNoticesToServer ?: it.routePrivateNoticesToServer,
+                    )
+                }
         }
 
         override suspend fun setOrdering(

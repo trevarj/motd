@@ -4619,6 +4619,192 @@ class EventProcessorTest {
 
     private suspend fun serverBuffer() = db.bufferDao().byName(networkId, "*")
 
+    private suspend fun setPrivateNoticeRouting(enabled: Boolean) {
+        val network = db.networkDao().byId(networkId)!!
+        db.networkDao().update(network.copy(routePrivateNoticesToServer = enabled))
+    }
+
+    private fun privateNotice(
+        msgid: String,
+        sender: String = "Helper",
+        account: String? = null,
+    ) = IrcEvent.ChatMessage(ctx(msgid, account = account), IrcEvent.ChatKind.NOTICE, Prefix(sender), "ME", "me: $msgid", false, null)
+
+    @Test
+    fun privateNoticeRoutingIsNetworkScopedAndHonorsIgnoreRules() =
+        runTest {
+            val other = db.networkDao().insert(db.networkDao().byId(networkId)!!.copy(id = 0, name = "other"))
+            setPrivateNoticeRouting(true)
+            db.networkIgnoreDao().upsert(NetworkIgnoreEntity(networkId = networkId, pattern = "blocked!*@*", createdAt = 1))
+            db.networkIgnoreDao().upsert(
+                NetworkIgnoreEntity(
+                    networkId = networkId,
+                    pattern = "helper!*@*",
+                    createdAt = 1,
+                    dropMessages = false,
+                    suppressedSignals = SUPPRESS_UNREAD,
+                ),
+            )
+            processor.process(networkId, privateNotice("hidden", "Blocked"))
+            assertNull(serverBuffer())
+            assertNull(db.bufferDao().byName(networkId, "blocked"))
+
+            val notice = privateNotice("same-id", account = "acct")
+            processor.processPush(networkId, notice)
+            processor.process(other, notice)
+            val row = pagingList(serverBuffer()!!.id).single()
+            assertEquals(MessageKind.NOTICE, row.kind)
+            assertEquals("Helper", row.sender)
+            assertEquals("acct", row.senderAccount)
+            assertFalse(row.hasMention)
+            assertEquals(SUPPRESS_UNREAD, row.suppressedSignals)
+            assertNull(db.bufferDao().byName(networkId, "helper"))
+            assertNull(db.roomAliasDao().byValue(networkId, RoomAliasNamespace.ACCOUNT, "acct"))
+            assertEquals("same-id", pagingList(db.bufferDao().byName(other, "helper")!!.id).single().msgid)
+            assertNull(db.bufferDao().byName(other, "*"))
+
+            processor.process(networkId, privateNotice("untagged", "Fresh").copy(ctx = ctx()))
+            assertTrue(pagingList(serverBuffer()!!.id).any { it.text == "me: untagged" })
+            assertNull(db.bufferDao().byName(networkId, "fresh"))
+        }
+
+    @Test
+    fun privateNoticeRoutingRetainsNickFirstMergeAndAccountAliases() =
+        runTest {
+            setPrivateNoticeRouting(true)
+            val provisional = privateNotice("first", "Peer[").copy(kind = IrcEvent.ChatKind.PRIVMSG)
+            val identified = privateNotice("second", "OldNick", "acct").copy(kind = IrcEvent.ChatKind.PRIVMSG)
+            processor.process(networkId, provisional)
+            processor.process(networkId, identified)
+            val first = db.bufferDao().byName(networkId, "peer{")!!.id
+            val second = db.bufferDao().byName(networkId, "oldnick")!!.id
+            processor.process(networkId, privateNotice("merged", "PEER{", "acct"))
+            processor.process(networkId, privateNotice("alias", "NewNick", "acct"))
+            processor.process(networkId, privateNotice("nick-only", "newnick"))
+            assertEquals(first, db.bufferDao().canonicalId(second))
+            assertEquals(setOf("first", "second", "merged", "alias", "nick-only"), pagingList(first).map { it.msgid }.toSet())
+            assertNull(serverBuffer())
+
+            processor.process(networkId, privateNotice("recycled", "NewNick", "other-owner"))
+            assertEquals("recycled", pagingList(serverBuffer()!!.id).single().msgid)
+            val replay = privateNotice("recycled-replay", "NewNick", "other-owner")
+            processor.process(networkId, IrcEvent.ReplayBatch("NewNick", listOf(replay)))
+            assertEquals(setOf("recycled", "recycled-replay"), pagingList(serverBuffer()!!.id).map { it.msgid }.toSet())
+            assertNull(db.roomAliasDao().byValue(networkId, RoomAliasNamespace.ACCOUNT, "other-owner"))
+        }
+
+    @Test
+    fun privateNoticeRoutingLeavesChannelContextSelfEchoAndNonPrivateTargetsAlone() =
+        runTest {
+            setPrivateNoticeRouting(true)
+            processor.onRegistered(networkId, "me", mapOf("PREFIX" to "(ov)@+", "STATUSMSG" to "@+"))
+            processor.process(networkId, IrcEvent.TopicSnapshot("#chan", "Help"))
+            for (target in listOf("#chan", "@+#chan")) {
+                processor.process(networkId, privateNotice(target).copy(target = target))
+            }
+            processor.process(
+                networkId,
+                privateNotice("context").copy(ctx = ctx("context").copy(clientTags = mapOf("+channel-context" to "#chan"))),
+            )
+            processor.processPush(networkId, privateNotice("context"))
+            processor.process(networkId, privateNotice("echo", "me").copy(target = "Alice"))
+            for (target in listOf("\$*.example", "someone", "me,someone")) {
+                processor.process(networkId, privateNotice(target, "Oper").copy(target = target))
+            }
+            assertEquals(setOf("#chan", "@+#chan", "context"), pagingList(db.bufferDao().byName(networkId, "#chan")!!.id).map { it.msgid }.toSet())
+            assertTrue(pagingList(db.bufferDao().byName(networkId, "alice")!!.id).single().isSelf)
+            assertEquals(3, pagingList(db.bufferDao().byName(networkId, "oper")!!.id).size)
+            assertNull(db.bufferDao().byName(networkId, "helper"))
+            assertNull(serverBuffer())
+            processor.process(networkId, privateNotice("system", "irc.example"))
+            assertEquals("system", pagingList(serverBuffer()!!.id).single().msgid)
+            assertNull(db.bufferDao().byName(networkId, "irc.example"))
+        }
+
+    @Test
+    fun privateNoticeRoutingPreservesExactReplayWithoutBindingOrRevivingAQuery() =
+        runTest {
+            setPrivateNoticeRouting(true)
+            val notice = privateNotice("server-copy")
+            processor.process(networkId, IrcEvent.ReplayBatch("Helper", listOf(notice)))
+            val server = serverBuffer()!!.id
+            val original = pagingList(server).single()
+            setPrivateNoticeRouting(false)
+            processor.onRegistered(networkId, "renamed", emptyMap())
+            processor.processPush(networkId, notice)
+            assertNull(db.bufferDao().byName(networkId, "helper"))
+
+            val later = privateNotice("later").copy(target = "renamed")
+            processor.process(networkId, later)
+            val query = db.bufferDao().byName(networkId, "helper")!!.id
+            db.bufferDao().deleteBuffer(query)
+            setPrivateNoticeRouting(true)
+            val replay = privateNotice("server-copy", account = "new-account")
+            processor.process(networkId, IrcEvent.HistoryBatch("Helper", listOf(replay, later)))
+            assertTrue(db.bufferDao().rawById(query)!!.dismissed)
+            assertTrue(pagingList(query).isEmpty())
+            assertNull(db.roomAliasDao().byValue(networkId, RoomAliasNamespace.ACCOUNT, "new-account"))
+            assertEquals(original.id, pagingList(server).single().id)
+        }
+
+    @Test
+    fun privateNoticeRoutingKeepsQueryReactionsInMixedReplay() =
+        runTest {
+            setPrivateNoticeRouting(true)
+            val dm = privateNotice("dm").copy(kind = IrcEvent.ChatKind.PRIVMSG)
+            val react = IrcEvent.TagMessage(ctx(), Prefix("Helper"), "me", null, "+1", "dm")
+            processor.process(networkId, IrcEvent.ReplayBatch("Helper", listOf(privateNotice("notice"), dm, react)))
+            val query = db.bufferDao().byName(networkId, "helper")!!
+            assertEquals("dm", pagingList(query.id).single().msgid)
+            assertEquals(
+                "+1",
+                db
+                    .reactionDao()
+                    .forRoom(query.id)
+                    .single()
+                    .emoji,
+            )
+            assertEquals("notice", pagingList(serverBuffer()!!.id).single().msgid)
+        }
+
+    @Test
+    fun privateNoticeRoutingKeepsExactQueryAboveAnotherRoomsDiscardFloor() =
+        runTest {
+            val old = privateNotice("old", "OldPeer")
+            processor.process(networkId, old)
+            val room = db.bufferDao().byName(networkId, "oldpeer")!!
+            setPrivateNoticeRouting(true)
+            val dm = privateNotice("dm", "NewPeer", "acct").copy(kind = IrcEvent.ChatKind.PRIVMSG, ctx = ctx("dm", 2_000, account = "acct"))
+            processor.process(networkId, dm)
+            db.bufferDao().deleteBuffer(db.bufferDao().byName(networkId, "newpeer")!!.id)
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch("unknown", listOf(old.copy(isBot = true), dm.copy(ctx = ctx("newer", 3_000, account = "acct")))),
+            )
+            assertTrue(pagingList(room.id).single().isBot)
+            assertNull(db.bufferDao().byName(networkId, "unknown"))
+        }
+
+    @Test
+    fun privateNoticeRoutingAllowsOnlyMatchingPeerRedaction() =
+        runTest {
+            setPrivateNoticeRouting(true)
+            processor.process(networkId, privateNotice("notice", "Peer[", "acct"))
+            processor.process(networkId, privateNotice("system", "irc.example"))
+            val server = serverBuffer()!!.id
+            val redact = IrcEvent.MessageRedacted(ctx(account = "acct"), Prefix("peer{"), "ME", "notice", null)
+            processor.process(networkId, redact.copy(source = Prefix("other")))
+            processor.process(networkId, redact.copy(target = "other"))
+            processor.process(networkId, redact.copy(ctx = ctx(account = "other-account")))
+            processor.process(networkId, IrcEvent.HistoryBatch("other", listOf(redact)))
+            processor.process(networkId, redact.copy(targetMsgid = "system", source = Prefix("irc.example")))
+            assertTrue(pagingList(server).all { it.kind == MessageKind.NOTICE })
+            processor.process(networkId, IrcEvent.HistoryBatch("PEER[", listOf(redact)))
+            assertEquals(MessageKind.REDACTED, db.messageDao().byMsgid(server, "notice")!!.kind)
+            assertEquals(MessageKind.NOTICE, db.messageDao().byMsgid(server, "system")!!.kind)
+            assertNull(db.bufferDao().byName(networkId, "peer{"))
+        }
+
     @Test
     fun serverNotice_routesToServerBuffer_notQuery() =
         runTest {
@@ -5299,6 +5485,7 @@ class EventProcessorTest {
     fun bouncerServ_isServerConsole_notChat_butItsNoticesStillNotify() =
         runTest {
             makeBouncerRoot()
+            setPrivateNoticeRouting(true)
             val notifiedKinds = mutableListOf<IrcEvent.ChatKind>()
             val recording =
                 EventProcessor(

@@ -49,21 +49,13 @@ class NetworkRepositoryImpl
                 networkDao.insertLast(n)
             }
 
-        /**
-         * Update every field except the manual drawer position, which only [reorderNetworks] owns. The
-         * settings form rebuilds a [NetworkEntity] from scratch (see `buildNetworkEntity`), so a saved
-         * edit carries the default `ordering = 0` and would otherwise jump that network to the top of
-         * the drawer.
-         */
-        override suspend fun updateNetwork(n: NetworkEntity) {
-            val stored = networkDao.byId(n.id)?.ordering ?: n.ordering
-            networkDao.update(n.copy(ordering = stored))
-        }
+        override suspend fun updateNetwork(n: NetworkEntity) = networkDao.updateNetworkSettings(n)
 
-        override suspend fun setAutoRegainPreferredNick(
+        override suspend fun updateNetworkFlags(
             id: Long,
-            enabled: Boolean,
-        ) = networkDao.setAutoRegainPreferredNick(id, enabled)
+            autoRegainPreferredNick: Boolean?,
+            routePrivateNoticesToServer: Boolean?,
+        ) = networkDao.updateNetworkFlags(id, autoRegainPreferredNick, routePrivateNoticesToServer)
 
         override suspend fun reorderNetworks(orderedIds: List<Long>) = networkDao.applyOrder(orderedIds)
 

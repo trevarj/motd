@@ -181,6 +181,7 @@ class NetworkSettingsViewModelTest {
     private fun TestScope.loadedVm(
         repo: FakeNetworkRepository,
         connectionManager: FakeConnectionManager = FakeConnectionManager(),
+        networkId: Long = 1,
     ): NetworkSettingsViewModel =
         NetworkSettingsViewModel(
             repo,
@@ -188,7 +189,7 @@ class NetworkSettingsViewModelTest {
             FakeAvatarPrefs(),
             FakeAvatarController,
         ).also {
-            it.init(1)
+            it.init(networkId)
             runCurrent()
         }
 
@@ -371,6 +372,7 @@ class NetworkSettingsViewModelTest {
             val vm = loadedVm(repo)
 
             assertEquals("old-secret", vm.state.value.auth.nickServPassword)
+            vm.setRoutePrivateNoticesToServer(true)
             vm.editAuth(
                 vm.state.value.auth.copy(
                     nickServPassword = "new-secret",
@@ -386,6 +388,7 @@ class NetworkSettingsViewModelTest {
 
             val saved = repo.networks.getValue(1)
             assertEquals("new-secret", saved.nickServPassword)
+            assertTrue(saved.routePrivateNoticesToServer)
             assertEquals("PASSWORD_NICK", saved.nickServIdentifySyntax)
             assertTrue(saved.nickServRecoveryEnabled)
             assertEquals("GHOST,REGAIN", saved.nickServRecoverySequence)
@@ -425,7 +428,7 @@ class NetworkSettingsViewModelTest {
             vm.setAutoRegainPreferredNick(true)
             assertTrue(vm.state.value.hasUnsavedChanges)
             assertFalse(repo.networks.getValue(1).autoRegainPreferredNick)
-            val latest = original.copy(serverIconUrl = "https://example.org/new-icon.png")
+            val latest = original.copy(serverIconUrl = "https://example.org/new-icon.png", routePrivateNoticesToServer = true)
             repo.networks[1] = latest
 
             vm.save {}
@@ -435,6 +438,51 @@ class NetworkSettingsViewModelTest {
             val reopened = loadedVm(repo)
             assertTrue(reopened.state.value.autoRegainPreferredNick)
             assertFalse(reopened.state.value.hasUnsavedChanges)
+
+            reopened.setAutoRegainPreferredNick(false)
+            reopened.setRoutePrivateNoticesToServer(false)
+            reopened.save {}
+            runCurrent()
+            assertEquals(latest.copy(routePrivateNoticesToServer = false), repo.networks.getValue(1))
+        }
+
+    @Test
+    fun privateNoticeRouting_savesOnlyTheSelectedChildWithoutRewritingCredentialsOrOtherFlags() =
+        runTest {
+            val parent = root()
+            val child = child(2).copy(name = "Libera ", saslPassword = null, pendingCredentialRequirements = "saslPassword")
+            val repo = FakeNetworkRepository(listOf(parent, child))
+            val vm = loadedVm(repo, networkId = child.id)
+            assertFalse(vm.state.value.hasUnsavedChanges)
+            assertFalse(vm.state.value.routePrivateNoticesToServer)
+            vm.setRoutePrivateNoticesToServer(true)
+            assertTrue(vm.state.value.canSave)
+            val latest = child.copy(autoRegainPreferredNick = true, ordering = 4)
+            repo.networks[child.id] = latest
+            vm.save {}
+            runCurrent()
+            assertEquals(latest.copy(routePrivateNoticesToServer = true), repo.networks.getValue(child.id))
+            assertEquals(parent, repo.networks.getValue(parent.id))
+            assertTrue(loadedVm(repo, networkId = child.id).state.value.routePrivateNoticesToServer)
+        }
+
+    @Test
+    fun privateNoticeRoutingWithRenameKeepsPendingCredentialsAndDoesNotRestoreAutoConnect() =
+        runTest {
+            val direct =
+                root().copy(
+                    role = NetworkRole.DIRECT,
+                    pendingCredentialRequirements = "serverPassword",
+                    autoConnect = false,
+                    restoreAutoConnect = true,
+                )
+            val repo = FakeNetworkRepository(listOf(direct))
+            val vm = loadedVm(repo)
+            vm.editDisplayName("renamed")
+            vm.setRoutePrivateNoticesToServer(true)
+            vm.save {}
+            runCurrent()
+            assertEquals(direct.copy(name = "renamed", routePrivateNoticesToServer = true), repo.networks.getValue(1))
         }
 
     @Test

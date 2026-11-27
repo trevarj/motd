@@ -72,6 +72,7 @@ data class NetworkSettingsUiState(
     val connState: IrcClientState = IrcClientState.Disconnected,
     val autoConnect: Boolean = true,
     val autoRegainPreferredNick: Boolean = false,
+    val routePrivateNoticesToServer: Boolean = false,
     val parentName: String? = null, // root name for a BOUNCER_CHILD's "Managed by" row
     /** A bouncer transport/login change can invalidate all locally imported child mirrors. */
     val pendingBouncerIdentityChange: BouncerIdentityChange? = null,
@@ -82,10 +83,14 @@ data class NetworkSettingsUiState(
 ) {
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
-    val hasUnsavedChanges: Boolean get() = hasNetworkFormChanges || (entity != null && autoRegainPreferredNick != entity.autoRegainPreferredNick)
+    internal val hasFlagChanges: Boolean get() {
+        val current = entity ?: return false
+        return autoRegainPreferredNick != current.autoRegainPreferredNick || routePrivateNoticesToServer != current.routePrivateNoticesToServer
+    }
+    val hasUnsavedChanges: Boolean get() = hasFlagChanges || hasNetworkFormChanges
     internal val hasNetworkFormChanges: Boolean get() {
         val current = entity ?: return false
-        return displayName.trim().ifBlank { current.name } != current.name ||
+        return (displayName.isNotBlank() && displayName.trim() != current.name.trim()) ||
             wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
             normalizeTrustedFileHost(trustedFileHost) != current.trustedFileHost ||
             onConnectCommands != current.onConnectCommands ||
@@ -102,21 +107,23 @@ data class NetworkSettingsUiState(
             ) ||
             server != current.toServerForm() ||
             initialAwayMessage.trim().ifBlank { null } != current.initialAwayMessage?.trim()?.ifBlank { null } ||
-            (
-                if (isZnc) {
-                    zncLogin != parseZncLogin(current.saslUser.orEmpty(), current.saslPassword.orEmpty())
-                } else {
-                    auth != current.toAuthForm()
-                }
-            ) || autoConnect != current.autoConnect
+            hasAuthChanges(current) || autoConnect != current.autoConnect
     }
+
+    internal fun hasAuthChanges(current: NetworkEntity): Boolean =
+        if (isZnc) {
+            zncLogin != parseZncLogin(current.saslUser.orEmpty(), current.saslPassword.orEmpty())
+        } else {
+            auth != current.toAuthForm()
+        }
+
     val initialAwayValid: Boolean get() = initialAwayValidationError(initialAwayMessage) == null
     val trustedFileHostError: String?
         get() = if (trustedFileHost.isBlank() || normalizeTrustedFileHost(trustedFileHost) != null) null else "invalid"
     val isValid: Boolean get() =
         server.isValid && (if (isZnc) zncLogin.isValid else auth.isValid) &&
             vlessLinkError == null && initialAwayValid && trustedFileHostError == null
-    val canSave: Boolean get() = isValid && hasUnsavedChanges
+    val canSave: Boolean get() = if (hasNetworkFormChanges) isValid else hasFlagChanges
 }
 
 /** User-safe validation copy for the VLESS field; never echoes a potentially sensitive URI. */
@@ -241,6 +248,7 @@ class NetworkSettingsViewModel
                             } ?: ZncLoginForm(),
                         autoConnect = n?.autoConnect ?: true,
                         autoRegainPreferredNick = n?.autoRegainPreferredNick ?: false,
+                        routePrivateNoticesToServer = n?.routePrivateNoticesToServer ?: false,
                         parentName = parentName,
                     )
                 }
@@ -333,6 +341,10 @@ class NetworkSettingsViewModel
             _state.value = _state.value.copy(autoRegainPreferredNick = enabled)
         }
 
+        fun setRoutePrivateNoticesToServer(enabled: Boolean) {
+            _state.value = _state.value.copy(routePrivateNoticesToServer = enabled)
+        }
+
         fun saveAvatar(url: String?) =
             updateAvatar {
                 if (url != null && validateAvatarUrl(url) == null) false else avatarController.setSelfAvatar(networkId, url)
@@ -367,8 +379,14 @@ class NetworkSettingsViewModel
             viewModelScope.launch {
                 val state = _state.value
                 val current = state.entity ?: return@launch
-                if (state.autoRegainPreferredNick != current.autoRegainPreferredNick && !state.hasNetworkFormChanges) {
-                    networkRepository.setAutoRegainPreferredNick(current.id, state.autoRegainPreferredNick)
+                if (!state.hasNetworkFormChanges) {
+                    if (state.hasFlagChanges) {
+                        networkRepository.updateNetworkFlags(
+                            current.id,
+                            autoRegainPreferredNick = state.autoRegainPreferredNick.takeIf { it != current.autoRegainPreferredNick },
+                            routePrivateNoticesToServer = state.routePrivateNoticesToServer.takeIf { it != current.routePrivateNoticesToServer },
+                        )
+                    }
                     onDone()
                     return@launch
                 }
@@ -443,6 +461,10 @@ class NetworkSettingsViewModel
                     state.server
                 }
             val auth = if (state.isZnc) state.zncLogin.toAuthForm() else state.auth
+            val keepImportState =
+                !state.hasAuthChanges(current) &&
+                    state.obfsLink.trim() == current.obfsLink.orEmpty().trim() &&
+                    (current.obfsLink.isNullOrBlank() || state.obfsMode == current.obfsMode)
             return buildNetworkEntity(
                 server = server,
                 auth = auth,
@@ -468,7 +490,10 @@ class NetworkSettingsViewModel
                 // Persist the current autoConnect value alongside the form fields.
             ).copy(
                 autoConnect = _state.value.autoConnect,
+                pendingCredentialRequirements = current.pendingCredentialRequirements.takeIf { keepImportState },
+                restoreAutoConnect = keepImportState && current.restoreAutoConnect,
                 autoRegainPreferredNick = state.autoRegainPreferredNick,
+                routePrivateNoticesToServer = state.routePrivateNoticesToServer,
                 trustedFileHost = normalizeTrustedFileHost(_state.value.trustedFileHost),
                 onConnectCommands = state.onConnectCommands,
                 initialAwayMessage =

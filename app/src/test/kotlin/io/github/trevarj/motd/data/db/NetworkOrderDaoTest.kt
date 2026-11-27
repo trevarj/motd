@@ -87,10 +87,12 @@ class NetworkOrderDaoTest {
             // The settings form rebuilds the entity from its fields, so it carries the default
             // ordering = 0. Saving must not silently promote that network to the top of the drawer.
             val edited = repository.networkById(hackint)!!
+            db.networkDao().setServerIconUrl(hackint, "https://example.org/new.png")
             repository.updateNetwork(edited.copy(ordering = 0, nick = "renamed"))
 
             assertEquals(listOf("hackint", "libera", "oftc"), names())
             assertEquals("renamed", repository.networkById(hackint)!!.nick)
+            assertEquals("https://example.org/new.png", repository.networkById(hackint)!!.serverIconUrl)
         }
 
     @Test

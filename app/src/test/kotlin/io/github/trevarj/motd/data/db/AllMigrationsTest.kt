@@ -97,7 +97,7 @@ class AllMigrationsTest {
             val sqlite = migrated.openHelper.writableDatabase
             sqlite
                 .query(
-                    """SELECT name, host, port, nick, autoRegainPreferredNick FROM networks WHERE id = 1""",
+                    """SELECT name, host, port, nick, autoRegainPreferredNick, routePrivateNoticesToServer FROM networks WHERE id = 1""",
                 ).use { cursor ->
                     check(cursor.moveToFirst())
                     assertEquals("libera", cursor.getString(0))
@@ -105,6 +105,7 @@ class AllMigrationsTest {
                     assertEquals(6697, cursor.getInt(2))
                     assertEquals("me", cursor.getString(3))
                     assertEquals(0, cursor.getInt(4))
+                    assertEquals(0, cursor.getInt(5))
                 }
             // The v1 row is ranked into the manual drawer order rather than left at the default.
             sqlite.query("SELECT ordering FROM networks WHERE id = 1").use { cursor ->
@@ -671,10 +672,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 60` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 61` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 60
+        const val DECLARED_VERSION = 61
     }
 }

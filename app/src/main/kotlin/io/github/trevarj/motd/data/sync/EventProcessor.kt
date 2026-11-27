@@ -262,6 +262,8 @@ class EventProcessor
             /** soju's console, already role-scoped by the route that resolved it. */
             val bouncerConsole: Boolean = false,
             val ignoreSignals: Int = 0,
+            val privateServerNotice: Boolean = false,
+            val exactQuery: Boolean = false,
         )
 
         private data class ActiveHistoryTarget(
@@ -951,7 +953,11 @@ class EventProcessor
             val resolvedNotifications = notificationSettings.resolve(networkId, bufferId)
             val attention =
                 IncomingChatAttention(
-                    ignoreSignals = route.ignoreSignals.takeIf { type != BufferType.SERVER && !isServerSource(e.source.nick) },
+                    ignoreSignals =
+                        route.ignoreSignals.takeIf {
+                            (type != BufferType.SERVER || route.privateServerNotice) &&
+                                !isServerSource(e.source.nick)
+                        },
                     classifyKeyword =
                         if (!sourceIsSelf && type != BufferType.SERVER && !isServerSource(e.source.nick)) {
                             ::classifyChatKeyword
@@ -1284,18 +1290,27 @@ class EventProcessor
 
             return db.withTransaction {
                 val historyRoomId = existingReactionRoomId(networkId, route, st, event.ctx.account)
-                if (channelName == null && historyRoomId == null) return@withTransaction null
-                val canonicalExpectedRoomId = historyRoomId?.let { bufferDao.canonicalId(it) }
+                val expectedRoomId = historyRoomId?.let { bufferDao.canonicalId(it) }
                 val target =
                     db.canonicalTimelineDao().eventByAlias(
                         networkId,
                         EventAliasNamespace.MSGID,
                         event.targetMsgid.toByteArray(Charsets.UTF_8),
                     )
+                val privateServerNotice =
+                    target != null && target.kind == MessageKind.NOTICE && !target.isSelf &&
+                        channelName == null && !isServerSource(target.sender) &&
+                        st.normalize(event.source.nick) == st.normalize(target.sender) &&
+                        (target.senderAccount == null || event.ctx.account == target.senderAccount) &&
+                        (st.isSelfNick(event.target) || (historyTarget != null && st.wasSelfNick(event.target))) &&
+                        (historyTarget == null || (route.type != BufferType.CHANNEL && st.normalize(historyTarget) == st.normalize(target.sender))) &&
+                        bufferDao.observeById(target.bufferId)?.let { it.type == BufferType.SERVER && it.name == "*" } == true
+                if (!privateServerNotice && channelName == null && historyRoomId == null) return@withTransaction null
+                val canonicalExpectedRoomId = if (privateServerNotice) target.bufferId else expectedRoomId
                 if (target != null && (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS)) {
                     return@withTransaction null
                 }
-                if (historyTarget != null) {
+                if (historyTarget != null && !privateServerNotice) {
                     if (channelName != null) {
                         if (route.type != BufferType.CHANNEL) return@withTransaction null
                         if (channelName != st.normalize(historyTarget) &&
@@ -1494,10 +1509,13 @@ class EventProcessor
                             origin,
                         )
                     val routedRoomIds = linkedSetOf<RoomId>()
+                    var privateNoticeRoomId: RoomId? = null
                     val chatRoutes = activeHistoryChatRoutes[networkId].orEmpty()
                     chatRoutes.forEach { route ->
                         route ?: return@forEach
-                        if (targetRoom == null || route.type == targetRoom.type) {
+                        if (route.privateServerNotice) {
+                            privateNoticeRoomId = route.bufferId
+                        } else if (targetRoom == null || route.type == targetRoom.type) {
                             routedRoomIds += bufferDao.canonicalId(route.bufferId) ?: route.bufferId
                         }
                     }
@@ -1505,6 +1523,7 @@ class EventProcessor
                     val contextRoomId =
                         routedRoomIds.singleOrNull()
                             ?: targetRoom?.id?.let { bufferDao.canonicalId(it) ?: it }
+                            ?: privateNoticeRoomId
                     contextRoomId?.let { roomId ->
                         bufferDao.observeById(roomId)?.let { room ->
                             var ignoredPeerNicks: MutableSet<String>? = null
@@ -2528,7 +2547,7 @@ class EventProcessor
             strongQueryRooms.singleOrNull()?.let { roomId ->
                 chatRoutes =
                     chatRoutes.map { route ->
-                        if (route?.type == BufferType.QUERY && route.bufferId != roomId && route.ignoreSignals != DROP_IGNORED_MESSAGE) {
+                        if (route?.type == BufferType.QUERY && !route.exactQuery && route.bufferId != roomId && route.ignoreSignals != DROP_IGNORED_MESSAGE) {
                             route.copy(bufferId = roomId)
                         } else {
                             route
@@ -4801,54 +4820,81 @@ class EventProcessor
                         prefix in st.statusMsgPrefixes || prefix in st.prefixModes.values
                     }?.let { existingChannelBuffer(networkId, it, st) }
                 }
-            if (contextRoom != null) {
-                return ChatRoute(
-                    contextRoom.id,
-                    contextRoom.displayName,
-                    BufferType.CHANNEL,
-                    event.text,
-                    serverNotice = false,
-                    sourceIsSelf = sourceIsSelf,
-                    selfAttributionAuthoritative = selfAttributionAuthoritative,
-                    ignoreSignals = ignoreSignals,
-                )
-            }
-            val normalizedName = active?.normalizedName ?: st.normalize(bufferName)
-            var bufferId =
-                active?.roomId ?: if (type == BufferType.QUERY) {
-                    val normalizedNick = normalizedName
-                    bufferStore.resolveQueryRoom(networkId, normalizedNick, account = null)?.id
-                        ?: bufferStore
-                            .resolveQueryRoom(
-                                networkId,
-                                normalizedNick,
-                                event.ctx.account.takeUnless { sourceIsSelf },
-                            )?.id
-                        ?: ensureBuffer(networkId, bufferName, type, st)
-                } else {
-                    ensureBuffer(networkId, bufferName, type, st)
-                }
-            if (type == BufferType.QUERY) {
-                bufferId =
-                    bufferStore
-                        .bindQueryIdentity(
-                            roomId = bufferId,
-                            networkId = networkId,
-                            normalizedNick = normalizedName,
-                            displayNick = bufferName,
-                            account = event.ctx.account.takeUnless { sourceIsSelf },
-                        ).id
-            }
-            return ChatRoute(
-                bufferId,
-                bufferName,
-                type,
+
+            fun route(
+                id: RoomId,
+                name: String = bufferName,
+                roomType: BufferType = type,
+                privateServerNotice: Boolean = false,
+                exactQuery: Boolean = false,
+            ) = ChatRoute(
+                id,
+                name,
+                roomType,
                 event.text,
                 serverNotice = false,
                 sourceIsSelf = sourceIsSelf,
                 selfAttributionAuthoritative = selfAttributionAuthoritative,
                 ignoreSignals = ignoreSignals,
+                privateServerNotice = privateServerNotice,
+                exactQuery = exactQuery,
             )
+            if (contextRoom != null) return route(contextRoom.id, contextRoom.displayName, BufferType.CHANNEL)
+            if (!isDm) return route(active?.roomId ?: ensureBuffer(networkId, bufferName, type, st))
+
+            val privateNotice = event.kind == IrcEvent.ChatKind.NOTICE && !sourceIsSelf && !targetIsChannel
+            val addressedToSelf = privateNotice && st.isSelfNick(event.target)
+            val knownRoom =
+                if (privateNotice) {
+                    event.ctx.msgid?.let { msgid ->
+                        db
+                            .canonicalTimelineDao()
+                            .eventByAlias(networkId, EventAliasNamespace.MSGID, msgid.toByteArray(Charsets.UTF_8))
+                            ?.let { bufferDao.observeById(it.bufferId) }
+                    }
+                } else {
+                    null
+                }
+            if (knownRoom?.type == BufferType.SERVER && knownRoom.name == "*") {
+                return route(knownRoom.id, "*", BufferType.SERVER, privateServerNotice = true)
+            }
+            if (knownRoom?.type == BufferType.CHANNEL) return route(knownRoom.id, knownRoom.displayName, BufferType.CHANNEL)
+            val normalizedName = active?.normalizedName ?: st.normalize(bufferName)
+            val peerAccount = event.ctx.account.takeUnless { sourceIsSelf }
+            val queryId =
+                active?.roomId
+                    ?: bufferStore.resolveQueryRoom(networkId, normalizedName, account = null)?.id
+                    ?: peerAccount?.let { bufferStore.resolveQueryRoom(networkId, normalizedName, it)?.id }
+            if (knownRoom?.type == BufferType.QUERY) {
+                val conflictingAccount =
+                    peerAccount != null &&
+                        db.roomAliasDao().forRoom(knownRoom.id).any { it.namespace == RoomAliasNamespace.ACCOUNT && it.value != peerAccount }
+                if (queryId != knownRoom.id || conflictingAccount) {
+                    return route(knownRoom.id, knownRoom.displayName, BufferType.QUERY, exactQuery = true)
+                }
+            }
+            if (addressedToSelf && knownRoom == null &&
+                (queryId == null || peerAccount != null) && networkDao.routePrivateNoticesToServer(networkId) == true
+            ) {
+                val aliases = db.roomAliasDao()
+                if (queryId == null ||
+                    (
+                        peerAccount != null && aliases.byValue(networkId, RoomAliasNamespace.ACCOUNT, peerAccount) == null &&
+                            aliases.forRoom(queryId).any { it.namespace == RoomAliasNamespace.ACCOUNT }
+                    )
+                ) {
+                    return route(ensureServerBuffer(networkId, st), "*", BufferType.SERVER, privateServerNotice = true)
+                }
+            }
+            val query =
+                bufferStore.bindQueryIdentity(
+                    roomId = queryId ?: ensureBuffer(networkId, bufferName, type, st),
+                    networkId = networkId,
+                    normalizedNick = normalizedName,
+                    displayNick = bufferName,
+                    account = peerAccount,
+                )
+            return route(query.id, exactQuery = knownRoom?.type == BufferType.QUERY)
         }
 
         private suspend fun ensureBuffer(

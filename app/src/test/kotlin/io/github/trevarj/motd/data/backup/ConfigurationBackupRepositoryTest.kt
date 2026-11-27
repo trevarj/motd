@@ -951,6 +951,7 @@ class ConfigurationBackupRepositoryTest {
             assertTrue(imported.nickServRecoveryEnabled)
             assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
             assertTrue(imported.autoRegainPreferredNick)
+            assertTrue(imported.routePrivateNoticesToServer)
             assertNull(imported.obfsLink)
             assertEquals(
                 "saslPassword,serverPassword,nickServPassword,obfsLink,clientCertificate",
@@ -1011,6 +1012,7 @@ class ConfigurationBackupRepositoryTest {
                     .lineSequence()
                     .filterNot { it.contains("\"onConnectCommands\":") }
                     .filterNot { it.contains("\"autoRegainPreferredNick\":") }
+                    .filterNot { it.contains("\"routePrivateNoticesToServer\":") }
                     .joinToString("\n")
             assertFalse(legacy.contains("\"onConnectCommands\""))
 
@@ -1028,21 +1030,10 @@ class ConfigurationBackupRepositoryTest {
 
             val newDb = inMemoryDb()
             repository(newDb).import(legacy, importMode = BackupImportMode.MERGE)
-            assertFalse(
-                newDb
-                    .networkDao()
-                    .allNow()
-                    .single()
-                    .autoRegainPreferredNick,
-            )
-            assertEquals(
-                "",
-                newDb
-                    .networkDao()
-                    .allNow()
-                    .single()
-                    .onConnectCommands,
-            )
+            val imported = newDb.networkDao().allNow().single()
+            assertFalse(imported.autoRegainPreferredNick)
+            assertFalse(imported.routePrivateNoticesToServer)
+            assertEquals("", imported.onConnectCommands)
             sourceDb.close()
             targetDb.close()
             newDb.close()
@@ -1092,6 +1083,7 @@ class ConfigurationBackupRepositoryTest {
             assertTrue(imported.nickServRecoveryEnabled)
             assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
             assertTrue(imported.autoRegainPreferredNick)
+            assertTrue(imported.routePrivateNoticesToServer)
             assertEquals("vless://secret", imported.obfsLink)
             assertEquals("files.example", imported.trustedFileHost)
             assertEquals(commands, imported.onConnectCommands)
@@ -2831,6 +2823,7 @@ class ConfigurationBackupRepositoryTest {
             nickServRecoveryEnabled = true,
             nickServRecoverySequence = "GHOST,REGAIN",
             autoRegainPreferredNick = true,
+            routePrivateNoticesToServer = true,
             clientCertAlias = clientCertAlias,
             autoConnect = true,
             obfsMode = ObfsMode.EMBEDDED_REALITY,

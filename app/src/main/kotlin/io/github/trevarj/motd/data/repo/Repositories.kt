@@ -42,11 +42,19 @@ interface NetworkRepository {
 
     suspend fun updateNetwork(n: NetworkEntity)
 
-    suspend fun setAutoRegainPreferredNick(
+    suspend fun updateNetworkFlags(
         id: Long,
-        enabled: Boolean,
+        autoRegainPreferredNick: Boolean?,
+        routePrivateNoticesToServer: Boolean?,
     ) {
-        networkById(id)?.let { updateNetwork(it.copy(autoRegainPreferredNick = enabled)) }
+        networkById(id)?.let { current ->
+            updateNetwork(
+                current.copy(
+                    autoRegainPreferredNick = autoRegainPreferredNick ?: current.autoRegainPreferredNick,
+                    routePrivateNoticesToServer = routePrivateNoticesToServer ?: current.routePrivateNoticesToServer,
+                ),
+            )
+        }
     }
 
     suspend fun deleteNetwork(id: Long)

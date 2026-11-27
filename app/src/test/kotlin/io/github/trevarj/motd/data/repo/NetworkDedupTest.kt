@@ -80,11 +80,19 @@ class NetworkDedupTest {
             rows[id]?.let { rows[id] = it.copy(serverIconUrl = url) }
         }
 
-        override suspend fun setAutoRegainPreferredNick(
+        override suspend fun routePrivateNoticesToServer(id: Long): Boolean? = rows[id]?.routePrivateNoticesToServer
+
+        override suspend fun updateNetworkFlags(
             id: Long,
-            enabled: Boolean,
+            autoRegainPreferredNick: Boolean?,
+            routePrivateNoticesToServer: Boolean?,
         ) {
-            rows[id]?.let { rows[id] = it.copy(autoRegainPreferredNick = enabled) }
+            val current = rows[id] ?: return
+            rows[id] =
+                current.copy(
+                    autoRegainPreferredNick = autoRegainPreferredNick ?: current.autoRegainPreferredNick,
+                    routePrivateNoticesToServer = routePrivateNoticesToServer ?: current.routePrivateNoticesToServer,
+                )
         }
 
         override suspend fun setOrdering(

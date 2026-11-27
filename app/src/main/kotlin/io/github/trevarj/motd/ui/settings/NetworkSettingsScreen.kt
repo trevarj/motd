@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -142,6 +143,7 @@ fun NetworkSettingsScreen(
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
         onSetAutoRegainPreferredNick = viewModel::setAutoRegainPreferredNick,
+        onSetRoutePrivateNoticesToServer = viewModel::setRoutePrivateNoticesToServer,
         onZncLoginChange = viewModel::editZncLogin,
         onSave = { viewModel.save(onBack) },
         onCancelBouncerIdentityChange = viewModel::cancelBouncerIdentityChange,
@@ -179,6 +181,7 @@ fun NetworkSettingsContent(
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
     onSetAutoRegainPreferredNick: (Boolean) -> Unit = {},
+    onSetRoutePrivateNoticesToServer: (Boolean) -> Unit = {},
     onZncLoginChange: (ZncLoginForm) -> Unit = {},
     onSave: () -> Unit,
     onCancelBouncerIdentityChange: () -> Unit = {},
@@ -239,6 +242,16 @@ fun NetworkSettingsContent(
                 modifier = Modifier.fillMaxWidth().padding(16.dp).testTag("network_display_name"),
             )
             AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
+            if (state.entity != null && state.entity.role != NetworkRole.BOUNCER_ROOT) {
+                SwitchRow(
+                    title = stringResource(R.string.network_route_private_notices_to_server),
+                    subtitle = stringResource(R.string.network_route_private_notices_to_server_desc),
+                    checked = state.routePrivateNoticesToServer,
+                    onCheckedChange = onSetRoutePrivateNoticesToServer,
+                    switchTag = "network_route_private_notices_to_server",
+                    icon = Icons.Outlined.Notifications,
+                )
+            }
         }
         val profileNetwork = state.entity?.takeUnless { it.role == NetworkRole.BOUNCER_ROOT }
         if (profileNetwork != null) {
@@ -447,7 +460,7 @@ fun NetworkSettingsContent(
                 TextButton(colors = readableTextButtonColors(), onClick = {
                     showDiscardConfirm = false
                     onSave()
-                }, enabled = state.isValid) {
+                }, enabled = state.canSave) {
                     Text(stringResource(R.string.network_settings_save))
                 }
             },

@@ -47,7 +47,7 @@ import io.github.trevarj.motd.data.saved.SavedMessagesDao
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 60,
+    version = 61,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1336,6 +1336,13 @@ val MIGRATION_59_60 =
         }
     }
 
+val MIGRATION_60_61 =
+    object : Migration(60, 61) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE networks ADD COLUMN routePrivateNoticesToServer INTEGER NOT NULL DEFAULT 0")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1408,6 +1415,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_57_58,
         MIGRATION_58_59,
         MIGRATION_59_60,
+        MIGRATION_60_61,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

@@ -129,6 +129,7 @@ data class NetworkEntity(
     /** Null is the default one-command `REGAIN` sequence. */
     val nickServRecoverySequence: String? = null,
     @ColumnInfo(defaultValue = "0") val autoRegainPreferredNick: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val routePrivateNoticesToServer: Boolean = false,
     val initialAwayMessage: String? = null,
     val clientCertAlias: String? = null,
     val autoConnect: Boolean = true,

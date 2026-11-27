@@ -28,6 +28,21 @@ class TypedDaoProjectionTest {
     fun tearDown() = db.close()
 
     @Test
+    fun privateNoticeRoutingReadsAndUpdatesOnlyTheSelectedNetworkFlags() =
+        runTest {
+            val dao = db.networkDao()
+            val otherId = dao.insert(network("other"))
+            val original = requireNotNull(dao.byId(networkId))
+            assertNull(dao.routePrivateNoticesToServer(-1))
+            assertEquals(false, dao.routePrivateNoticesToServer(networkId))
+            dao.updateNetworkFlags(networkId, autoRegainPreferredNick = true, routePrivateNoticesToServer = true)
+            assertEquals(true, dao.routePrivateNoticesToServer(networkId))
+            assertEquals(false, dao.routePrivateNoticesToServer(otherId))
+            dao.updateNetworkFlags(networkId, autoRegainPreferredNick = null, routePrivateNoticesToServer = false)
+            assertEquals(original.copy(autoRegainPreferredNick = true), dao.byId(networkId))
+        }
+
+    @Test
     fun `history and target projections preserve fixed-query semantics`() =
         runTest {
             val channel = db.bufferDao().insert(buffer(networkId, "#motd"))

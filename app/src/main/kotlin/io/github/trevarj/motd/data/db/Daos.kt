@@ -224,10 +224,19 @@ interface NetworkDao {
         url: String?,
     )
 
-    @Query("UPDATE networks SET autoRegainPreferredNick = :enabled WHERE id = :id")
-    suspend fun setAutoRegainPreferredNick(
+    @Query("SELECT routePrivateNoticesToServer FROM networks WHERE id = :id")
+    suspend fun routePrivateNoticesToServer(id: Long): Boolean?
+
+    @Query(
+        """UPDATE networks SET
+           autoRegainPreferredNick = COALESCE(:autoRegainPreferredNick, autoRegainPreferredNick),
+           routePrivateNoticesToServer = COALESCE(:routePrivateNoticesToServer, routePrivateNoticesToServer)
+           WHERE id = :id""",
+    )
+    suspend fun updateNetworkFlags(
         id: Long,
-        enabled: Boolean,
+        autoRegainPreferredNick: Boolean?,
+        routePrivateNoticesToServer: Boolean?,
     )
 
     @Query("UPDATE networks SET ordering = :ordering WHERE id = :id")
@@ -235,6 +244,12 @@ interface NetworkDao {
         id: Long,
         ordering: Int,
     )
+
+    @Transaction
+    suspend fun updateNetworkSettings(n: NetworkEntity) {
+        val stored = byId(n.id) ?: return
+        update(n.copy(ordering = stored.ordering, serverIconUrl = stored.serverIconUrl))
+    }
 
     /**
      * Insert [n] at the end of the manual order. New networks must land somewhere deterministic;
