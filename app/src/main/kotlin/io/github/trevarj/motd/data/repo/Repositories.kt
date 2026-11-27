@@ -69,6 +69,8 @@ interface NetworkIgnoreRepository {
     suspend fun addIgnore(
         networkId: Long,
         pattern: String,
+        dropMessages: Boolean = true,
+        suppressedSignals: Int = 0,
     ): Result<Unit>
 
     suspend fun setExactNickIgnored(
@@ -103,6 +105,8 @@ object NoopNetworkIgnoreRepository : NetworkIgnoreRepository {
     override suspend fun addIgnore(
         networkId: Long,
         pattern: String,
+        dropMessages: Boolean,
+        suppressedSignals: Int,
     ): Result<Unit> = Result.success(Unit)
 
     override suspend fun setExactNickIgnored(

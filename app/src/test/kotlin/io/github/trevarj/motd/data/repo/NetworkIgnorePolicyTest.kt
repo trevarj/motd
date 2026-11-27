@@ -24,8 +24,9 @@ class NetworkIgnorePolicyTest {
 
     @Test fun `enabled ignore matches source hostmask`() {
         val ignores = listOf(ignore("a?ice!*@*.example.net"))
-        assertTrue(
-            ignoredBy(
+        assertEquals(
+            DROP_IGNORED_MESSAGE,
+            incomingIgnoreSignals(
                 ignores,
                 Prefix("alice", "ident", "chat.example.net"),
                 IrcIdentityRules(),
@@ -35,20 +36,22 @@ class NetworkIgnorePolicyTest {
 
     @Test fun `disabled ignore does not match`() {
         val ignores = listOf(ignore("alice!*@*", enabled = false))
-        assertFalse(ignoredBy(ignores, Prefix("alice", "u", "h"), IrcIdentityRules()))
+        assertEquals(0, incomingIgnoreSignals(ignores, Prefix("alice", "u", "h"), IrcIdentityRules()))
     }
 
     @Test fun `nick matching follows irc case mapping`() {
         val ignores = listOf(ignore("[lice!*@*"))
-        assertTrue(
-            ignoredBy(
+        assertEquals(
+            DROP_IGNORED_MESSAGE,
+            incomingIgnoreSignals(
                 ignores,
                 Prefix("{lice", "u", "h"),
                 IrcIdentityRules(IrcCaseMapping.Rfc1459),
             ),
         )
-        assertFalse(
-            ignoredBy(
+        assertEquals(
+            0,
+            incomingIgnoreSignals(
                 ignores,
                 Prefix("{lice", "u", "h"),
                 IrcIdentityRules(IrcCaseMapping.Ascii),
@@ -95,6 +98,24 @@ class NetworkIgnorePolicyTest {
         val exact = nonExact + ignore("[LICE!*@*")
         assertTrue(hasExactNickIgnore(exact, "{lice", rules))
         assertFalse(hasExactNickIgnore(exact, "{lice", IrcIdentityRules(IrcCaseMapping.Ascii)))
+    }
+
+    @Test fun `overlapping selective masks combine by casemap unless an enabled hard rule matches`() {
+        val unread = ignore("[lice!*@*").copy(dropMessages = false, suppressedSignals = SUPPRESS_UNREAD)
+        val highlight = ignore("*!IDENT@*.example.net").copy(dropMessages = false, suppressedSignals = SUPPRESS_HIGHLIGHT)
+        val disabled =
+            ignore("*!*@*", enabled = false).copy(dropMessages = false, suppressedSignals = SUPPRESS_NOTIFICATIONS)
+        val disabledHard = ignore("[lice!*@*", enabled = false)
+        val ignores = listOf(unread, highlight, disabled, disabledHard)
+        val source = Prefix("{lice", "ident", "chat.example.net")
+        val rfc = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+        val ascii = IrcIdentityRules(IrcCaseMapping.Ascii)
+
+        assertEquals(SUPPRESS_UNREAD or SUPPRESS_HIGHLIGHT, incomingIgnoreSignals(ignores, source, rfc))
+        assertEquals(SUPPRESS_HIGHLIGHT, incomingIgnoreSignals(ignores, source, ascii))
+        assertEquals(0, incomingIgnoreSignals(ignores, Prefix("other", "user", "host"), rfc))
+        assertFalse(hasExactNickIgnore(ignores, "{lice", rfc))
+        assertEquals(DROP_IGNORED_MESSAGE, incomingIgnoreSignals(ignores + disabledHard.copy(enabled = true), source, rfc))
     }
 
     private fun ignore(

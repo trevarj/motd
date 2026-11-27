@@ -27,18 +27,37 @@ class NetworkIgnoreRepositoryImpl
         override suspend fun addIgnore(
             networkId: Long,
             pattern: String,
-        ): Result<Unit> =
-            normalizeIgnorePattern(pattern).mapCatching { normalized ->
-                ignoreDao
-                    .upsert(
-                        NetworkIgnoreEntity(
-                            networkId = networkId,
-                            pattern = normalized,
-                            enabled = true,
-                            createdAt = System.currentTimeMillis(),
-                        ),
-                    ).let { cache.invalidate(networkId) }
+            dropMessages: Boolean,
+            suppressedSignals: Int,
+        ): Result<Unit> {
+            val validSignals =
+                if (dropMessages) {
+                    suppressedSignals == 0
+                } else {
+                    suppressedSignals != 0 && (suppressedSignals and ALL_IGNORE_SIGNALS) == suppressedSignals
+                }
+            if (!validSignals) return Result.failure(IllegalArgumentException("Invalid ignore signals for this mode"))
+            val normalized = normalizeIgnorePattern(pattern).getOrElse { return Result.failure(it) }
+            return try {
+                ignoreDao.upsert(
+                    NetworkIgnoreEntity(
+                        networkId = networkId,
+                        pattern = normalized,
+                        enabled = true,
+                        createdAt = System.currentTimeMillis(),
+                        dropMessages = dropMessages,
+                        suppressedSignals = suppressedSignals,
+                    ),
+                )
+                Result.success(Unit)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Result.failure(e)
+            } finally {
+                cache.invalidate(networkId)
             }
+        }
 
         override suspend fun setExactNickIgnored(
             networkId: Long,

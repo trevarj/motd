@@ -964,6 +964,121 @@ class RequiredHeadlessE2eTest {
         }
     }
 
+    private fun exerciseSelectiveIgnore(
+        bootstrap: E2eBootstrap,
+        network: BootstrappedNetwork,
+        bufferId: Long,
+    ) {
+        val chats = ChatListRobot(compose)
+        val settings = SettingsRobot(compose)
+        val timeline = TimelineRobot(compose)
+        val buffers = bootstrap.seams.buffers()
+        val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val resources = context.resources
+        val notifications = checkNotNull(context.getSystemService(NotificationManager::class.java))
+        val ready = requireNotNull(bootstrap.seams.connections().clientFor(network.childId)).state.value as IrcClientState.Ready
+        val token = "selective ignore ${bootstrap.args.runId}"
+
+        fun mentionCardBodies(): List<String> =
+            notifications.activeNotifications
+                .firstOrNull { it.id == MotdNotifications.messageNotificationId(bufferId) && it.tag == "channel_mentions" }
+                ?.let { NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(it.notification) }
+                ?.messages
+                ?.map { it.text.toString() }
+                .orEmpty()
+
+        fun openTools() {
+            chats.click("chatlist_selection_close")
+            val networkRow = "drawer_network_row_${network.childId}"
+            chats.awaitTag(networkRow)
+            compose.onNodeWithTag(networkRow, useUnmergedTree = true).performTouchInput { longClick() }
+            compose.onNodeWithText(resources.getString(R.string.drawer_network_settings)).performClick()
+            settings.scrollToAndClick("network_settings_network_tools")
+            settings.awaitTag("screen_network_tools")
+        }
+
+        fun closeTools() {
+            repeat(2) { settings.click("settings_back") }
+            chats.awaitTag("chatlist_row_$bufferId")
+        }
+
+        FixtureIrcClient.connect(bootstrap.args).use { peer ->
+            val beforeText = "${ready.nick}: $token baseline"
+            peer.sendMessage(bootstrap.args.channel, beforeText)
+            peer.flushThroughServer("selective-ignore-baseline")
+            val ordinary = runBlocking { probe.awaitCanonicalFromAnySender(beforeText, bufferId) }
+            compose.waitUntil("fixture baseline mention posts a notification", 20_000) { beforeText in mentionCardBodies() }
+            val before =
+                awaitWhileComposing("baseline chat list preview", 10_000) {
+                    buffers
+                        .observeChatList()
+                        .first { rows -> rows.any { it.bufferId == bufferId && it.lastMessageText == beforeText } }
+                        .single { it.bufferId == bufferId }
+                }
+            openTools()
+            settings.replace("network_tools_ignore_input", ordinary.sender)
+            settings.scrollToAndClick("network_tools_ignore_selective")
+            settings.scrollToAndClick("network_tools_ignore_unread")
+            settings.scrollToAndClick("network_tools_ignore_highlights")
+            settings.scrollToAndClick("network_tools_ignore_notifications")
+            settings.scrollToAndClick("network_tools_add_ignore")
+            val mask = "${ordinary.sender}!*@*"
+            compose.waitUntil("selective rule shown for the fixture sender", 10_000) {
+                compose.onAllNodes(hasText(mask)).fetchSemanticsNodes().isNotEmpty()
+            }
+            closeTools()
+            val marker = runBlocking { requireNotNull(buffers.observeBuffer(bufferId).first()) }
+
+            val afterText = "${ready.nick}: $token visible"
+            peer.sendMessage(bootstrap.args.channel, afterText)
+            peer.flushThroughServer("selective-ignore-visible")
+            val suppressed = runBlocking { probe.awaitCanonicalFromAnySender(afterText, bufferId) }
+            val after =
+                awaitWhileComposing("selectively ignored message remains a chat list preview", 10_000) {
+                    buffers
+                        .observeChatList()
+                        .first { rows -> rows.any { it.bufferId == bufferId && it.lastMessageText == afterText } }
+                        .single { it.bufferId == bufferId }
+                }
+            assertEquals(before.unreadCount, after.unreadCount)
+            assertEquals(before.mentionCount, after.mentionCount)
+            val unchanged = runBlocking { requireNotNull(buffers.observeBuffer(bufferId).first()) }
+            assertEquals(marker.localReadAnchorTime, unchanged.localReadAnchorTime)
+            assertEquals(marker.localReadAnchorEventId, unchanged.localReadAnchorEventId)
+            assertEquals(marker.readMarkerTime, unchanged.readMarkerTime)
+
+            val controlText = "${ready.nick}: $token unsuppressed control"
+            FixtureIrcClient.connect(bootstrap.args).use { control ->
+                control.sendMessage(bootstrap.args.channel, controlText)
+                control.flushThroughServer("selective-ignore-control")
+            }
+            compose.waitUntil("control mention still posts after the selective rule", 20_000) { controlText in mentionCardBodies() }
+            assertTrue(afterText !in mentionCardBodies())
+
+            chats.open(bufferId)
+            timeline.awaitTag("chat_timeline")
+            timeline.awaitEntryVeilLifted()
+            if (timeline.isPresent("chat_scroll_to_bottom_fab")) timeline.scrollToBottom()
+            timeline.assertMessageVisible(suppressed.tag())
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            chats.awaitTag("chatlist_row_$bufferId")
+            openTools()
+            val delete =
+                resources.getString(
+                    R.string.network_tools_delete_ignore,
+                    mask,
+                    resources.getString(R.string.network_tools_ignore_selective_mode),
+                )
+            compose.onNode(hasContentDescription(delete)).performScrollTo().performClick()
+            compose.waitUntil("selective rule removed from network tools", 10_000) {
+                compose.onAllNodes(hasText(mask)).fetchSemanticsNodes().isEmpty()
+            }
+            closeTools()
+            milestones.record("selective_ignore_visible_without_attention", "buffer=$bufferId event=${suppressed.id}")
+        }
+    }
+
     @Test
     fun bootstrappedNavigationSettingsAndBouncerSmoke() {
         val (bootstrap, network) = launchBootstrapped()
@@ -972,6 +1087,7 @@ class RequiredHeadlessE2eTest {
         }
         val roomId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
         exerciseKeywordActivity(bootstrap, network, roomId)
+        exerciseSelectiveIgnore(bootstrap, network, roomId)
         val settings = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
         val originalSettings = runBlocking { settings.settings.first() }
         val originalAppearance =

@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.icu.text.ListFormatter
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -13,15 +14,22 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.MarkChatUnread
+import androidx.compose.material.icons.outlined.NotificationsOff
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExposedDropdownMenuAnchorType
@@ -29,6 +37,7 @@ import androidx.compose.material3.ExposedDropdownMenuBox
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -45,8 +54,13 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontFamily
@@ -59,6 +73,9 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
+import io.github.trevarj.motd.data.repo.SUPPRESS_NOTIFICATIONS
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.ui.components.MuteBacklogUndoEffect
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
@@ -104,7 +121,7 @@ fun NetworkToolsContent(
     state: NetworkToolsUiState,
     onBack: () -> Unit,
     snackbarHostState: SnackbarHostState = remember { SnackbarHostState() },
-    onAddIgnore: (String) -> Unit = {},
+    onAddIgnore: (pattern: String, dropMessages: Boolean, suppressedSignals: Int) -> Unit = { _, _, _ -> },
     onSetIgnoreEnabled: (Long, Boolean) -> Unit = { _, _ -> },
     onDeleteIgnore: (Long) -> Unit = {},
     onSetMuted: (Long, Boolean) -> Unit = { _, _ -> },
@@ -133,11 +150,13 @@ fun NetworkToolsContent(
 @Composable
 private fun IgnoreSection(
     state: NetworkToolsUiState,
-    onAddIgnore: (String) -> Unit,
+    onAddIgnore: (String, Boolean, Int) -> Unit,
     onSetIgnoreEnabled: (Long, Boolean) -> Unit,
     onDeleteIgnore: (Long) -> Unit,
 ) {
-    var pattern by remember { mutableStateOf("") }
+    var pattern by rememberSaveable(state.networkId) { mutableStateOf("") }
+    var selective by rememberSaveable(state.networkId) { mutableStateOf(false) }
+    var signals by rememberSaveable(state.networkId) { mutableStateOf(0) }
     SettingsGroup(title = stringResource(R.string.network_tools_privacy_section)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
@@ -150,12 +169,51 @@ private fun IgnoreSection(
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                 modifier = Modifier.fillMaxWidth().testTag("network_tools_ignore_input"),
             )
+            Text(
+                text = stringResource(R.string.network_tools_ignore_scope),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            ListItem(
+                modifier =
+                    Modifier
+                        .testTag("network_tools_ignore_selective")
+                        .toggleable(selective, role = Role.Switch, onValueChange = { selective = it }),
+                colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                leadingContent = { Icon(Icons.Outlined.Visibility, contentDescription = null) },
+                headlineContent = { Text(stringResource(R.string.network_tools_ignore_selective_choice)) },
+                supportingContent = {
+                    Text(
+                        stringResource(
+                            if (selective) R.string.network_tools_ignore_selective_help else R.string.network_tools_ignore_hard_help,
+                        ),
+                    )
+                },
+                trailingContent = { Switch(checked = selective, onCheckedChange = null) },
+            )
+            if (selective) {
+                for (signal in IgnoreSignal.entries) {
+                    val checked = signals and signal.bit != 0
+                    ListItem(
+                        modifier =
+                            Modifier
+                                .testTag(signal.tag)
+                                .toggleable(checked, role = Role.Checkbox) { signals = signals xor signal.bit },
+                        colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                        leadingContent = { Icon(signal.icon, contentDescription = null) },
+                        headlineContent = { Text(stringResource(signal.label)) },
+                        trailingContent = { Checkbox(checked = checked, onCheckedChange = null) },
+                    )
+                }
+            }
             Button(
                 onClick = {
-                    onAddIgnore(pattern)
+                    onAddIgnore(pattern, !selective, if (selective) signals else 0)
                     pattern = ""
+                    selective = false
+                    signals = 0
                 },
-                enabled = pattern.isNotBlank(),
+                enabled = pattern.isNotBlank() && (!selective || signals != 0),
                 modifier = Modifier.testTag("network_tools_add_ignore"),
             ) { Text(stringResource(R.string.network_tools_add_ignore)) }
         }
@@ -167,22 +225,49 @@ private fun IgnoreSection(
             )
         } else {
             state.ignores.forEach { ignore ->
+                val modeRes = if (ignore.dropMessages) R.string.network_tools_ignore_hard_mode else R.string.network_tools_ignore_selective_mode
+                val mode = stringResource(modeRes)
+                val switchLabel = stringResource(R.string.network_tools_toggle_ignore, ignore.pattern, mode)
                 ListItem(
-                    colors =
-                        androidx.compose.material3.ListItemDefaults
-                            .colors(containerColor = androidx.compose.ui.graphics.Color.Transparent),
+                    modifier = Modifier.testTag("network_tools_ignore_rule_${ignore.id}"),
+                    colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+                    leadingContent = {
+                        Icon(
+                            if (ignore.dropMessages) Icons.Outlined.Block else Icons.Outlined.Visibility,
+                            contentDescription = null,
+                        )
+                    },
                     headlineContent = { Text(ignore.pattern) },
                     supportingContent = {
-                        Text(stringResource(if (ignore.enabled) R.string.network_tools_enabled else R.string.network_tools_disabled))
+                        val summary =
+                            if (ignore.dropMessages) {
+                                mode
+                            } else {
+                                val labels =
+                                    buildList {
+                                        for (signal in IgnoreSignal.entries) {
+                                            if (ignore.suppressedSignals and signal.bit != 0) add(stringResource(signal.label))
+                                        }
+                                    }
+                                val locale = LocalConfiguration.current.locales[0]
+                                val formatter = remember(locale) { ListFormatter.getInstance(locale) }
+                                stringResource(R.string.network_tools_ignore_selective_summary, formatter.format(labels))
+                            }
+                        val status = stringResource(if (ignore.enabled) R.string.network_tools_enabled else R.string.network_tools_disabled)
+                        Text(stringResource(R.string.network_tools_ignore_rule_status, summary, status))
                     },
                     trailingContent = {
                         Row {
                             Switch(
                                 checked = ignore.enabled,
                                 onCheckedChange = { onSetIgnoreEnabled(ignore.id, it) },
+                                modifier = Modifier.semantics { contentDescription = switchLabel },
                             )
                             IconButton(onClick = { onDeleteIgnore(ignore.id) }) {
-                                Icon(Icons.Outlined.Delete, contentDescription = stringResource(R.string.action_delete))
+                                Icon(
+                                    Icons.Outlined.Delete,
+                                    contentDescription = stringResource(R.string.network_tools_delete_ignore, ignore.pattern, mode),
+                                )
                             }
                         }
                     },
@@ -191,6 +276,22 @@ private fun IgnoreSection(
             }
         }
     }
+}
+
+private enum class IgnoreSignal(
+    val bit: Int,
+    val label: Int,
+    val tag: String,
+    val icon: ImageVector,
+) {
+    Unread(SUPPRESS_UNREAD, R.string.network_tools_ignore_unread, "network_tools_ignore_unread", Icons.Outlined.MarkChatUnread),
+    Highlights(SUPPRESS_HIGHLIGHT, R.string.network_tools_ignore_highlights, "network_tools_ignore_highlights", Icons.Filled.Star),
+    Notifications(
+        SUPPRESS_NOTIFICATIONS,
+        R.string.network_tools_ignore_notifications,
+        "network_tools_ignore_notifications",
+        Icons.Outlined.NotificationsOff,
+    ),
 }
 
 @Composable

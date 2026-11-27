@@ -32,11 +32,14 @@ import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
 import io.github.trevarj.motd.data.db.alertsAsMention
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.db.suppressesNotifications
+import io.github.trevarj.motd.data.db.suppressesUnread
 import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.matchKeywordHighlight
+import io.github.trevarj.motd.data.repo.DROP_IGNORED_MESSAGE
 import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
-import io.github.trevarj.motd.data.repo.ignoredBy
+import io.github.trevarj.motd.data.repo.incomingIgnoreSignals
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DICKORD_CHANNEL_TAG
@@ -167,7 +170,7 @@ class EventProcessor
         private val activeHistoryInsertedIds =
             ConcurrentHashMap<Long, MutableSet<TimelineEventId>>()
         private val activeHistoryChatRoutes =
-            ConcurrentHashMap<Long, ArrayDeque<ChatRoute>>()
+            ConcurrentHashMap<Long, ArrayDeque<ChatRoute?>>()
         private val activeHistoryTargets = ConcurrentHashMap<Long, ActiveHistoryTarget>()
         private val activeProtocolPageCursorWrites = ConcurrentHashMap.newKeySet<Long>()
         private val commandResponsesById = ConcurrentHashMap<String, CommandResponseSession>()
@@ -256,6 +259,7 @@ class EventProcessor
             val selfAttributionAuthoritative: Boolean,
             /** soju's console, already role-scoped by the route that resolved it. */
             val bouncerConsole: Boolean = false,
+            val ignoreSignals: Int = 0,
         )
 
         private data class ActiveHistoryTarget(
@@ -263,6 +267,7 @@ class EventProcessor
             val roomId: RoomId,
             val type: BufferType,
             val normalizedName: String,
+            val ignoredPeerNicks: Set<String> = emptySet(),
         )
 
         private data class ReactionRoute(
@@ -874,28 +879,15 @@ class EventProcessor
             historyTarget: String?,
         ): Pair<RoomId, TimelineEventId>? {
             val st = stateFor(networkId)
-            val sourceSelfCandidate = e.isSelf || st.isSelfNick(e.source.nick)
-            if (!sourceSelfCandidate &&
-                !(e.kind == IrcEvent.ChatKind.NOTICE && isServerSource(e.source.nick)) &&
-                ignoredBy(networkIgnoreCache.enabledForNetwork(networkId), e.source, st.identityRules)
-            ) {
-                diagnostics.record("messages", "message_ignored_by_network_rule") {
-                    mapOf(
-                        "network_id" to networkId,
-                        "origin" to origin.name,
-                        "sender_fp" to diagnostics.fingerprint(e.source.nick),
-                    )
-                }
-                if (origin.isHistorical) activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
-                return null
-            }
+            val plannedRoutes = activeHistoryChatRoutes[networkId].takeIf { origin.isHistorical }
             val route =
-                if (origin.isHistorical) {
-                    activeHistoryChatRoutes[networkId]?.removeFirstOrNull()
-                        ?: resolveChatRoute(networkId, e, st, historyTarget, origin)
+                if (plannedRoutes != null) {
+                    plannedRoutes.removeFirstOrNull()
                 } else {
-                    resolveChatRoute(networkId, e, st, historyTarget = null, origin = origin)
+                    resolveChatRoute(networkId, e, st, historyTarget, origin)
                 }
+            route ?: return null
+            if (route.ignoreSignals == DROP_IGNORED_MESSAGE) return null
             if (route.serverNotice) {
                 insertSystem(
                     route.bufferId,
@@ -957,18 +949,19 @@ class EventProcessor
             val resolvedNotifications = notificationSettings.resolve(networkId, bufferId)
             val attention =
                 IncomingChatAttention(
+                    ignoreSignals = route.ignoreSignals.takeIf { type != BufferType.SERVER && !isServerSource(e.source.nick) },
                     classifyKeyword =
                         if (!sourceIsSelf && type != BufferType.SERVER && !isServerSource(e.source.nick)) {
                             ::classifyChatKeyword
                         } else {
                             null
                         },
-                    decideNotification = { keywordAlerts ->
+                    decideNotification = { alertsAsMention ->
                         incomingNotificationDecision(
                             type = type,
                             kind = e.kind,
                             origin = origin,
-                            hasMention = directMention || keywordAlerts,
+                            hasMention = alertsAsMention,
                             consoleNotice = !sourceIsSelf && consoleNotice,
                             mode = if (sourceIsSelf) NotificationMode.OFF else resolvedNotifications?.mode ?: NotificationMode.OFF,
                             watchActive = !sourceIsSelf && resolvedNotifications?.watch != null,
@@ -1036,7 +1029,9 @@ class EventProcessor
                         // its own; history, replay, and push revive only when they insert a genuinely new
                         // newest unread row, so backfill, gap fills, and duplicate transports retain the
                         // user's choice. Self echoes and system activity never revive.
-                        if (!sourceIsSelf && type != BufferType.SERVER && ingested.event.kind != MessageKind.REDACTED) {
+                        if (!ingested.event.isSelf && type != BufferType.SERVER &&
+                            ingested.event.kind != MessageKind.REDACTED && !ingested.event.suppressesUnread
+                        ) {
                             if (origin == EventOrigin.LIVE) {
                                 bufferDao.unarchiveIfUnmuted(ingested.event.bufferId)
                             } else if (ingested is IngestResult.Inserted) {
@@ -1072,7 +1067,7 @@ class EventProcessor
                     return if (result.redactionMerged) canonical.bufferId to canonical.id else null
                 }
                 if (origin == EventOrigin.LIVE &&
-                    !sourceIsSelf &&
+                    !canonical.isSelf && !canonical.suppressesNotifications &&
                     type != BufferType.SERVER &&
                     canonicalTimeline.claimSound(canonical.id)
                 ) {
@@ -1117,7 +1112,7 @@ class EventProcessor
                 }
                 if (result is IngestResult.Enriched &&
                     !canonical.isSelf && type == BufferType.CHANNEL &&
-                    canonical.notificationHandled && canonical.notificationEligible &&
+                    !canonical.suppressesNotifications && canonical.notificationHandled && canonical.notificationEligible &&
                     canonical.notificationEligibilityResolved && canonical.alertsAsMention
                 ) {
                     try {
@@ -1150,7 +1145,7 @@ class EventProcessor
                         }
                     }
                 }
-                if (!canonical.isSelf &&
+                if (!canonical.isSelf && !canonical.suppressesNotifications &&
                     shouldPresentIncoming(
                         IncomingNotificationDecision(
                             canonical.notificationEligible,
@@ -1185,7 +1180,7 @@ class EventProcessor
                         )
                     }
                 }
-                return if (result.mentionAlertRevoked) canonical.bufferId to canonical.id else null
+                return if (result.mentionAlertRevoked || result.notificationSuppressed) canonical.bufferId to canonical.id else null
             }
         }
 
@@ -1272,25 +1267,8 @@ class EventProcessor
 
             return db.withTransaction {
                 val historyRoomId = existingReactionRoomId(networkId, route, st, event.ctx.account)
-                if (historyTarget != null) {
-                    if (channelName != null) {
-                        if (route.type != BufferType.CHANNEL) return@withTransaction null
-                        if (channelName != st.normalize(historyTarget) &&
-                            (historyRoomId == null || bufferStore.resolveChannelRoom(networkId, channelName)?.id != historyRoomId)
-                        ) {
-                            return@withTransaction null
-                        }
-                    } else if (route.type != BufferType.QUERY || historyRoomId == null ||
-                        !matchesHistoryQueryRedaction(networkId, historyRoomId, historyTarget, event, st)
-                    ) {
-                        return@withTransaction null
-                    }
-                }
                 if (channelName == null && historyRoomId == null) return@withTransaction null
                 val canonicalExpectedRoomId = historyRoomId?.let { bufferDao.canonicalId(it) }
-                val savedMessages = db.savedMessagesDao()
-                val channelKey = canonicalExpectedRoomId?.let { savedMessages.channelKey(it) } ?: channelName
-
                 val target =
                     db.canonicalTimelineDao().eventByAlias(
                         networkId,
@@ -1300,6 +1278,22 @@ class EventProcessor
                 if (target != null && (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS)) {
                     return@withTransaction null
                 }
+                if (historyTarget != null) {
+                    if (channelName != null) {
+                        if (route.type != BufferType.CHANNEL) return@withTransaction null
+                        if (channelName != st.normalize(historyTarget) &&
+                            (historyRoomId == null || bufferStore.resolveChannelRoom(networkId, channelName)?.id != historyRoomId)
+                        ) {
+                            return@withTransaction null
+                        }
+                    } else if (route.type != BufferType.QUERY || canonicalExpectedRoomId == null ||
+                        !matchesHistoryQueryRedaction(networkId, canonicalExpectedRoomId, historyTarget, event, st, hasKnownTarget = target != null)
+                    ) {
+                        return@withTransaction null
+                    }
+                }
+                val savedMessages = db.savedMessagesDao()
+                val channelKey = canonicalExpectedRoomId?.let { savedMessages.channelKey(it) } ?: channelName
                 savedMessages.rememberRedaction(networkId, canonicalExpectedRoomId, channelKey, target?.id, event.targetMsgid)
                 savedMessages.redact(networkId, canonicalExpectedRoomId, channelKey, target?.id, event.targetMsgid)
                 if (target == null) return@withTransaction null
@@ -1324,6 +1318,7 @@ class EventProcessor
             historyTarget: String,
             event: IrcEvent.MessageRedacted,
             st: NetworkState,
+            hasKnownTarget: Boolean,
         ): Boolean {
             val account = event.ctx.account?.takeUnless { it.isEmpty() || it == "*" }
             val aliases = db.roomAliasDao()
@@ -1334,6 +1329,11 @@ class EventProcessor
             val source = st.normalize(event.source.nick)
             val peer = st.normalize(historyTarget)
             val sourceRoomId = bufferStore.resolveQueryRoom(networkId, source, account = null)?.id
+            if (account == null && (hasKnownTarget || sourceRoomId == null) &&
+                source in activeHistoryTargets[networkId]?.ignoredPeerNicks.orEmpty()
+            ) {
+                return true
+            }
             val sourceIsPeer = accountRoomId == roomId || (accountRoomId == null && (source == peer || sourceRoomId == roomId))
             val target = st.normalize(event.target)
             val targetsPeer = target == peer || bufferStore.resolveQueryRoom(networkId, target, account = null)?.id == roomId
@@ -1363,6 +1363,8 @@ class EventProcessor
                 val canonical = messageDao.byCanonicalId(eventId)
                 if (canonical == null || canonical.kind == MessageKind.REDACTED) {
                     notifier.onMessageRedacted(canonical?.bufferId ?: bufferId, canonical?.id ?: eventId)
+                } else if (canonical.suppressesNotifications) {
+                    notifier.onNotificationSuppressed(canonical.bufferId)
                 } else {
                     notifier.onMentionAlertChanged(canonical.bufferId)
                 }
@@ -1468,7 +1470,9 @@ class EventProcessor
                             origin,
                         )
                     val routedRoomIds = linkedSetOf<RoomId>()
-                    activeHistoryChatRoutes[networkId].orEmpty().forEach { route ->
+                    val chatRoutes = activeHistoryChatRoutes[networkId].orEmpty()
+                    chatRoutes.forEach { route ->
+                        route ?: return@forEach
                         if (targetRoom == null || route.type == targetRoom.type) {
                             routedRoomIds += bufferDao.canonicalId(route.bufferId) ?: route.bufferId
                         }
@@ -1479,12 +1483,20 @@ class EventProcessor
                             ?: targetRoom?.id?.let { bufferDao.canonicalId(it) ?: it }
                     contextRoomId?.let { roomId ->
                         bufferDao.observeById(roomId)?.let { room ->
+                            var ignoredPeerNicks: MutableSet<String>? = null
+                            for (route in chatRoutes) {
+                                if (route?.bufferId == room.id && route.ignoreSignals == DROP_IGNORED_MESSAGE) {
+                                    val nicks = ignoredPeerNicks ?: mutableSetOf<String>().also { ignoredPeerNicks = it }
+                                    nicks += route.bufferName
+                                }
+                            }
                             activeHistoryTargets[networkId] =
                                 ActiveHistoryTarget(
                                     target,
                                     room.id,
                                     room.type,
                                     room.name,
+                                    ignoredPeerNicks = ignoredPeerNicks.orEmpty(),
                                 )
                         }
                     }
@@ -2475,27 +2487,35 @@ class EventProcessor
             var chatRoutes =
                 chatEvents
                     .map { event ->
-                        resolveChatRoute(networkId, event, st, target, origin)
-                    }.map { route ->
-                        route.copy(bufferId = bufferDao.canonicalId(route.bufferId) ?: route.bufferId)
+                        resolveChatRoute(networkId, event, st, target, origin)?.let { route ->
+                            val canonicalRoomId = bufferDao.canonicalId(route.bufferId) ?: route.bufferId
+                            if (canonicalRoomId == route.bufferId) route else route.copy(bufferId = canonicalRoomId)
+                        }
                     }
             val strongQueryRooms =
                 chatEvents
-                    .zip(chatRoutes)
-                    .filter { (event, route) ->
-                        route.type == BufferType.QUERY && !route.sourceIsSelf &&
-                            event.ctx.account?.takeUnless { it.isEmpty() || it == "*" } != null
-                    }.mapTo(linkedSetOf()) { (_, route) -> route.bufferId }
+                    .mapIndexedNotNullTo(linkedSetOf()) { index, event ->
+                        val route = chatRoutes[index]
+                        route?.bufferId?.takeIf {
+                            route.type == BufferType.QUERY && !route.sourceIsSelf &&
+                                event.ctx.account?.takeUnless { it.isEmpty() || it == "*" } != null
+                        }
+                    }
             strongQueryRooms.singleOrNull()?.let { roomId ->
                 chatRoutes =
                     chatRoutes.map { route ->
-                        if (route.type == BufferType.QUERY) route.copy(bufferId = roomId) else route
+                        if (route?.type == BufferType.QUERY && route.bufferId != roomId && route.ignoreSignals != DROP_IGNORED_MESSAGE) {
+                            route.copy(bufferId = roomId)
+                        } else {
+                            route
+                        }
                     }
             }
             activeHistoryChatRoutes[networkId] = ArrayDeque(chatRoutes)
             val routedTargetRooms =
                 chatRoutes
                     .asSequence()
+                    .filterNotNull()
                     .filter { route -> activeHistoryTargets[networkId]?.type == route.type }
                     .mapTo(linkedSetOf()) { it.bufferId }
             routedTargetRooms.singleOrNull()?.let { roomId ->
@@ -2515,7 +2535,6 @@ class EventProcessor
                     .mapNotNull { event ->
                         historyBatchKey(
                             networkId,
-                            target,
                             event,
                             st,
                             if (event is IrcEvent.ChatMessage) routeIterator.next() else null,
@@ -2545,10 +2564,9 @@ class EventProcessor
 
         private suspend fun historyBatchKey(
             networkId: Long,
-            target: String,
             event: IrcEvent,
             st: NetworkState,
-            preflightChatRoute: ChatRoute? = null,
+            preflightChatRoute: ChatRoute?,
         ): CanonicalBatchKey? {
             suspend fun channelRoom(name: String) = ensureBuffer(networkId, name, BufferType.CHANNEL, st)
 
@@ -2561,9 +2579,8 @@ class EventProcessor
             ) = CanonicalBatchKey(roomId, kind, st.normalize(actor), text, time)
             return when (event) {
                 is IrcEvent.ChatMessage -> {
-                    val route =
-                        preflightChatRoute
-                            ?: resolveChatRoute(networkId, event, st, target, EventOrigin.HISTORY)
+                    val route = preflightChatRoute ?: return null
+                    if (route.ignoreSignals == DROP_IGNORED_MESSAGE) return null
                     key(
                         route.bufferId,
                         kindOf(event.kind),
@@ -4625,7 +4642,8 @@ class EventProcessor
             st: NetworkState,
             historyTarget: String?,
             origin: EventOrigin,
-        ): ChatRoute {
+        ): ChatRoute? {
+            val serverNotice = event.kind == IrcEvent.ChatKind.NOTICE && isServerSource(event.source.nick)
             val statusTarget = st.statusChannelTarget(event.target)
             val active =
                 historyTarget?.let { activeHistoryTargets[networkId] }?.takeIf {
@@ -4636,7 +4654,7 @@ class EventProcessor
             val type = active?.type ?: if (targetIsChannel) BufferType.CHANNEL else BufferType.QUERY
             val isDm = type == BufferType.QUERY
             // Server-sourced NOTICEs never create query rooms.
-            if (isDm && event.kind == IrcEvent.ChatKind.NOTICE && isServerSource(event.source.nick)) {
+            if (isDm && serverNotice) {
                 return ChatRoute(
                     bufferId = ensureServerBuffer(networkId, st),
                     bufferName = "*",
@@ -4695,6 +4713,35 @@ class EventProcessor
             // Only a replayed query carries a peer strong enough to overrule the wire's own self flag.
             val selfAttributionAuthoritative =
                 (origin == EventOrigin.HISTORY || origin == EventOrigin.REPLAY) && historyPeer != null
+            val ignoreSignals =
+                if (serverNotice || sourceIsSelf || (!selfAttributionAuthoritative && st.isSelfNick(event.source.nick))) {
+                    0
+                } else {
+                    incomingIgnoreSignals(networkIgnoreCache.enabledForNetwork(networkId), event.source, st.identityRules)
+                }
+            if (ignoreSignals == DROP_IGNORED_MESSAGE) {
+                diagnostics.record("messages", "message_ignored_by_network_rule") {
+                    mapOf(
+                        "network_id" to networkId,
+                        "origin" to origin.name,
+                        "sender_fp" to diagnostics.fingerprint(event.source.nick),
+                    )
+                }
+                if (!origin.isHistorical || !isDm) return null
+                val account = event.ctx.account?.takeUnless { it.isEmpty() || it == "*" } ?: return null
+                val alias = db.roomAliasDao().byValue(networkId, RoomAliasNamespace.ACCOUNT, account) ?: return null
+                val room = bufferDao.observeById(alias.roomId)?.takeIf { it.type == BufferType.QUERY } ?: return null
+                return ChatRoute(
+                    bufferId = room.id,
+                    bufferName = st.normalize(event.source.nick),
+                    type = room.type,
+                    storedText = "",
+                    serverNotice = false,
+                    sourceIsSelf = false,
+                    selfAttributionAuthoritative = selfAttributionAuthoritative,
+                    ignoreSignals = DROP_IGNORED_MESSAGE,
+                )
+            }
             // Every route, not just a DM: targeted replay resolves the console as SERVER-typed, and
             // that path used to store `sasl set-password <secret>` echoes verbatim.
             if (networkDao.isBouncerConsole(networkId, bufferName)) {
@@ -4731,6 +4778,7 @@ class EventProcessor
                     serverNotice = false,
                     sourceIsSelf = sourceIsSelf,
                     selfAttributionAuthoritative = selfAttributionAuthoritative,
+                    ignoreSignals = ignoreSignals,
                 )
             }
             val normalizedName = active?.normalizedName ?: st.normalize(bufferName)
@@ -4767,6 +4815,7 @@ class EventProcessor
                 serverNotice = false,
                 sourceIsSelf = sourceIsSelf,
                 selfAttributionAuthoritative = selfAttributionAuthoritative,
+                ignoreSignals = ignoreSignals,
             )
         }
 
@@ -5161,6 +5210,8 @@ interface MessageNotifier {
 
     /** Reconcile the surviving mentions lane after a committed canonical classification change. */
     suspend fun onMentionAlertChanged(bufferId: RoomId) = Unit
+
+    suspend fun onNotificationSuppressed(bufferId: RoomId) = Unit
 
     suspend fun onMessageRedacted(
         bufferId: Long,

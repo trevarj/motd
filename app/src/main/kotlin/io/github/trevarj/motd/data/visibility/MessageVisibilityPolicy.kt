@@ -4,6 +4,7 @@ import androidx.sqlite.db.SimpleSQLiteQuery
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.suppressesUnread
 import io.github.trevarj.motd.data.prefs.DEFAULT_CUSTOM_PRESENCE_KINDS
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
@@ -14,6 +15,7 @@ import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_COMMON_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.SMART_PRESENCE_WINDOW_MS
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.merge
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
@@ -181,7 +183,7 @@ class MessageVisibilityPolicy(
             message.kind in CONVERSATION_KINDS ||
                 (message.kind == MessageKind.DCC_TRANSFER && message.eventPayload != null)
         ) &&
-            !message.isSelf && foolPreferences(message)?.visibility != FoolsMode.HIDE
+            !message.isSelf && !message.suppressesUnread && foolPreferences(message)?.visibility != FoolsMode.HIDE
 
     /** Hidden results stay excluded even during a temporary timeline reveal. */
     fun search(message: MessageEntity): Boolean =
@@ -255,6 +257,7 @@ internal class MessageVisibilitySql(
                 "OR (${column(alias, "kind")} = '${MessageKind.DCC_TRANSFER.name}' " +
                 "AND ${column(alias, "eventPayload")} IS NOT NULL))",
             "${column(alias, "isSelf")} = 0",
+            "(COALESCE(${column(alias, "suppressedSignals")}, 0) & $SUPPRESS_UNREAD) = 0",
             notHidden(alias),
         )
 

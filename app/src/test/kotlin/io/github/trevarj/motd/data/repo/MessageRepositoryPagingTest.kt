@@ -677,6 +677,10 @@ class MessageRepositoryPagingTest {
                     )
                 db.messageDao().insertAll(
                     listOf(
+                        message(roomId, "quiet at tie", serverTime = 11, dedupKey = "quiet-tie")
+                            .copy(timelineOrder = -1, suppressedSignals = SUPPRESS_UNREAD),
+                        message(roomId, "quiet preview", serverTime = 19, dedupKey = "quiet-preview")
+                            .copy(suppressedSignals = SUPPRESS_UNREAD, hasMention = true, directMention = true),
                         message(roomId, "own", serverTime = 14, dedupKey = "own", isSelf = true),
                         message(roomId, "join", serverTime = 15, dedupKey = "join", kind = MessageKind.JOIN),
                         message(roomId, "offer record", serverTime = 17, dedupKey = "record", kind = MessageKind.DCC_TRANSFER),
@@ -722,6 +726,18 @@ class MessageRepositoryPagingTest {
             val neverReadWalk = unreadAnchorWalk(neverReadId, TimelineAnchor(0, 0, Long.MIN_VALUE))
             assertEquals(neverReadCounted, neverReadWalk)
             assertEquals(neverReadWalk.size, cue.getValue(neverReadId).unreadCount)
+
+            val filteredSpec = spec.copy(showRedactedMessages = false)
+            val rooms = listOf(Triple(readId, readMarker, readWalk), Triple(neverReadId, TimelineAnchor(0, 0, Long.MIN_VALUE), neverReadWalk))
+            for ((roomId, marker, expected) in rooms) {
+                val filtered = checkNotNull(reader.chatListRow(roomId, filteredSpec))
+                assertEquals(expected.size, filtered.unreadCount)
+                assertEquals(expected.size, reader.countVisibleUnreadInTimelinePrefix(roomId, 100, marker, 100, filteredSpec))
+                for (row in listOf(cue.getValue(roomId), filtered)) {
+                    assertEquals("quiet preview", row.lastMessageText)
+                    assertEquals(1, row.mentionCount)
+                }
+            }
         }
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)

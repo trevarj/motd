@@ -11,6 +11,9 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
+import io.github.trevarj.motd.data.repo.SUPPRESS_NOTIFICATIONS
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 
 enum class NetworkRole { DIRECT, BOUNCER_ROOT, BOUNCER_CHILD }
@@ -191,7 +194,7 @@ val NetworkIdentityEntity.identityRules: IrcIdentityRules
 @Entity(
     tableName = "network_ignores",
     indices = [
-        Index(value = ["networkId", "pattern"], unique = true),
+        Index(value = ["networkId", "pattern", "dropMessages"], unique = true),
     ],
     foreignKeys = [
         ForeignKey(
@@ -208,6 +211,8 @@ data class NetworkIgnoreEntity(
     val pattern: String,
     val enabled: Boolean = true,
     val createdAt: Long,
+    @ColumnInfo(defaultValue = "1") val dropMessages: Boolean = true,
+    @ColumnInfo(defaultValue = "0") val suppressedSignals: Int = 0,
 )
 
 @Entity(
@@ -495,7 +500,7 @@ data class TimelineEventEntity(
         } else {
             TimeProvenance.LOCAL_CLOCK
         },
-    /** Policy captured at ingestion; only the first LIVE/PUSH observation resolves it permanently. */
+    /** Settings policy captured at ingestion; [suppressedSignals] is an independent delivery gate. */
     @ColumnInfo(defaultValue = "0") val notificationEligible: Boolean = false,
     @ColumnInfo(defaultValue = "0") val notificationEligibilityResolved: Boolean = false,
     /** Qualified under a watch at ingestion; recovery must not consult the current watch. */
@@ -514,6 +519,8 @@ data class TimelineEventEntity(
     /** Promotion captured at notification time, conditional on the canonical keyword alert surviving a merge. */
     @ColumnInfo(defaultValue = "0") val notificationEligibilityFromKeyword: Boolean = false,
     @ColumnInfo(defaultValue = "0") val notificationWatchFromKeyword: Boolean = false,
+    val suppressedSignals: Int? = null,
+    val suppressionClassifiedAtOrder: Long? = null,
 )
 
 /** Compatibility name retained while presentation callers migrate to canonical event ids. */
@@ -521,6 +528,15 @@ typealias MessageEntity = TimelineEventEntity
 
 internal val TimelineEventEntity.alertsAsMention: Boolean
     get() = directMention || keywordMatch == KeywordMatch.ALERT
+
+internal val TimelineEventEntity.suppressesUnread: Boolean
+    get() = (suppressedSignals ?: 0) and SUPPRESS_UNREAD != 0
+
+internal val TimelineEventEntity.suppressesHighlight: Boolean
+    get() = (suppressedSignals ?: 0) and SUPPRESS_HIGHLIGHT != 0
+
+internal val TimelineEventEntity.suppressesNotifications: Boolean
+    get() = (suppressedSignals ?: 0) and SUPPRESS_NOTIFICATIONS != 0
 
 @Entity(
     tableName = "dcc_transfers",

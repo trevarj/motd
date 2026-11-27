@@ -33,6 +33,7 @@ import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.isSchedulableMessage
+import io.github.trevarj.motd.data.db.suppressesUnread
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
@@ -417,6 +418,7 @@ internal suspend fun resolveCurrentReadTarget(
     db: MotdDatabase,
     bufferId: Long,
     requested: TimelineAnchor,
+    fromViewport: Boolean = false,
 ): CurrentReadTarget? {
     if (requested.serverTime <= 0 || requested.eventId <= 0) return null
     val buffer = db.bufferDao().observeById(bufferId) ?: return null
@@ -425,7 +427,13 @@ internal suspend fun resolveCurrentReadTarget(
     val event = db.messageDao().byId(canonicalEventId) ?: return null
     val eventRoomId = db.bufferDao().canonicalId(event.bufferId) ?: return null
     if (eventRoomId != buffer.id || event.serverTime <= 0) return null
-    val current = TimelineAnchor(event.serverTime, event.id, event.timelineOrder)
+    val clampViewport = fromViewport && event.suppressesUnread
+    val current =
+        if (clampViewport) {
+            db.messageDao().viewportReadAnchorAtOrBefore(buffer.id, event.serverTime, event.timelineOrder, event.id) ?: return null
+        } else {
+            TimelineAnchor(event.serverTime, event.id, event.timelineOrder)
+        }
     val stored =
         buffer.localReadAnchorTime?.let {
             val storedId = buffer.localReadAnchorEventId ?: 0L
@@ -433,6 +441,7 @@ internal suspend fun resolveCurrentReadTarget(
             TimelineAnchor(it, storedId, storedOrder)
         }
     if (stored != null && current < stored) return null
+    if (clampViewport && (current == stored || current.serverTime <= (buffer.localUnreadFloorTime ?: Long.MIN_VALUE))) return null
     return CurrentReadTarget(
         buffer = buffer,
         anchor = current,
@@ -449,9 +458,10 @@ internal suspend fun resolveAndAdvanceCurrentReadTarget(
     db: MotdDatabase,
     bufferId: Long,
     requested: TimelineAnchor,
+    fromViewport: Boolean = false,
 ): CurrentReadTarget? =
     db.withTransaction {
-        val target = resolveCurrentReadTarget(db, bufferId, requested) ?: return@withTransaction null
+        val target = resolveCurrentReadTarget(db, bufferId, requested, fromViewport) ?: return@withTransaction null
         db.bufferDao().advanceLocalReadAnchor(
             target.buffer.id,
             target.anchor.serverTime,
@@ -3626,7 +3636,22 @@ class ConnectionManagerImpl
             bufferId: Long,
             anchor: TimelineAnchor,
         ) {
-            val target = resolveAndAdvanceCurrentReadTarget(db, bufferId, anchor) ?: return
+            markRead(bufferId, anchor, fromViewport = false)
+        }
+
+        override suspend fun markReadFromViewport(
+            bufferId: Long,
+            anchor: TimelineAnchor,
+        ) {
+            markRead(bufferId, anchor, fromViewport = true)
+        }
+
+        private suspend fun markRead(
+            bufferId: Long,
+            anchor: TimelineAnchor,
+            fromViewport: Boolean,
+        ) {
+            val target = resolveAndAdvanceCurrentReadTarget(db, bufferId, anchor, fromViewport) ?: return
             val buffer = target.buffer
             val canonicalBufferId = buffer.id
             messageNotifier.onRead(canonicalBufferId, target.anchor)

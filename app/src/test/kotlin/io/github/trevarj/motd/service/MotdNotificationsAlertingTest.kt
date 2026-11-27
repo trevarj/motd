@@ -28,18 +28,27 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.alertsAsMention
+import io.github.trevarj.motd.data.db.suppressesHighlight
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
 import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
+import io.github.trevarj.motd.data.repo.SUPPRESS_NOTIFICATIONS
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.data.sync.CanonicalTimelineStore
+import io.github.trevarj.motd.data.sync.ChatSoundPlayer
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
+import io.github.trevarj.motd.data.visibility.ActivityFilter
+import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
@@ -1134,6 +1143,126 @@ class MotdNotificationsAlertingTest {
                 chat("alert-peer", "me: interrupted mention", "watch-mention", 4_000).copy(target = "#chan"),
             )
             assertEquals(0, postedNotifications().size)
+        }
+
+    @Test
+    fun selectiveHighlightsAndNotificationSuppressionStayIndependentAcrossLivePushAndRecovery() =
+        runTest {
+            val channelId = mutedChannel()
+            val watch = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
+            watch.startWatch(channelId, null)
+            for ((nick, flags) in listOf("quiet" to SUPPRESS_NOTIFICATIONS, "plain" to SUPPRESS_HIGHLIGHT)) {
+                db.networkIgnoreDao().upsert(
+                    NetworkIgnoreEntity(
+                        networkId = networkId,
+                        pattern = "$nick!*@*",
+                        createdAt = 1,
+                        dropMessages = false,
+                        suppressedSignals = flags,
+                    ),
+                )
+            }
+            val settings =
+                object : SettingsRepository by repo {
+                    override val keywordHighlightRules = flowOf(listOf(KeywordHighlightRule("project", alerts = true)))
+                }
+            val audible = mutableListOf<String>()
+            val sounds =
+                object : ChatSoundPlayer by ChatSoundPlayer.Noop {
+                    override suspend fun onCanonicalIncoming(
+                        bufferId: Long,
+                        type: BufferType,
+                        message: IrcEvent.ChatMessage,
+                        canonical: MessageEntity,
+                    ) {
+                        audible += canonical.sender
+                    }
+                }
+            val live =
+                EventProcessor(
+                    db,
+                    TypingTrackerImpl(),
+                    notifications,
+                    chatSoundPlayer = sounds,
+                    notificationSettings = watch,
+                    settingsRepository = settings,
+                )
+            live.onRegistered(networkId, "me", emptyMap())
+            val quietLive = chat("quiet", "me: project without alert", "quiet-live").copy(target = "#chan")
+            live.process(networkId, quietLive)
+            live.processPush(networkId, chat("quiet", "me: silent push", "quiet-push", 2_000).copy(target = "#chan"))
+            assertTrue(postedNotifications().isEmpty())
+            assertTrue(audible.isEmpty())
+
+            val plainLive = chat("plain", "me: project without highlight", "plain-live", 3_000).copy(target = "#chan")
+            live.process(networkId, plainLive)
+            assertEquals(listOf("plain"), audible)
+            assertEquals(listOf(plainLive.text), bodies(lane("channel_mentions")))
+
+            val quietRow = requireNotNull(db.messageDao().byMsgid(channelId, "quiet-live"))
+            val plainRow = requireNotNull(db.messageDao().byMsgid(channelId, "plain-live"))
+            assertTrue(quietRow.hasMention)
+            assertEquals("me", quietRow.highlightNick)
+            assertFalse(plainRow.hasMention)
+            assertTrue(plainRow.suppressesHighlight)
+            assertEquals("me", plainRow.highlightNick)
+            assertEquals("rfc1459", plainRow.highlightCaseMapping)
+            assertTrue(plainRow.directMention && plainRow.alertsAsMention)
+            assertEquals(KeywordMatch.ALERT, plainRow.keywordMatch)
+            for (filter in ActivityFilter.entries) {
+                val activity = db.messageDao().globalFeedPage(globalFeedPagingQuery(MessageVisibilitySpec(), activityFilter = filter))
+                assertTrue(activity.any { it.message.id == quietRow.id })
+                assertTrue(activity.none { it.message.id == plainRow.id })
+            }
+
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = watch, settingsRepository = settings)
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            val plainPush = chat("plain", "me: recovered project", "plain-push", 4_000).copy(target = "#chan")
+            interrupted.processPush(networkId, plainPush)
+            watch.stopWatch(channelId)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications.recoverCanonicalNotifications()
+            val recovered = lane("channel_mentions")
+            assertSilent(recovered)
+            assertEquals(listOf(plainLive.text, plainPush.text), bodies(recovered))
+        }
+
+    @Test
+    fun coalescenceRetiresOnlyTheSuppressedBodyFromTheOrdinaryCard() =
+        runTest {
+            val winnerId = channel()
+            val loserId = channel("#older")
+            val ruleId =
+                db.networkIgnoreDao().upsert(
+                    NetworkIgnoreEntity(
+                        networkId = networkId,
+                        pattern = "peer!*@*",
+                        createdAt = 1,
+                        dropMessages = false,
+                        suppressedSignals = SUPPRESS_NOTIFICATIONS,
+                    ),
+                )
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = allSettings())
+            val history = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop)
+            live.onRegistered(networkId, "me", emptyMap())
+            history.onRegistered(networkId, "me", emptyMap())
+            val copy = chat("peer", "late duplicate", serverTime = 2_000).copy(target = "#chan")
+            val tagged = copy.copy(ctx = copy.ctx.copy(serverTimeSource = ServerTimeSource.TAG))
+            history.process(networkId, IrcEvent.HistoryBatch("#older", listOf(tagged.copy(target = "#older"))))
+            db.networkIgnoreDao().setEnabled(ruleId, false)
+            live.process(networkId, chat("other", "keep ordinary", "keep", 1_000).copy(target = "#chan"))
+            live.process(networkId, tagged)
+            live.process(networkId, chat("other", "me: keep the other lane", "keep-mention", 3_000).copy(target = "#chan"))
+            assertEquals(listOf("keep ordinary", "late duplicate"), bodies(lane(null)))
+            val mentionCard = lane("channel_mentions")
+
+            BufferStore(db, notifier = notifications).mergeRooms(winnerId, loserId)
+
+            assertEquals(listOf("keep ordinary"), bodies(lane(null)))
+            assertSilent(lane(null))
+            assertSame(mentionCard, lane("channel_mentions"))
+            val merged = db.canonicalTimelineDao().eventsForRoom(winnerId).single { it.text == "late duplicate" }
+            assertEquals(SUPPRESS_NOTIFICATIONS, merged.suppressedSignals)
         }
 
     @Test

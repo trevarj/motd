@@ -15,7 +15,10 @@ import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.alertsAsMention
+import io.github.trevarj.motd.data.db.suppressesHighlight
+import io.github.trevarj.motd.data.db.suppressesNotifications
 import io.github.trevarj.motd.data.prefs.KeywordMatch
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -47,6 +50,7 @@ data class TimelineObservation(
 
 internal data class IncomingChatAttention(
     val classifyKeyword: (suspend (String) -> KeywordMatch?)?,
+    val ignoreSignals: Int? = null,
     val decideNotification: (Boolean) -> IncomingNotificationDecision,
 )
 
@@ -54,22 +58,26 @@ sealed interface IngestResult {
     val event: TimelineEventEntity
     val redactionMerged: Boolean get() = false
     val mentionAlertRevoked: Boolean get() = false
+    val notificationSuppressed: Boolean get() = false
 
     data class Inserted(
         override val event: TimelineEventEntity,
         override val mentionAlertRevoked: Boolean = false,
+        override val notificationSuppressed: Boolean = false,
     ) : IngestResult
 
     data class Merged(
         override val event: TimelineEventEntity,
         override val redactionMerged: Boolean = false,
         override val mentionAlertRevoked: Boolean = false,
+        override val notificationSuppressed: Boolean = false,
     ) : IngestResult
 
     data class Enriched(
         override val event: TimelineEventEntity,
         override val redactionMerged: Boolean = false,
         override val mentionAlertRevoked: Boolean = false,
+        override val notificationSuppressed: Boolean = false,
     ) : IngestResult
 
     data class Ignored(
@@ -555,6 +563,7 @@ class CanonicalTimelineStore
             var canonical = initial
             var redactionMerged = false
             var mentionAlertRevoked = false
+            var notificationSuppressed = false
             for ((namespace, value) in aliases) {
                 val existingAlias = dao.aliasByValue(observation.networkId, namespace, value)
                 if (existingAlias != null && existingAlias.timelineEventId != canonical.id) {
@@ -563,6 +572,8 @@ class CanonicalTimelineStore
                     val merged = coalesce(observation.networkId, canonical, other, incoming) ?: continue
                     redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
                     mentionAlertRevoked = mentionAlertRevoked || merged.revokesMentionAlertFrom(canonical) || merged.revokesMentionAlertFrom(other)
+                    notificationSuppressed =
+                        notificationSuppressed || merged.suppressesAlertFrom(canonical) || merged.suppressesAlertFrom(other)
                     canonical = merged
                 } else if (existingAlias == null) {
                     dao.insertAliasIgnore(
@@ -581,6 +592,8 @@ class CanonicalTimelineStore
                     redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
                     mentionAlertRevoked =
                         mentionAlertRevoked || merged.revokesMentionAlertFrom(canonical) || merged.revokesMentionAlertFrom(provisionalCandidate)
+                    notificationSuppressed =
+                        notificationSuppressed || merged.suppressesAlertFrom(canonical) || merged.suppressesAlertFrom(provisionalCandidate)
                     canonical = merged
                 }
             }
@@ -615,11 +628,14 @@ class CanonicalTimelineStore
                 }
             if (updated != canonical) {
                 if (canonical.kind != MessageKind.REDACTED && updated.kind == MessageKind.REDACTED) redactionMerged = true
+                notificationSuppressed = notificationSuppressed || updated.suppressesAlertFrom(canonical)
                 dao.updateEvent(updated)
                 if (updated.msgid != canonical.msgid || updated.kind != canonical.kind) {
                     db.savedMessagesDao().reconcileEvent(observation.networkId, updated)
                 }
-                db.bufferDao().retimeLocalReadAnchor(updated.id, updated.serverTime)
+                if (updated.serverTime != canonical.serverTime) {
+                    db.bufferDao().retimeLocalReadAnchor(updated.id, updated.serverTime)
+                }
                 db.historyGapDao().repointEventBoundary(
                     updated.id,
                     updated.id,
@@ -645,8 +661,9 @@ class CanonicalTimelineStore
                     observedAt = observedAt,
                 ),
                 keepForClassification =
-                    (inserted && initial.keywordMatch != null) ||
-                        (redactionChecked.keywordMatch == null && updated.keywordMatch != null),
+                    (inserted && (initial.keywordClassifiedAtOrder != null || initial.suppressionClassifiedAtOrder != null)) ||
+                        (redactionChecked.keywordMatch == null && updated.keywordMatch != null) ||
+                        (redactionChecked.suppressedSignals == null && updated.suppressedSignals != null),
             )
 
             if (observation.persistHistoryCursor) updateHistoryCursor(observation, canonical)
@@ -674,11 +691,15 @@ class CanonicalTimelineStore
             }
 
             return when {
-                inserted -> IngestResult.Inserted(canonical, mentionAlertRevoked)
-                canonical != initial -> IngestResult.Enriched(canonical, redactionMerged, mentionAlertRevoked)
-                else -> IngestResult.Merged(canonical, redactionMerged, mentionAlertRevoked)
+                inserted -> IngestResult.Inserted(canonical, mentionAlertRevoked, notificationSuppressed)
+                canonical != initial -> IngestResult.Enriched(canonical, redactionMerged, mentionAlertRevoked, notificationSuppressed)
+                else -> IngestResult.Merged(canonical, redactionMerged, mentionAlertRevoked, notificationSuppressed)
             }
         }
+
+        private fun TimelineEventEntity.suppressesAlertFrom(previous: TimelineEventEntity): Boolean =
+            suppressesNotifications && !previous.suppressesNotifications &&
+                (previous.notificationEligible || previous.notificationHandled || previous.notificationClaimed)
 
         private fun TimelineEventEntity.revokesMentionAlertFrom(previous: TimelineEventEntity): Boolean =
             previous.alertsAsMention &&
@@ -694,18 +715,20 @@ class CanonicalTimelineStore
         ): TimelineEventEntity {
             if (attention == null || kind !in CHAT_MESSAGE_KINDS) return this
             val classify = attention.classifyKeyword
+            val match = if (keywordMatch == null && !isSelf) classify?.invoke(text) else null
+            val signals = attention.ignoreSignals?.takeIf { !isSelf && suppressedSignals == null }
             val classified =
-                if (keywordMatch == null && !isSelf && classify != null) {
-                    val match = classify(text)
-                    if (match == null) {
-                        this
-                    } else {
-                        copy(
-                            hasMention = directMention || match != KeywordMatch.NONE,
-                            keywordMatch = match,
-                            keywordClassifiedAtOrder = dao.nextObservationId(),
-                        )
-                    }
+                if (match != null || signals != null) {
+                    val order = dao.nextObservationId()
+                    val keyword = match ?: keywordMatch
+                    val suppressHighlight = ((signals ?: suppressedSignals ?: 0) and SUPPRESS_HIGHLIGHT) != 0
+                    copy(
+                        suppressedSignals = signals ?: suppressedSignals,
+                        suppressionClassifiedAtOrder = if (signals != null) order else suppressionClassifiedAtOrder,
+                        hasMention = !suppressHighlight && (directMention || (keyword != null && keyword != KeywordMatch.NONE)),
+                        keywordMatch = keyword,
+                        keywordClassifiedAtOrder = if (match != null) order else keywordClassifiedAtOrder,
+                    )
                 } else {
                     this
                 }
@@ -718,7 +741,7 @@ class CanonicalTimelineStore
                 )
             }
 
-            val baseline = attention.decideNotification(false)
+            val baseline = attention.decideNotification(classified.directMention)
             if (!baseline.eligibilityResolved && !captureUnresolved) return classified
             // Capture the alternate decision even on NONE/SILENT: an earlier separately
             // classified row (or a later successful read) can supply the canonical ALERT.
@@ -728,7 +751,7 @@ class CanonicalTimelineStore
             return classified.copy(
                 notificationEligible = !classified.isSelf && (baseline.eligible || (alert && keywordEligibility)),
                 notificationEligibilityResolved = baseline.eligibilityResolved,
-                notificationWatched = baseline.bypassesMute || (alert && keywordWatch),
+                notificationWatched = !classified.isSelf && (baseline.bypassesMute || (alert && keywordWatch)),
                 notificationEligibilityFromKeyword = keywordEligibility,
                 notificationWatchFromKeyword = keywordWatch,
             )
@@ -992,6 +1015,18 @@ class CanonicalTimelineStore
                     else -> incoming
                 }
             val keywordMatch = keywordSource?.keywordMatch
+            val suppression =
+                when {
+                    existing.suppressedSignals == null -> incoming
+
+                    incoming.suppressedSignals == null -> existing
+
+                    (existing.suppressionClassifiedAtOrder ?: Long.MIN_VALUE) <=
+                        (incoming.suppressionClassifiedAtOrder ?: Long.MIN_VALUE) -> existing
+
+                    else -> incoming
+                }
+            val suppressHighlight = suppression.suppressesHighlight
             return existing.copy(
                 bufferId = existing.bufferId,
                 msgid = existing.msgid ?: incoming.msgid,
@@ -1026,7 +1061,7 @@ class CanonicalTimelineStore
                         existing.isSelf || incoming.isSelf
                     },
                 isBot = existing.isBot || incoming.isBot,
-                hasMention = directMention || (keywordMatch != null && keywordMatch != KeywordMatch.NONE),
+                hasMention = !suppressHighlight && (directMention || (keywordMatch != null && keywordMatch != KeywordMatch.NONE)),
                 directMention = directMention,
                 keywordMatch = keywordMatch,
                 keywordClassifiedAtOrder = keywordSource?.keywordClassifiedAtOrder,
@@ -1057,6 +1092,8 @@ class CanonicalTimelineStore
                 notificationClaimed = existing.notificationClaimed || incoming.notificationClaimed,
                 notificationClaimOwner = existing.notificationClaimOwner ?: incoming.notificationClaimOwner,
                 soundHandled = existing.soundHandled || incoming.soundHandled,
+                suppressedSignals = suppression.suppressedSignals,
+                suppressionClassifiedAtOrder = suppression.suppressionClassifiedAtOrder,
             )
         }
 

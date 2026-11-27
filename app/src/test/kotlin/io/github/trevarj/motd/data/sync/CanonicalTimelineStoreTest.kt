@@ -15,6 +15,8 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.prefs.KeywordMatch
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
+import io.github.trevarj.motd.data.repo.SUPPRESS_NOTIFICATIONS
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -685,6 +687,56 @@ class CanonicalTimelineStoreTest {
                     if (allowsAll) listOf(winner.id) else emptyList(),
                     setup
                         .db
+                        .canonicalTimelineDao()
+                        .pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
+                        .map { it.id },
+                )
+                setup.db.close()
+            }
+        }
+
+    @Test
+    fun coalescenceKeepsFirstSuppressionSnapshotRatherThanLowestRowId() =
+        runTest {
+            val suppressed = SUPPRESS_HIGHLIGHT or SUPPRESS_NOTIFICATIONS
+            for (firstFlags in listOf(0, suppressed)) {
+                val setup = openSetup("canonical-suppression-merge-$firstFlags.db")
+                val otherRoom = setup.db.bufferDao().insert(room(setup.networkId, "#other"))
+                val raw =
+                    ObservationSpec(ObservationOrigin.HISTORY, null, 80_000, TimeProvenance.SERVER_TAG)
+                        .observation(setup.networkId, setup.roomId)
+                val winner = setup.store.ingest(raw).event
+                val first =
+                    setup.store
+                        .ingestChat(
+                            raw.copy(event = raw.event.copy(bufferId = otherRoom, directMention = true)),
+                            IncomingChatAttention({ KeywordMatch.ALERT }, firstFlags) { IncomingNotificationDecision(false, false, false) },
+                        ).event
+                val later =
+                    setup.store
+                        .ingestChat(
+                            raw.copy(
+                                origin = ObservationOrigin.LIVE,
+                                event = raw.event.copy(directMention = true, highlightNick = "me", highlightCaseMapping = "rfc1459"),
+                            ),
+                            IncomingChatAttention({ KeywordMatch.ALERT }, firstFlags xor suppressed) { IncomingNotificationDecision(true, true, true) },
+                        ).event
+                assertEquals(winner.id, later.id)
+                setup.store.moveEventsToRoom(setup.networkId, otherRoom, setup.roomId)
+
+                val stored = rows(setup.db, setup.roomId).single()
+                assertEquals(winner.id, stored.id)
+                assertEquals(firstFlags, stored.suppressedSignals)
+                assertEquals(first.suppressionClassifiedAtOrder, stored.suppressionClassifiedAtOrder)
+                assertEquals(firstFlags == 0, stored.hasMention)
+                assertEquals("me", stored.highlightNick)
+                assertEquals("rfc1459", stored.highlightCaseMapping)
+                assertNull(stored.redacted().highlightNick)
+                assertEquals(true, stored.directMention)
+                assertEquals(KeywordMatch.ALERT, stored.keywordMatch)
+                assertEquals(
+                    if (firstFlags == 0) listOf(winner.id) else emptyList(),
+                    setup.db
                         .canonicalTimelineDao()
                         .pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
                         .map { it.id },

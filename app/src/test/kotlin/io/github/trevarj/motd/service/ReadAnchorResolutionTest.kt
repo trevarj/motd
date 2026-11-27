@@ -7,6 +7,7 @@ import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -61,6 +62,49 @@ class ReadAnchorResolutionTest {
             assertEquals(TimelineAnchor(700, winnerId), resolveLatestNotificationAnchor(db, roomId, listOf(loserId)))
             assertEquals(700L, resolved?.authoritative?.timestamp)
             assertEquals(winnerId, resolved?.authoritative?.eventId)
+        }
+
+    @Test
+    fun viewportDoesNotChooseAnUnreadSuppressedLocalOrWireAnchor() =
+        runTest {
+            val (ordinaryId, tiedQuietId, laterQuietId, localId) =
+                db.messageDao().insertAll(
+                    listOf(
+                        message(roomId, "ordinary", serverTime = 500, dedupKey = "ordinary").copy(timelineOrder = 1),
+                        message(roomId, "quiet at tie", serverTime = 500, dedupKey = "tied").copy(
+                            timelineOrder = 2,
+                            suppressedSignals = SUPPRESS_UNREAD,
+                        ),
+                        message(roomId, "quiet later", serverTime = 700, dedupKey = "later").copy(suppressedSignals = SUPPRESS_UNREAD),
+                        message(roomId, "local", serverTime = 800, dedupKey = "local").copy(serverTimeAuthoritative = false),
+                    ),
+                )
+            val clamped = resolveCurrentReadTarget(db, roomId, TimelineAnchor(500, tiedQuietId), fromViewport = true)
+            assertEquals(TimelineAnchor(500, ordinaryId, 1), clamped?.anchor)
+            assertEquals(ordinaryId, clamped?.authoritative?.eventId)
+
+            db.bufferDao().seedHistoryUnreadFloor(roomId, 500)
+            assertNull(resolveAndAdvanceCurrentReadTarget(db, roomId, TimelineAnchor(500, tiedQuietId), fromViewport = true))
+            assertNull(db.bufferDao().observeById(roomId)?.localReadAnchorEventId)
+            val baseline = resolveAndAdvanceCurrentReadTarget(db, roomId, TimelineAnchor(500, ordinaryId), fromViewport = true)
+            assertEquals(TimelineAnchor(500, ordinaryId, 1), baseline?.anchor)
+            assertEquals(ordinaryId, baseline?.authoritative?.eventId)
+            assertNull(resolveAndAdvanceCurrentReadTarget(db, roomId, TimelineAnchor(500, tiedQuietId), fromViewport = true))
+            assertNull(resolveAndAdvanceCurrentReadTarget(db, roomId, TimelineAnchor(700, laterQuietId), fromViewport = true))
+            assertEquals(ordinaryId, db.bufferDao().observeById(roomId)?.localReadAnchorEventId)
+            assertEquals(500L, db.bufferDao().observeById(roomId)?.localUnreadFloorTime)
+            val acknowledged = db.bufferDao().storedReadMarkers(networkId).single()
+            assertEquals(ordinaryId, acknowledged.eventId)
+
+            val manual = resolveCurrentReadTarget(db, roomId, TimelineAnchor(700, laterQuietId))
+            assertEquals(laterQuietId, manual?.anchor?.eventId)
+            assertEquals(laterQuietId, manual?.authoritative?.eventId)
+            val fromLocal = resolveAndAdvanceCurrentReadTarget(db, roomId, TimelineAnchor(800, localId), fromViewport = true)
+            assertEquals(localId, fromLocal?.anchor?.eventId)
+            assertEquals(laterQuietId, fromLocal?.authoritative?.eventId)
+            assertEquals(localId, db.bufferDao().observeById(roomId)?.localReadAnchorEventId)
+            val throughLaterRead = db.bufferDao().storedReadMarkers(networkId).single()
+            assertEquals(laterQuietId, throughLaterRead.eventId)
         }
 
     @Test

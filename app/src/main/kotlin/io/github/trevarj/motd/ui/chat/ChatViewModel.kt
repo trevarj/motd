@@ -2447,7 +2447,7 @@ class ChatViewModel
             // The reader has seen these rows: leaving the chat must not cancel the write while it waits
             // for the database writer, which a history sync can hold for seconds.
             viewModelScope.launch(start = CoroutineStart.UNDISPATCHED) {
-                withContext(NonCancellable) { connectionManager.markRead(roomId, anchor) }
+                withContext(NonCancellable) { connectionManager.markReadFromViewport(roomId, anchor) }
             }
         }
 

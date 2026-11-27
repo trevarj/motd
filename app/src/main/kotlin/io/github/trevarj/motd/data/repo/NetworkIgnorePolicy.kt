@@ -4,6 +4,12 @@ import io.github.trevarj.motd.data.db.NetworkIgnoreEntity
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import io.github.trevarj.motd.irc.proto.Prefix
 
+internal const val DROP_IGNORED_MESSAGE = -1
+internal const val SUPPRESS_UNREAD = 1
+internal const val SUPPRESS_HIGHLIGHT = 2
+internal const val SUPPRESS_NOTIFICATIONS = 4
+internal const val ALL_IGNORE_SIGNALS = SUPPRESS_UNREAD or SUPPRESS_HIGHLIGHT or SUPPRESS_NOTIFICATIONS
+
 data class IgnoreMask(
     val nick: String,
     val user: String,
@@ -82,29 +88,42 @@ internal fun NetworkIgnoreEntity.matchesExactIgnoreNick(
     normalizedNick: String,
     rules: IrcIdentityRules,
 ): Boolean {
+    if (!dropMessages) return false
     val mask = parseIgnoreMask(pattern) ?: return false
     return mask.user == "*" && mask.host == "*" && mask.nick.none { it == '*' || it == '?' } &&
         rules.normalize(mask.nick) == normalizedNick
 }
 
-fun ignoredBy(
+internal fun incomingIgnoreSignals(
     ignores: List<NetworkIgnoreEntity>,
     source: Prefix,
     identityRules: IrcIdentityRules,
-): Boolean =
-    ignores.any { ignore ->
-        ignore.enabled && parseIgnoreMask(ignore.pattern)?.matches(source, identityRules) == true
+): Int {
+    var suppressed = 0
+    var sourceNick: String? = null
+    var sourceUser: String? = null
+    var sourceHost: String? = null
+    for (ignore in ignores) {
+        if (!ignore.enabled) continue
+        val mask = parseIgnoreMask(ignore.pattern) ?: continue
+        val nick = sourceNick ?: identityRules.normalize(source.nick).also { sourceNick = it }
+        if (!globMatches(identityRules.normalize(mask.nick), nick)) continue
+        val user =
+            sourceUser ?: source.user
+                .orEmpty()
+                .lowercase()
+                .also { sourceUser = it }
+        if (!globMatches(mask.user.lowercase(), user)) continue
+        val host =
+            sourceHost ?: source.host
+                .orEmpty()
+                .lowercase()
+                .also { sourceHost = it }
+        if (!globMatches(mask.host.lowercase(), host)) continue
+        if (ignore.dropMessages) return DROP_IGNORED_MESSAGE
+        suppressed = suppressed or (ignore.suppressedSignals and ALL_IGNORE_SIGNALS)
     }
-
-private fun IgnoreMask.matches(
-    source: Prefix,
-    identityRules: IrcIdentityRules,
-): Boolean {
-    val normalizedMaskNick = identityRules.normalize(nick)
-    val normalizedSourceNick = identityRules.normalize(source.nick)
-    return globMatches(normalizedMaskNick, normalizedSourceNick) &&
-        globMatches(user.lowercase(), (source.user ?: "").lowercase()) &&
-        globMatches(host.lowercase(), (source.host ?: "").lowercase())
+    return suppressed
 }
 
 private fun globMatches(

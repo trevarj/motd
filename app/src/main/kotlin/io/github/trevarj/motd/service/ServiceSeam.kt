@@ -392,6 +392,11 @@ interface ConnectionManager {
         anchor: TimelineAnchor,
     )
 
+    suspend fun markReadFromViewport(
+        bufferId: Long,
+        anchor: TimelineAnchor,
+    ) = markRead(bufferId, anchor)
+
     /** Re-evaluate push-mode socket teardown after per-network endpoint changes.
      *  No-op unless deliveryMode == UNIFIED_PUSH. Called by MotdPushReceiver.onNewEndpoint. */
     suspend fun evaluatePushMode()

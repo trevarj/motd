@@ -47,7 +47,7 @@ import io.github.trevarj.motd.data.saved.SavedMessagesDao
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 57,
+    version = 58,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1273,6 +1273,26 @@ val MIGRATION_56_57 =
         }
     }
 
+val MIGRATION_57_58 =
+    object : Migration(57, 58) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE network_ignores ADD COLUMN dropMessages INTEGER NOT NULL DEFAULT 1")
+            db.execSQL("ALTER TABLE network_ignores ADD COLUMN suppressedSignals INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("DROP INDEX index_network_ignores_networkId_pattern")
+            db.execSQL(
+                "CREATE UNIQUE INDEX index_network_ignores_networkId_pattern_dropMessages " +
+                    "ON network_ignores(networkId, pattern, dropMessages)",
+            )
+            db.execSQL("ALTER TABLE messages ADD COLUMN suppressedSignals INTEGER")
+            db.execSQL("ALTER TABLE messages ADD COLUMN suppressionClassifiedAtOrder INTEGER")
+            db.execSQL(
+                """UPDATE messages SET suppressedSignals = 0
+                   WHERE isSelf = 0 AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                     AND bufferId IN (SELECT id FROM buffers WHERE type IN ('CHANNEL', 'QUERY'))""",
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1342,6 +1362,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_54_55,
         MIGRATION_55_56,
         MIGRATION_56_57,
+        MIGRATION_57_58,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

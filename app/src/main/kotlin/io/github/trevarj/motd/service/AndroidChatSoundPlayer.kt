@@ -13,6 +13,7 @@ import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.alertsAsMention
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.db.suppressesNotifications
 import io.github.trevarj.motd.data.prefs.ChatSoundConfig
 import io.github.trevarj.motd.data.prefs.ChatSoundMelody
 import io.github.trevarj.motd.data.prefs.ChatSoundPrefs
@@ -416,6 +417,7 @@ class AndroidChatSoundPlayer
             // Event-only callers have no computed reply/mention fact. Use a durable row when
             // available; production delivery supplies it directly through onCanonicalIncoming.
             val canonical = message.ctx.msgid?.let { db.messageDao().byMsgid(bufferId, it) }
+            if (canonical?.suppressesNotifications == true) return
             playIncoming(
                 bufferId,
                 type,
@@ -431,7 +433,10 @@ class AndroidChatSoundPlayer
             type: BufferType,
             message: IrcEvent.ChatMessage,
             canonical: MessageEntity,
-        ) = playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor, canonical.alertsAsMention)
+        ) {
+            if (canonical.suppressesNotifications) return
+            playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor, canonical.alertsAsMention)
+        }
 
         private suspend fun playIncoming(
             bufferId: Long,

@@ -28,6 +28,9 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.ChatRoomRevisions
+import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
+import io.github.trevarj.motd.data.repo.SUPPRESS_HIGHLIGHT
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import io.github.trevarj.motd.data.saved.SavedMessage
 import io.github.trevarj.motd.data.saved.SavedMessageSource
 import io.github.trevarj.motd.data.saved.SavedMessagesRepository
@@ -502,6 +505,152 @@ class EventProcessorTest {
                 }
                 val ignoredBodies = messages.filter { it.source.nick == "alice" }.map { it.text }
                 assertTrue(rows.none { it.text in ignoredBodies })
+            }
+        }
+
+    @Test
+    fun hardIgnoredHistoryDoesNotCreateOrBindQuery() =
+        runTest {
+            val hard = NetworkIgnoreEntity(networkId = networkId, pattern = "alice!*@*", createdAt = 1)
+            db.networkIgnoreDao().upsert(hard)
+            db.networkIgnoreDao().upsert(hard.copy(dropMessages = false, suppressedSignals = SUPPRESS_HIGHLIGHT))
+            val ignored =
+                IrcEvent.ChatMessage(
+                    ctx(msgid = "ignored", account = "alice-account").copy(batchId = "history"),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("alice", "user", "host"),
+                    "me",
+                    "hidden",
+                    true,
+                    null,
+                )
+            processor.process(networkId, IrcEvent.HistoryBatch("alice", listOf(ignored)))
+
+            assertNull(db.bufferDao().byName(networkId, "alice"))
+            assertNull(BufferStore(db).resolveQueryRoom(networkId, "alice", "alice-account"))
+        }
+
+    @Test
+    fun hardIgnoredHistoryPreservesReadOnlyPeerEvidenceForRedaction() =
+        runTest {
+            val ignoreDao = db.networkIgnoreDao()
+            val cache = NetworkIgnoreCache(ignoreDao)
+            val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop, networkIgnoreCache = cache)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val original =
+                IrcEvent.ChatMessage(
+                    ctx(msgid = "secret", account = "peer-account"),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("old-peer"),
+                    "me",
+                    "secret",
+                    false,
+                    null,
+                )
+            processor.process(networkId, original)
+            val room = checkNotNull(db.bufferDao().byName(networkId, "old-peer"))
+            val row = checkNotNull(db.messageDao().byMsgid(room.id, "secret"))
+            val saved = SavedMessagesRepository(db, AppClock { 5_000L })
+            saved.setSaved(row.id, true)
+            processor.process(
+                networkId,
+                original.copy(ctx = ctx(msgid = "other", account = "other-account"), source = Prefix("new-peer"), text = "different owner"),
+            )
+            val rooms = BufferStore(db)
+            val currentPeer = checkNotNull(rooms.resolveQueryRoom(networkId, "new-peer", account = null))
+            ignoreDao.upsert(NetworkIgnoreEntity(networkId = networkId, pattern = "new-peer!*@*", createdAt = 1))
+            cache.invalidate(networkId)
+            processor.process(
+                networkId,
+                IrcEvent.HistoryBatch(
+                    "batch-peer",
+                    listOf(
+                        original.copy(
+                            ctx = ctx(msgid = "ignored", time = 2_000, account = "peer-account"),
+                            source = Prefix("new-peer"),
+                            target = "previous-me",
+                        ),
+                        IrcEvent.MessageRedacted(ctx(), Prefix("new-peer"), "previous-me", "secret", null),
+                        IrcEvent.MessageRedacted(ctx(), Prefix("new-peer"), "previous-me", "other", null),
+                    ),
+                ),
+            )
+
+            assertEquals(MessageKind.REDACTED, pagingList(room.id).single().kind)
+            val snapshot = saved.observe().first().single()
+            assertNull(snapshot.text)
+            assertEquals(currentPeer.id, rooms.resolveQueryRoom(networkId, "new-peer", account = null)?.id)
+            assertEquals("different owner", pagingList(currentPeer.id).single().text)
+            assertNull(db.bufferDao().byName(networkId, "batch-peer"))
+        }
+
+    @Test
+    fun selectivelyUnreadSuppressedChatStoresRowsWithoutRevivingArchiveOrWritingMarkers() =
+        runTest {
+            val dao = db.networkIgnoreDao()
+            val cache = NetworkIgnoreCache(dao)
+            val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop, networkIgnoreCache = cache)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val ruleId =
+                dao.upsert(
+                    NetworkIgnoreEntity(
+                        networkId = networkId,
+                        pattern = "alice!*@*",
+                        createdAt = 1,
+                        dropMessages = false,
+                        suppressedSignals = SUPPRESS_UNREAD,
+                    ),
+                )
+            for (origin in listOf("live", "history", "push", "replay")) {
+                dao.setEnabled(ruleId, true)
+                cache.invalidate(networkId)
+                val channel = "#$origin"
+                val roomId =
+                    db.bufferDao().insert(
+                        BufferEntity(
+                            networkId = networkId,
+                            name = channel,
+                            displayName = channel,
+                            type = BufferType.CHANNEL,
+                            archived = true,
+                            readMarkerTime = 100,
+                            localReadAnchorTime = 200,
+                            localUnreadFloorTime = 300,
+                        ),
+                    )
+                val msg =
+                    IrcEvent.ChatMessage(
+                        ctx(msgid = origin, time = 1_000),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix("alice"),
+                        channel,
+                        "me: still visible",
+                        false,
+                        null,
+                    )
+                when (origin) {
+                    "history" -> processor.process(networkId, IrcEvent.HistoryBatch(channel, listOf(msg)))
+                    "push" -> processor.processPush(networkId, msg)
+                    "replay" -> processor.process(networkId, IrcEvent.ReplayBatch(channel, listOf(msg)))
+                    else -> processor.process(networkId, msg)
+                }
+
+                dao.setEnabled(ruleId, false)
+                cache.invalidate(networkId)
+                processor.process(networkId, msg)
+                val row = pagingList(roomId).single()
+                assertEquals(msg.text, row.text)
+                assertEquals(SUPPRESS_UNREAD, row.suppressedSignals)
+                assertTrue(row.hasMention)
+                val archived = requireNotNull(db.bufferDao().observeById(roomId))
+                assertTrue(archived.archived)
+                assertEquals(100L, archived.readMarkerTime)
+                assertEquals(200L, archived.localReadAnchorTime)
+                assertNull(archived.localReadAnchorEventId)
+                assertEquals(300L, archived.localUnreadFloorTime)
+
+                processor.processPush(networkId, msg.copy(ctx = ctx(msgid = "$origin-new", time = 800), text = "new"))
+                assertFalse(requireNotNull(db.bufferDao().observeById(roomId)).archived)
             }
         }
 
@@ -1946,6 +2095,15 @@ class EventProcessorTest {
                     override val keywordHighlightRules = flowOf(listOf(KeywordHighlightRule("repair", alerts = true)))
                 }
             val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop, settingsRepository = rules)
+            db.networkIgnoreDao().upsert(
+                NetworkIgnoreEntity(
+                    networkId = networkId,
+                    pattern = "newMe!*@*",
+                    createdAt = 1,
+                    dropMessages = false,
+                    suppressedSignals = SUPPRESS_HIGHLIGHT,
+                ),
+            )
             processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
             val incorrectlyAttributed =
                 IrcEvent.ChatMessage(
@@ -1962,6 +2120,7 @@ class EventProcessorTest {
             val self = pagingList(bob.id).single()
             assertTrue(self.isSelf)
             assertNull(self.keywordMatch)
+            assertNull(self.suppressedSignals)
 
             processor.process(
                 networkId,
@@ -1980,6 +2139,8 @@ class EventProcessorTest {
             assertFalse(repaired.isSelf)
             assertEquals(self.id, repaired.id)
             assertEquals(KeywordMatch.ALERT, repaired.keywordMatch)
+            assertEquals(SUPPRESS_HIGHLIGHT, repaired.suppressedSignals)
+            assertFalse(repaired.hasMention)
             assertEquals("repair-query-direction", repaired.msgid)
         }
 

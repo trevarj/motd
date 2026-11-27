@@ -7,6 +7,7 @@ import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.prefs.KeywordMatch
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -576,6 +577,74 @@ class AllMigrationsTest {
             }
         }
 
+    @Test
+    fun migrateVersion57ToCurrent_keepsHardRulesAndFreezesExistingPeerRows() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            legacyHelper =
+                FrameworkSQLiteOpenHelperFactory().create(
+                    SupportSQLiteOpenHelper.Configuration
+                        .builder(context)
+                        .name(DB_NAME)
+                        .callback(
+                            object : SupportSQLiteOpenHelper.Callback(57) {
+                                override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 57)
+
+                                override fun onUpgrade(
+                                    db: SupportSQLiteDatabase,
+                                    old: Int,
+                                    new: Int,
+                                ) = Unit
+                            },
+                        ).build(),
+                )
+            legacyHelper!!.writableDatabase.apply {
+                execSQL(
+                    """INSERT INTO networks
+                        (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
+                         autoConnect, ordering, restoreAutoConnect)
+                        VALUES (1, 'Network', 'DIRECT', 'irc.example.org', 6697, 1, 'me', 'me', 'Me',
+                                'NONE', 1, 0, 1)""",
+                )
+                execSQL(
+                    """INSERT INTO buffers
+                        (id, networkId, name, displayName, type, joined, membershipCycle, pinned,
+                         muted, archived, ordering, historyComplete, dismissed)
+                        VALUES (1, 1, '#room', '#room', 'CHANNEL', 1, 0, 0, 0, 0, 0, 0, 0)""",
+                )
+                execSQL("INSERT INTO network_ignores (id, networkId, pattern, enabled, createdAt) VALUES (7, 1, 'alice!*@*', 1, 1)")
+                execSQL(
+                    """INSERT INTO messages
+                        (id, bufferId, serverTime, sender, normalizedActor, kind, text, isSelf,
+                         hasMention, failed, dedupKey, serverTimeAuthoritative, timelineOrder,
+                         timelineOrderConfirmed, timeProvenance, notificationHandled,
+                         notificationClaimed, soundHandled)
+                        VALUES (1, 1, 1000, 'alice', 'alice', 'PRIVMSG', 'old peer', 0, 0, 0, 'peer',
+                                1, 1, 0, 'SERVER_TAG', 0, 0, 0),
+                               (2, 1, 2000, 'me', 'me', 'PRIVMSG', 'own', 1, 0, 0, 'self',
+                                1, 2, 0, 'SERVER_TAG', 0, 0, 0)""",
+                )
+            }
+            legacyHelper!!.close()
+            legacyHelper = null
+
+            val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME).addMigrations(*ALL_MIGRATIONS).build()
+            try {
+                val dao = migrated.networkIgnoreDao()
+                val hard = dao.allForNetwork(1).single()
+                assertEquals(7L, hard.id)
+                assertTrue(hard.enabled && hard.dropMessages)
+                assertEquals(0, hard.suppressedSignals)
+                dao.upsert(hard.copy(id = 0, dropMessages = false, suppressedSignals = SUPPRESS_UNREAD))
+                assertEquals(listOf(true, false), dao.allForNetwork(1).map { it.dropMessages })
+                val events = migrated.canonicalTimelineDao().eventsForRoom(1)
+                assertEquals(listOf(0, null), events.map { it.suppressedSignals })
+                assertTrue(events.all { it.suppressionClassifiedAtOrder == null })
+            } finally {
+                migrated.close()
+            }
+        }
+
     private fun schemaResource(version: Int): URL? = javaClass.classLoader?.getResource("${MotdDatabase::class.java.canonicalName}/$version.json")
 
     /** Creates the real v1 tables, indices, FTS triggers, and Room identity from the tracked JSON. */
@@ -585,10 +654,10 @@ class AllMigrationsTest {
         const val DB_NAME = "all-migrations-test.db"
 
         /**
-         * Mirrors `version = 55` on `@Database`. Room's annotation is CLASS-retained, so the
+         * Mirrors `version = 58` on `@Database`. Room's annotation is CLASS-retained, so the
          * declared version cannot be read reflectively; the exported schema JSON is the runtime
          * witness for it instead.
          */
-        const val DECLARED_VERSION = 55
+        const val DECLARED_VERSION = 58
     }
 }

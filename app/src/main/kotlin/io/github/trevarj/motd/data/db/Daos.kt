@@ -16,6 +16,8 @@ import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.repo.SUPPRESS_NOTIFICATIONS
+import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
 import kotlinx.coroutines.flow.Flow
 
 internal const val PENDING_CHAT_PLACEMENT_PREFIX = "pending-chat-placement:"
@@ -639,6 +641,7 @@ interface BufferDao {
                  SELECT 1 FROM messages m
                  WHERE m.bufferId = :id AND m.id != :eventId
                    AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
+                   AND (COALESCE(m.suppressedSignals, 0) & $SUPPRESS_UNREAD) = 0
                    AND (m.serverTime > :serverTime
                         OR (m.serverTime = :serverTime AND m.timelineOrder > :timelineOrder)
                         OR (m.serverTime = :serverTime AND m.timelineOrder = :timelineOrder
@@ -1419,6 +1422,7 @@ interface MessageDao {
               )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
              AND notificationEligible = 1
+             AND (COALESCE(suppressedSignals, 0) & $SUPPRESS_NOTIFICATIONS) = 0
              AND (:hasMention IS NULL OR (directMention = 1 OR keywordMatch IS 'ALERT') = :hasMention)
            ORDER BY serverTime DESC, timelineOrder DESC, id DESC
            LIMIT :limit""",
@@ -1609,6 +1613,20 @@ interface MessageDao {
 
     @Query("SELECT * FROM messages WHERE bufferId = :bufferId ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1")
     suspend fun newestMessage(bufferId: RoomId): MessageEntity?
+
+    @Query(
+        """SELECT serverTime, id AS eventId, timelineOrder
+           FROM messages WHERE bufferId = :bufferId AND serverTime > 0
+             AND (serverTime, timelineOrder, id) <= (:serverTime, :timelineOrder, :eventId)
+             AND (COALESCE(suppressedSignals, 0) & $SUPPRESS_UNREAD) = 0
+           ORDER BY serverTime DESC, timelineOrder DESC, id DESC LIMIT 1""",
+    )
+    suspend fun viewportReadAnchorAtOrBefore(
+        bufferId: RoomId,
+        serverTime: Long,
+        timelineOrder: Long,
+        eventId: TimelineEventId,
+    ): TimelineAnchor?
 
     @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId")
     suspend fun oldestTime(bufferId: Long): Long?
@@ -1848,7 +1866,10 @@ interface MessageDao {
      * if none. Anchors the "new messages" divider + unread badge to real incoming messages: your own
      * sent messages must never trip the unread UI, since you have obviously read what you just sent.
      */
-    @Query("SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND serverTime > :after")
+    @Query(
+        """SELECT MIN(serverTime) FROM messages WHERE bufferId = :bufferId AND isSelf = 0 AND serverTime > :after
+           AND (COALESCE(suppressedSignals, 0) & $SUPPRESS_UNREAD) = 0""",
+    )
     suspend fun firstUnreadOtherTime(
         bufferId: Long,
         after: Long,
@@ -2331,6 +2352,7 @@ private const val RECOVERABLE_NOTIFICATION =
        AND (
            (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION') AND b.type != 'SERVER'
               AND m.notificationEligibilityResolved = 1 AND m.notificationEligible = 1
+              AND (COALESCE(m.suppressedSignals, 0) & $SUPPRESS_NOTIFICATIONS) = 0
               AND EXISTS (
                   SELECT 1 FROM event_observations o WHERE o.timelineEventId = m.id
                     AND (o.origin = 'LIVE' OR (o.origin = 'PUSH'
@@ -2718,7 +2740,10 @@ interface CanonicalTimelineDao {
         parentId: TimelineEventId,
     )
 
-    @Query("UPDATE messages SET soundHandled = 1 WHERE id = :eventId AND soundHandled = 0")
+    @Query(
+        """UPDATE messages SET soundHandled = 1 WHERE id = :eventId AND soundHandled = 0
+           AND (COALESCE(suppressedSignals, 0) & $SUPPRESS_NOTIFICATIONS) = 0""",
+    )
     suspend fun claimSound(eventId: TimelineEventId): Int
 
     @Query(
@@ -2726,7 +2751,8 @@ interface CanonicalTimelineDao {
            WHERE id = COALESCE(
                (SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId),
                :eventId
-           ) AND notificationHandled = 0 AND notificationClaimed = 0""",
+           ) AND notificationHandled = 0 AND notificationClaimed = 0
+             AND (COALESCE(suppressedSignals, 0) & $SUPPRESS_NOTIFICATIONS) = 0""",
     )
     suspend fun claimNotification(
         eventId: TimelineEventId,
@@ -3212,6 +3238,7 @@ internal const val CHAT_LIST_SQL =
                 )
             )
             AND m.isSelf = 0
+            AND (COALESCE(m.suppressedSignals, 0) & $SUPPRESS_UNREAD) = 0
             AND (
                 m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
                 OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)

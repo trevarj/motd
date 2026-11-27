@@ -124,14 +124,17 @@ class NetworkToolsViewModel
                 initialValue = NetworkToolsUiState(),
             )
 
-        fun addIgnore(pattern: String) =
-            viewModelScope.launch {
-                val networkId = state.value.networkId.takeIf { it != 0L } ?: return@launch
-                toolsRepository
-                    .addIgnore(networkId, pattern)
-                    .onSuccess { statusFlow.value = NetworkToolsStatus.IgnoreAdded }
-                    .onFailure { statusFlow.value = NetworkToolsStatus.IgnoreFailed(it.message.orEmpty()) }
-            }
+        fun addIgnore(
+            pattern: String,
+            dropMessages: Boolean,
+            suppressedSignals: Int,
+        ) = viewModelScope.launch {
+            val networkId = state.value.networkId.takeIf { it != 0L } ?: return@launch
+            toolsRepository
+                .addIgnore(networkId, pattern, dropMessages, suppressedSignals)
+                .onSuccess { statusFlow.value = NetworkToolsStatus.IgnoreAdded }
+                .onFailure { statusFlow.value = NetworkToolsStatus.IgnoreFailed(it.message.orEmpty()) }
+        }
 
         fun setIgnoreEnabled(
             id: Long,

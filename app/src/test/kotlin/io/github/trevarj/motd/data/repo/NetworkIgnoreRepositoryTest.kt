@@ -117,18 +117,18 @@ class NetworkIgnoreRepositoryTest {
             val retained = dao.allForNetwork(network).single()
             assertEquals("Élodie[!*@*", retained.pattern)
             assertTrue(hasExactNickIgnore(cache.enabledForNetwork(network), nick, rules))
-            assertTrue(ignoredBy(cache.enabledForNetwork(network), source, rules))
+            assertEquals(DROP_IGNORED_MESSAGE, incomingIgnoreSignals(cache.enabledForNetwork(network), source, rules))
 
             repository.setExactNickIgnored(network, nick, rules, ignored = false).getOrThrow()
             assertEquals(listOf(retained.copy(enabled = false)), dao.allForNetwork(network))
-            assertFalse(ignoredBy(cache.enabledForNetwork(network), source, rules))
+            assertEquals(0, incomingIgnoreSignals(cache.enabledForNetwork(network), source, rules))
             repository.setExactNickIgnored(network, nick, rules, ignored = true).getOrThrow()
             assertEquals(listOf(retained), dao.allForNetwork(network))
-            assertTrue(ignoredBy(cache.enabledForNetwork(network), source, rules))
+            assertEquals(DROP_IGNORED_MESSAGE, incomingIgnoreSignals(cache.enabledForNetwork(network), source, rules))
 
             val differentNick = "élodie{"
             assertFalse(hasExactNickIgnore(cache.enabledForNetwork(network), differentNick, rules))
-            assertFalse(ignoredBy(cache.enabledForNetwork(network), source.copy(nick = differentNick), rules))
+            assertEquals(0, incomingIgnoreSignals(cache.enabledForNetwork(network), source.copy(nick = differentNick), rules))
             repository.setExactNickIgnored(network, differentNick, rules, ignored = true).getOrThrow()
             assertEquals(listOf(retained.pattern, "$differentNick!*@*"), dao.allForNetwork(network).map { it.pattern })
         }
@@ -171,6 +171,52 @@ class NetworkIgnoreRepositoryTest {
             assertTrue(thrown is CancellationException)
             assertEquals(cancelled.message, thrown?.message)
             assertEquals(listOf(first, second), dao.allForNetwork(network))
+        }
+
+    @Test
+    fun `saving the same normalized selective mask replaces and enables only its mode`() =
+        runTest {
+            val network = network()
+            val other = network("other")
+            val otherCache = cache.enabledForNetwork(other)
+            assertTrue(cache.enabledForNetwork(network).isEmpty())
+
+            repository.addIgnore(network, " [lice ", dropMessages = false, suppressedSignals = SUPPRESS_UNREAD).getOrThrow()
+            val selective = cache.enabledForNetwork(network).single()
+            assertEquals("[lice!*@*", selective.pattern)
+            assertEquals(SUPPRESS_UNREAD, selective.suppressedSignals)
+            val rules = IrcIdentityRules(IrcCaseMapping.Rfc1459)
+            assertFalse(hasExactNickIgnore(listOf(selective), "{lice", rules))
+
+            repository.setExactNickIgnored(network, "[lice", rules, ignored = true).getOrThrow()
+            val hard = cache.enabledForNetwork(network).single { it.dropMessages }
+            assertEquals(selective.pattern, hard.pattern)
+            assertTrue(hasExactNickIgnore(cache.enabledForNetwork(network), "{lice", rules))
+            repository.setExactNickIgnored(network, "{LICE", rules, ignored = false).getOrThrow()
+            assertEquals(listOf(selective), cache.enabledForNetwork(network))
+
+            repository.setIgnoreEnabled(selective.id, false)
+            assertTrue(cache.enabledForNetwork(network).isEmpty())
+            repository
+                .addIgnore(network, "[lice!*@*", dropMessages = false, suppressedSignals = SUPPRESS_NOTIFICATIONS)
+                .getOrThrow()
+
+            val updated = cache.enabledForNetwork(network).single()
+            assertFalse(updated.dropMessages)
+            assertEquals(SUPPRESS_NOTIFICATIONS, updated.suppressedSignals)
+            assertEquals(setOf(hard.copy(enabled = false), updated), dao.allForNetwork(network).toSet())
+            assertSame(otherCache, cache.enabledForNetwork(other))
+        }
+
+    @Test
+    fun `invalid selective bits or hard suppression flags cannot create a rule`() =
+        runTest {
+            val network = network()
+            for (invalid in listOf(0, 8, SUPPRESS_UNREAD or 8, DROP_IGNORED_MESSAGE)) {
+                assertTrue(repository.addIgnore(network, "alice", dropMessages = false, suppressedSignals = invalid).isFailure)
+            }
+            assertTrue(repository.addIgnore(network, "alice", suppressedSignals = SUPPRESS_UNREAD).isFailure)
+            assertTrue(dao.allForNetwork(network).isEmpty())
         }
 
     private suspend fun network(name: String = "network"): Long =
