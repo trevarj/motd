@@ -286,6 +286,7 @@ fun AttachmentSheets(
     val activity = LocalActivity.current
     val cameraStartError = stringResource(R.string.upload_camera_failed)
     val localMediaRequiredError = stringResource(R.string.settings_local_media_required)
+    val uploadFavoriteError = stringResource(R.string.upload_library_favorite_failed)
     val defaultConfig by viewModel.config.collectAsStateWithLifecycle()
     val sojuFileHostAvailable = sojuFileHostUrl != null
     val disclosedContext = AttachmentUploadContext(networkId, expectedSojuFileHostUrl = sojuFileHostUrl)
@@ -797,7 +798,7 @@ fun AttachmentSheets(
                 },
                 onDeleteRecent = { deleteTarget = it },
                 onFavoriteRecent = { record, favorite ->
-                    viewModel.setUploadFavorite(record.url, favorite, context.getString(R.string.upload_library_favorite_failed))
+                    viewModel.setUploadFavorite(record.url, favorite, uploadFavoriteError)
                 },
                 onClearHistory = viewModel::clearHistory,
             )
@@ -1035,10 +1036,8 @@ fun AttachmentSheets(
 }
 
 @Composable
-fun AttachmentBatchSheets(
-    batchId: String,
-    bufferId: Long,
-    files: List<PendingShare.File>,
+internal fun AttachmentBatchSheets(
+    request: AttachmentBatchRequest,
     networkId: Long?,
     sojuFileHostUrl: String?,
     preferSojuFileHost: Boolean = false,
@@ -1049,8 +1048,7 @@ fun AttachmentBatchSheets(
     val context = LocalContext.current.applicationContext
     val resolver = context.contentResolver
     val target = AttachmentBatchTarget(networkId, sojuFileHostUrl, preferSojuFileHost)
-    val scheduled = viewModel.batchRequest.value
-    if (scheduled?.id != batchId || scheduled.bufferId != bufferId || scheduled.files != files) return
+    val batchId = request.id
     val review by viewModel.batchReview.collectAsStateWithLifecycle()
     val singleProgress by viewModel.progress.collectAsStateWithLifecycle()
     var picking by rememberSaveable(batchId) { mutableStateOf(false) }
@@ -1060,7 +1058,7 @@ fun AttachmentBatchSheets(
     DisposableEffect(viewModel, batchId) {
         onDispose { viewModel.leaveBatchCompression(batchId) }
     }
-    val shown = review?.takeIf { it.request.id == batchId } ?: return
+    val shown = review?.takeIf { it.request === request } ?: return
     if (picking && !shown.started && shown.settings != null) {
         BackendPickerSheet(
             source = shown.request.binarySource,
@@ -2227,7 +2225,7 @@ private fun AttachmentMetadata(
                             val label =
                                 when {
                                     size == null -> stringResource(R.string.upload_size_unknown)
-                                    originalSizeIsLowerBound -> stringResource(R.string.upload_size_minimum, size)
+                                    originalSizeIsLowerBound -> pluralStringResource(R.plurals.upload_size_minimum, size.toInt(), size)
                                     else -> formatBytes(size)
                                 }
                             stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_unknown), label)

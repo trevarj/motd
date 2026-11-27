@@ -1432,9 +1432,7 @@ class AttachmentConfirmationSheetUiTest {
                 MotdTheme {
                     request?.takeIf { visible }?.let {
                         AttachmentBatchSheets(
-                            batchId = it.id,
-                            bufferId = it.bufferId,
-                            files = it.files,
+                            request = it,
                             networkId = null,
                             sojuFileHostUrl = null,
                             canAddLinks = hydrated,
@@ -1777,9 +1775,7 @@ class AttachmentConfirmationSheetUiTest {
                 MotdTheme {
                     if (visible) {
                         AttachmentBatchSheets(
-                            batchId = request.id,
-                            bufferId = request.bufferId,
-                            files = request.files,
+                            request = request,
                             networkId = 21L,
                             sojuFileHostUrl = null,
                             onFinished = { true },

@@ -988,15 +988,18 @@
     <string name="upload_destination_change">Change destination</string>
     <string name="upload_destination_size_limit">Up to %1$s</string>
     <string name="upload_over_size_limit">This attachment is %1$s. The selected destination allows up to %2$s.</string>
-    <string name="upload_over_size_limit_minimum">This attachment is at least %1$,d bytes. The selected destination allows up to %2$s.</string>
-    <string name="upload_size_minimum">At least %1$,d bytes</string>
+    <string name="upload_over_size_limit_minimum">Attachment size (bytes): at least %1$,d. The selected destination allows up to %2$s.</string>
+    <plurals name="upload_size_minimum">
+        <item quantity="one">At least %1$,d byte</item>
+        <item quantity="other">At least %1$,d bytes</item>
+    </plurals>
     <string name="upload_checking_video_size">Checking video size…</string>
     <string name="upload_compression_action">Compress to fit</string>
     <string name="upload_compression_consent">Make a smaller MP4 on this device for the %1$s limit. Video or audio quality may be reduced. Nothing is uploaded until you approve, and your original stays unchanged.</string>
     <string name="upload_compression_working">Compressing on this device…</string>
     <string name="upload_compression_cancel">Cancel compression</string>
-    <string name="upload_compression_ready">Compressed copy ready • MP4\nOriginal: %1$,d bytes\nCompressed: %2$,d bytes\nSelected limit: %3$,d bytes</string>
-    <string name="upload_compression_ready_minimum">Compressed copy ready • MP4\nOriginal: at least %1$,d bytes\nCompressed: %2$,d bytes\nSelected limit: %3$,d bytes</string>
+    <string name="upload_compression_ready">Compressed copy ready • MP4\nOriginal (bytes): %1$,d\nCompressed (bytes): %2$,d\nSelected limit (bytes): %3$,d</string>
+    <string name="upload_compression_ready_minimum">Compressed copy ready • MP4\nOriginal (bytes): at least %1$,d\nCompressed (bytes): %2$,d\nSelected limit (bytes): %3$,d</string>
     <string name="upload_compression_keep_original">Discard copy and keep original</string>
     <string name="upload_compression_failed">Couldn’t compress this video to fit the selected limit. The original is unchanged.</string>
     <string name="upload_compression_settings_unavailable">Couldn’t verify the upload settings. Nothing was uploaded.</string>
@@ -1007,7 +1010,7 @@
     <string name="upload_action">Upload</string>
     <string name="share_batch_error_title">Unable to share files</string>
     <string name="share_batch_error_invalid">This share does not contain a valid list of files.</string>
-    <string name="share_batch_error_limit">Share at most %1$d files at a time.</string>
+    <string name="share_batch_error_limit">Too many files. Limit per share: %1$d.</string>
     <string name="share_batch_error_unsupported">This share contains a file with an unsupported address.</string>
     <string name="share_batch_error_permission">This share did not grant access to every file. Share the files again from the original app.</string>
     <string name="share_batch_error_expired">This share is no longer available. Share it again from the original app.</string>
@@ -1549,9 +1552,15 @@
     <string name="settings_keyword_highlight_edit_description">Edit keyword “%1$s”</string>
     <string name="settings_keyword_highlight_delete_description">Delete keyword “%1$s”</string>
     <string name="settings_keyword_highlight_phrase">Word or phrase</string>
-    <string name="settings_keyword_highlight_phrase_limit">Enter a single line of up to %1$d characters.</string>
+    <plurals name="settings_keyword_highlight_phrase_limit">
+        <item quantity="one">Enter a single line of up to %1$d character.</item>
+        <item quantity="other">Enter a single line of up to %1$d characters.</item>
+    </plurals>
     <string name="settings_keyword_highlight_duplicate">A rule already matches this phrase.</string>
-    <string name="settings_keyword_highlight_limit">You can add up to %1$d keyword rules.</string>
+    <plurals name="settings_keyword_highlight_limit">
+        <item quantity="one">You can add up to %1$d keyword rule.</item>
+        <item quantity="other">You can add up to %1$d keyword rules.</item>
+    </plurals>
     <string name="settings_keyword_highlight_alerts">Alert on match</string>
     <string name="settings_keyword_highlight_alerts_desc">Treat matches like mentions for notifications.</string>
     <string name="settings_keyword_highlight_alerts_on">Alerts on</string>

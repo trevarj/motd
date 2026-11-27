@@ -16,9 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.AndroidViewModel
@@ -315,7 +315,8 @@ fun IncomingContentNavigation(
     shares: PendingShareStore,
     onConsumed: (Intent) -> Unit,
 ) {
-    val context = LocalContext.current
+    val expiredMessage by rememberUpdatedState(stringResource(R.string.share_batch_error_expired))
+    val reviewActiveMessage by rememberUpdatedState(stringResource(R.string.share_batch_error_review_active))
     val backStackEntry by navController.currentBackStackEntryAsState()
     val active by intake.active.collectAsStateWithLifecycle()
     val pending by intake.pending.collectAsStateWithLifecycle()
@@ -337,7 +338,7 @@ fun IncomingContentNavigation(
             // Navigation can survive process death, but the claim and its URI grants cannot.
             if (navController.popBackStack() && error == null) {
                 errorTitle = R.string.share_batch_error_title
-                error = context.getString(R.string.share_batch_error_expired)
+                error = expiredMessage
             }
         }
     }
@@ -360,7 +361,7 @@ fun IncomingContentNavigation(
             is IncomingContent.Share -> {
                 if (shares.hasActiveBatchReview) {
                     errorTitle = R.string.share_batch_error_title
-                    error = context.getString(R.string.share_batch_error_review_active)
+                    error = reviewActiveMessage
                 } else {
                     // A replacement share needs a fresh picker claim, even if the picker is open.
                     if (navController.currentDestination?.hasRoute<SharePickerRoute>() == true) {

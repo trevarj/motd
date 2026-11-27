@@ -13,6 +13,7 @@ import android.os.Bundle
 import android.os.CancellationSignal
 import android.os.Handler
 import android.os.HandlerThread
+import android.os.StatFs
 import android.provider.MediaStore
 import android.system.ErrnoException
 import android.system.Os
@@ -261,8 +262,8 @@ private suspend fun stageVideo(
     descriptor: AssetFileDescriptor,
     file: File,
 ) {
-    // Bound unknown-length input by available cache space, not the destination's upload cap.
-    val availableBytes = file.usableSpace
+    // Bound unknown-length input by already-free space on the cache volume, without evicting caches.
+    val availableBytes = StatFs(file.absolutePath).availableBytes
     var remainingBytes = availableBytes - minOf(availableBytes / 20, 8 * 1024 * 1024L)
     val poll =
         arrayOf(

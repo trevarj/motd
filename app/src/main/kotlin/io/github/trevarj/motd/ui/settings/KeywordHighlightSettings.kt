@@ -34,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.liveRegion
@@ -121,7 +122,7 @@ internal fun KeywordHighlightSettings(
             }
         }
         if (rules.size >= MAX_KEYWORD_HIGHLIGHT_RULES) {
-            Text(stringResource(R.string.settings_keyword_highlight_limit, MAX_KEYWORD_HIGHLIGHT_RULES))
+            Text(pluralStringResource(R.plurals.settings_keyword_highlight_limit, MAX_KEYWORD_HIGHLIGHT_RULES, MAX_KEYWORD_HIGHLIGHT_RULES))
         }
         if (rules.isEmpty()) {
             Text(stringResource(R.string.settings_keyword_highlights_empty))
@@ -204,9 +205,25 @@ private fun KeywordHighlightDialog(
                         supportingText = {
                             Text(
                                 when (error) {
-                                    KeywordRuleError.DUPLICATE -> stringResource(R.string.settings_keyword_highlight_duplicate)
-                                    KeywordRuleError.LIMIT -> stringResource(R.string.settings_keyword_highlight_limit, MAX_KEYWORD_HIGHLIGHT_RULES)
-                                    else -> stringResource(R.string.settings_keyword_highlight_phrase_limit, MAX_KEYWORD_HIGHLIGHT_LENGTH)
+                                    KeywordRuleError.DUPLICATE -> {
+                                        stringResource(R.string.settings_keyword_highlight_duplicate)
+                                    }
+
+                                    KeywordRuleError.LIMIT -> {
+                                        pluralStringResource(
+                                            R.plurals.settings_keyword_highlight_limit,
+                                            MAX_KEYWORD_HIGHLIGHT_RULES,
+                                            MAX_KEYWORD_HIGHLIGHT_RULES,
+                                        )
+                                    }
+
+                                    else -> {
+                                        pluralStringResource(
+                                            R.plurals.settings_keyword_highlight_phrase_limit,
+                                            MAX_KEYWORD_HIGHLIGHT_LENGTH,
+                                            MAX_KEYWORD_HIGHLIGHT_LENGTH,
+                                        )
+                                    }
                                 },
                             )
                         },

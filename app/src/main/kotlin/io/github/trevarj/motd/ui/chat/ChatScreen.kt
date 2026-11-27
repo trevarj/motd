@@ -5554,9 +5554,7 @@ internal fun ChatContent(
         if (attachmentBatch != null && attachmentViewModel != null) {
             key(attachmentBatch.id) {
                 AttachmentBatchSheets(
-                    batchId = attachmentBatch.id,
-                    bufferId = attachmentBatch.bufferId,
-                    files = attachmentBatch.files,
+                    request = attachmentBatch,
                     networkId = state.buffer?.networkId,
                     sojuFileHostUrl =
                         (state.connState as? IrcClientState.Ready)
