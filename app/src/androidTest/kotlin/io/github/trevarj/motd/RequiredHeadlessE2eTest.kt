@@ -50,6 +50,7 @@ import androidx.test.rule.GrantPermissionRule
 import io.github.trevarj.motd.ai.WhisperNativeAssertions
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
+import io.github.trevarj.motd.attachment.assertVideoPipeFailureRemovesStagedInput
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
@@ -534,6 +535,7 @@ class RequiredHeadlessE2eTest {
     private fun exerciseVideoCompression(bufferId: Long) {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         val context = instrumentation.targetContext
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) assertVideoPipeFailureRemovesStagedInput(context)
         val prefs = AttachmentPrefsImpl(context)
         val originalConfig = runBlocking { prefs.config.first() }
         val existingUrls = runBlocking { prefs.recentUploads.first().mapTo(HashSet()) { it.url } }
