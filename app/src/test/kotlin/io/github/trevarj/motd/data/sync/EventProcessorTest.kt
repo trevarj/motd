@@ -24,6 +24,9 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.ChatRoomRevisions
+import io.github.trevarj.motd.data.saved.SavedMessage
+import io.github.trevarj.motd.data.saved.SavedMessageSource
+import io.github.trevarj.motd.data.saved.SavedMessagesRepository
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.messagePagingQuery
 import io.github.trevarj.motd.di.AppClock
@@ -3262,6 +3265,195 @@ class EventProcessorTest {
         }
 
     @Test
+    fun savedSnapshotSurvivesPruningAndOnlyExactRoutedRedactionErasesIt() =
+        runTest {
+            val saved = SavedMessagesRepository(db, AppClock { 5_000L })
+            val chat =
+                IrcEvent.ChatMessage(
+                    ctx = ctx(msgid = "SecretId"),
+                    kind = IrcEvent.ChatKind.PRIVMSG,
+                    source = Prefix("alice"),
+                    target = "#chan",
+                    text = "\u0002secret\u000f",
+                    isSelf = false,
+                    replyToMsgid = null,
+                )
+            processor.process(networkId, chat)
+            val room = checkNotNull(db.bufferDao().byName(networkId, "#chan"))
+            BufferStore(db).getOrCreate(networkId, "#other", "#other", BufferType.CHANNEL)
+            val original = checkNotNull(db.messageDao().byMsgid(room.id, "SecretId"))
+            saved.setSaved(original.id, true)
+            saved.setSaved(original.id, true)
+            val snapshot = saved.observe().first().single()
+            assertEquals(SavedMessage(snapshot.id, "alice", "secret", 5_000L, 1_000L, "libera", "#chan"), snapshot)
+            assertEquals(SavedMessageSource(room.id, original.id, "SecretId", 1_000L), saved.resolveSource(snapshot.id))
+
+            assertEquals(1, db.historyPruneDao().deleteOldest(room.id, 1_001L, presence = false, chunk = 1))
+            assertNull(db.messageDao().byId(original.id))
+            assertEquals(snapshot, saved.observe().first().single())
+            assertEquals(SavedMessageSource(room.id, null, "SecretId", 1_000L), saved.resolveSource(snapshot.id))
+
+            val redaction = IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#chan", "SecretId", null)
+            val wrongRoom = redaction.copy(target = "#other")
+            processor.process(networkId, wrongRoom)
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(wrongRoom)))
+            processor.process(networkId, redaction.copy(targetMsgid = "secretid"))
+            assertEquals(snapshot, saved.observe().first().single())
+
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(redaction)))
+            assertEquals(snapshot.copy(text = null), saved.observe().first().single())
+            processor.process(networkId, chat)
+            val replayed = checkNotNull(db.messageDao().byMsgid(room.id, "SecretId"))
+            assertEquals(MessageKind.REDACTED, replayed.kind)
+            assertNull(replayed.ircFormattedText)
+            assertFalse(replayed.notificationEligible)
+            assertEquals(replayed.id, saved.resolveSource(snapshot.id)?.eventId)
+            saved.remove(snapshot.id)
+            db.messageDao().deleteById(replayed.id)
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(chat)))
+            assertEquals(MessageKind.REDACTED, db.messageDao().byMsgid(room.id, "SecretId")?.kind)
+            assertTrue(saved.observe().first().isEmpty())
+            db.networkDao().deleteLocalTree(networkId)
+            assertTrue(saved.observe().first().isEmpty())
+            saved.setSaved(original.id, true)
+            assertTrue(saved.observe().first().isEmpty())
+        }
+
+    @Test
+    fun savedChannelIdentitySurvivesCloseAndRejoin() =
+        runTest {
+            val saved = SavedMessagesRepository(db, AppClock { 5_000L })
+            val chat =
+                IrcEvent.ChatMessage(
+                    ctx(msgid = "channel-msg"),
+                    IrcEvent.ChatKind.PRIVMSG,
+                    Prefix("alice"),
+                    "#chan",
+                    "secret",
+                    false,
+                    null,
+                )
+            processor.process(networkId, chat)
+            val room = checkNotNull(db.bufferDao().byName(networkId, "#chan"))
+            val original = checkNotNull(db.messageDao().byMsgid(room.id, "channel-msg"))
+            saved.setSaved(original.id, true)
+            val snapshot = saved.observe().first().single()
+            db.bufferDao().deleteBuffer(room.id)
+            assertNull(saved.resolveSource(snapshot.id))
+
+            val rejoined = BufferStore(db).getOrCreate(networkId, "#chan", "#CHAN", BufferType.CHANNEL)
+            assertNotEquals(room.id, rejoined.id)
+            assertEquals(SavedMessageSource(rejoined.id, null, "channel-msg", 1_000L), saved.resolveSource(snapshot.id))
+            processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(chat)))
+            val replayed = checkNotNull(db.messageDao().byMsgid(rejoined.id, "channel-msg"))
+            assertEquals(replayed.id, saved.resolveSource(snapshot.id)?.eventId)
+            assertTrue(saved.observeSaved(replayed.id).first())
+            saved.setSaved(replayed.id, true)
+            assertEquals(snapshot, saved.observe().first().single())
+
+            db.bufferDao().deleteBuffer(rejoined.id)
+            processor.process(networkId, IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#CHAN", "channel-msg", null))
+            assertEquals(snapshot.copy(text = null), saved.observe().first().single())
+            processor.process(networkId, chat)
+            val nextRoom = checkNotNull(db.bufferDao().byName(networkId, "#chan"))
+            assertEquals(MessageKind.REDACTED, db.messageDao().byMsgid(nextRoom.id, "channel-msg")?.kind)
+            assertEquals(nextRoom.id, saved.resolveSource(snapshot.id)?.bufferId)
+        }
+
+    @Test
+    fun historicalDmRedactionRejectsKnownWrongPeerAndAcceptsOldSelfTarget() =
+        runTest {
+            val saved = SavedMessagesRepository(db, AppClock { 5_000L })
+            processor.onRegistered(networkId, "oldme", mapOf("CASEMAPPING" to "rfc1459"))
+            processor.process(networkId, IrcEvent.Registered("me", emptySet(), emptyMap(), startsSession = false))
+            BufferStore(db).getOrCreate(networkId, "oldme", "oldme", BufferType.QUERY)
+            for (peer in listOf("alice", "bob")) {
+                processor.process(
+                    networkId,
+                    IrcEvent.ChatMessage(
+                        ctx(msgid = "$peer-msg", account = "$peer-account"),
+                        IrcEvent.ChatKind.PRIVMSG,
+                        Prefix(peer),
+                        "me",
+                        "secret",
+                        false,
+                        null,
+                    ),
+                )
+            }
+            val alice = checkNotNull(db.bufferDao().byName(networkId, "alice"))
+            val original = checkNotNull(db.messageDao().byMsgid(alice.id, "alice-msg"))
+            saved.setSaved(original.id, true)
+            assertEquals(1, db.historyPruneDao().deleteOldest(alice.id, 1_001, presence = false, chunk = 1))
+
+            val wrongPeer = IrcEvent.MessageRedacted(ctx(account = "bob-account"), Prefix("bob"), "me", "alice-msg", null)
+            processor.process(networkId, IrcEvent.HistoryBatch("alice", listOf(wrongPeer)))
+            processor.process(networkId, IrcEvent.HistoryBatch("alice", listOf(wrongPeer.copy(ctx = ctx()))))
+            val thirdParty = wrongPeer.copy(ctx = ctx(), target = "alice")
+            processor.process(networkId, IrcEvent.HistoryBatch("alice", listOf(thirdParty)))
+            val before = saved.observe().first().single()
+            assertEquals("secret", before.text)
+            val correctPeer = wrongPeer.copy(ctx = ctx(account = "alice-account"), source = Prefix("alice"), target = "oldme")
+            processor.process(networkId, IrcEvent.HistoryBatch("alice", listOf(correctPeer)))
+            val after = saved.observe().first().single()
+            assertNull(after.text)
+
+            val bob = checkNotNull(db.bufferDao().byName(networkId, "bob"))
+            val bobMessage = checkNotNull(db.messageDao().byMsgid(bob.id, "bob-msg"))
+            saved.setSaved(bobMessage.id, true)
+            val outgoing = IrcEvent.MessageRedacted(ctx(account = "own-account"), Prefix("oldme"), "bob", "bob-msg", null)
+            processor.process(networkId, IrcEvent.HistoryBatch("bob", listOf(outgoing)))
+            assertEquals(MessageKind.REDACTED, db.messageDao().byId(bobMessage.id)?.kind)
+            val bobSave = saved.observe().first().single { it.conversationName == "bob" }
+            assertNull(bobSave.text)
+
+            val untaggedSource =
+                IrcEvent.ChatMessage(ctx(msgid = "old-self-no-account"), IrcEvent.ChatKind.PRIVMSG, Prefix("me"), "bob", "secret", true, null)
+            processor.process(networkId, untaggedSource)
+            val untaggedMessage = checkNotNull(db.messageDao().byMsgid(bob.id, "old-self-no-account"))
+            saved.setSaved(untaggedMessage.id, true)
+            val untagged = outgoing.copy(ctx = ctx(), targetMsgid = "old-self-no-account")
+            processor.process(networkId, IrcEvent.HistoryBatch("bob", listOf(untagged)))
+            assertEquals(MessageKind.REDACTED, db.messageDao().byId(untaggedMessage.id)?.kind)
+            val bobSaves = saved.observe().first().filter { it.conversationName == "bob" }
+            assertEquals(listOf(null, null), bobSaves.map { it.text })
+        }
+
+    @Test
+    fun historyRedactionKeepsBoundRoomWhenRequestedChannelNameIsReused() =
+        runTest {
+            val saved = SavedMessagesRepository(db, AppClock { 5_000L })
+            val store = BufferStore(db)
+            processor.process(
+                networkId,
+                IrcEvent.ChatMessage(ctx(msgid = "old-msg"), IrcEvent.ChatKind.PRIVMSG, Prefix("alice"), "#old", "secret", false, null),
+            )
+            val old = checkNotNull(store.resolveChannelRoom(networkId, "#old"))
+            val original = checkNotNull(db.messageDao().byMsgid(old.id, "old-msg"))
+            saved.setSaved(original.id, true)
+            val renamed = checkNotNull(store.renameChannel(networkId, "#old", "#renamed", "#renamed"))
+            val reused = store.getOrCreate(networkId, "#old", "#old", BufferType.CHANNEL)
+            assertNotEquals(renamed.id, reused.id)
+            val redaction = IrcEvent.MessageRedacted(ctx(), Prefix("oper"), "#old", "old-msg", null)
+            processor.persistHistoryPage(
+                networkId,
+                ChatHistoryRequest(ChatHistoryRequest.Subcommand.LATEST, "#old", limit = 2),
+                ChatHistoryResponse.Messages(
+                    events = listOf(redaction),
+                    oldest = null,
+                    newest = null,
+                    endOfHistory = true,
+                    primaryMessageCount = 0,
+                ),
+                expectedRoomId = renamed.id,
+            )
+            assertEquals(MessageKind.REDACTED, db.messageDao().byId(original.id)?.kind)
+            val snapshot = saved.observe().first().single()
+            assertNull(snapshot.text)
+            assertEquals(renamed.id, saved.resolveSource(snapshot.id)?.bufferId)
+        }
+
+    @Test
     fun historyIdentityMergeKeepsTheRedactedLosersTombstoneAndInvalidatesTheWinner() =
         runTest {
             val notified = mutableListOf<Pair<Long, Long>>()
@@ -3305,6 +3497,13 @@ class EventProcessorTest {
             processor.process(networkId, early.copy(ctx = early.ctx.copy(msgid = "m1", serverTime = 2_000)))
             val loser = db.messageDao().byMsgid(buffer.id, "m1")!!
             assertNotEquals(winnerId, loser.id)
+            var saveTime = 10_000L
+            val saved = SavedMessagesRepository(db, AppClock { saveTime })
+            saved.setSaved(loser.id, true)
+            val firstSave = saved.observe().first().single()
+            saveTime += 1_000L
+            saved.setSaved(winnerId, true)
+            assertEquals(2, saved.observe().first().size)
             val timeline = CanonicalTimelineStore(db)
             val dao = db.canonicalTimelineDao()
             assertEquals(listOf(loser.id), dao.pendingNotifications(10, 60_000, 100).map { it.id })
@@ -3320,6 +3519,15 @@ class EventProcessorTest {
             assertEquals(winnerId, stored.id)
             assertEquals(winnerId, db.messageDao().byCanonicalId(loser.id)?.id)
             assertEquals(MessageKind.REDACTED, stored.kind)
+            assertEquals(firstSave.copy(text = null), saved.observe().first().single())
+            assertEquals(winnerId, saved.resolveSource(firstSave.id)?.eventId)
+            assertTrue(saved.observeSaved(winnerId).first())
+            assertTrue(saved.observeSaved(loser.id).first())
+            saved.setSaved(loser.id, false)
+            saved.setSaved(loser.id, false)
+            assertTrue(saved.observe().first().isEmpty())
+            saved.setSaved(winnerId, true)
+            assertTrue(saved.observe().first().isEmpty())
             assertEquals("Message deleted by oper", stored.text)
             assertNull(stored.ircFormattedText)
             assertNull(stored.highlightNick)

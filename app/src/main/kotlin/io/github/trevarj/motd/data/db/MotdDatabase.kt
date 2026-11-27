@@ -6,6 +6,9 @@ import androidx.room.RoomDatabase
 import androidx.room.TypeConverters
 import androidx.room.migration.Migration
 import androidx.sqlite.db.SupportSQLiteDatabase
+import io.github.trevarj.motd.data.saved.SavedMessageEntity
+import io.github.trevarj.motd.data.saved.SavedMessageRedactionEntity
+import io.github.trevarj.motd.data.saved.SavedMessagesDao
 
 // Single app database. Destructive fallback is deliberately NOT configured so schema
 // drift surfaces in review instead of wiping real user data/history; schema changes ship a proper
@@ -25,6 +28,8 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         TimelineEventFtsEntity::class,
         ComposerDraftEntity::class,
         ScheduledMessageEntity::class,
+        SavedMessageEntity::class,
+        SavedMessageRedactionEntity::class,
         EventAliasEntity::class,
         EventRedirectEntity::class,
         EventObservationEntity::class,
@@ -39,7 +44,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 54,
+    version = 55,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -59,6 +64,8 @@ abstract class MotdDatabase : RoomDatabase() {
     abstract fun composerDraftDao(): ComposerDraftDao
 
     abstract fun scheduledMessageDao(): ScheduledMessageDao
+
+    internal abstract fun savedMessagesDao(): SavedMessagesDao
 
     abstract fun memberDao(): MemberDao
 
@@ -1186,6 +1193,50 @@ val MIGRATION_53_54 =
         }
     }
 
+val MIGRATION_54_55 =
+    object : Migration(54, 55) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS saved_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    eventId INTEGER NOT NULL,
+                    bufferId INTEGER NOT NULL,
+                    networkId INTEGER NOT NULL,
+                    channelName TEXT,
+                    msgid TEXT,
+                    sender TEXT NOT NULL,
+                    text TEXT,
+                    savedAt INTEGER NOT NULL,
+                    serverTime INTEGER NOT NULL,
+                    networkName TEXT NOT NULL,
+                    conversationName TEXT NOT NULL,
+                    FOREIGN KEY(networkId) REFERENCES networks(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            db.execSQL("CREATE UNIQUE INDEX IF NOT EXISTS index_saved_messages_eventId ON saved_messages (eventId)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_saved_messages_networkId_bufferId_msgid ON saved_messages (networkId, bufferId, msgid)")
+            db.execSQL("CREATE INDEX IF NOT EXISTS index_saved_messages_networkId_channelName_msgid ON saved_messages (networkId, channelName, msgid)")
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS saved_message_redactions (
+                    networkId INTEGER NOT NULL,
+                    bufferId INTEGER NOT NULL,
+                    msgid TEXT NOT NULL,
+                    channelName TEXT,
+                    PRIMARY KEY(networkId, bufferId, msgid),
+                    FOREIGN KEY(networkId) REFERENCES networks(id) ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent(),
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS index_saved_message_redactions_networkId_channelName_msgid " +
+                    "ON saved_message_redactions (networkId, channelName, msgid)",
+            )
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1252,6 +1303,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_51_52,
         MIGRATION_52_53,
         MIGRATION_53_54,
+        MIGRATION_54_55,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"
@@ -1289,6 +1341,8 @@ internal val OBSERVED_TABLES =
         "network_ignores",
         "networks",
         "reactions",
+        "room_aliases",
+        "saved_messages",
         "scheduled_messages",
         "users",
     )
@@ -1305,7 +1359,7 @@ internal val UNOBSERVED_TABLES =
         "history_cursors",
         "network_history_cursors",
         "pending_folder_assignments",
-        "room_aliases",
+        "saved_message_redactions",
     )
 
 /**

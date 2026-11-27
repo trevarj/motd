@@ -3732,7 +3732,7 @@ class ChatViewModel
             ChatJumpResolver(
                 messages = messageRepository,
                 fetchAround = fetch@{ name, msgid, timeMs, limit ->
-                    val buffer = state.value.buffer ?: return@fetch false
+                    val buffer = state.value.buffer ?: bufferRepository.observeBuffer(bufferId).firstOrNull() ?: return@fetch false
                     val networkId = buffer.networkId
                     val client = connectionManager.clientFor(networkId) ?: return@fetch false
                     try {

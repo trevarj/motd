@@ -311,6 +311,7 @@ import io.github.trevarj.motd.ui.components.typingText
 import io.github.trevarj.motd.ui.profile.ircIdentityLabels
 import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.profile.rememberProfileMetadataSupported
+import io.github.trevarj.motd.ui.saved.SavedMessagesViewModel
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.share.PendingShare
@@ -460,6 +461,7 @@ fun ChatScreen(
     onOpenScheduledMessages: ((Long) -> Unit)? = null,
     onOpenNetworkTools: ((Long) -> Unit)? = null,
 ) {
+    val savedMessages = hiltViewModel<SavedMessagesViewModel>()
     val scheduledComposer =
         if (onOpenScheduledMessages == null) {
             null
@@ -787,6 +789,8 @@ fun ChatScreen(
         },
         onReact = viewModel::react,
         onRedact = viewModel::redact,
+        observeSavedMessage = savedMessages::observeSaved,
+        onSetSavedMessage = savedMessages::setSaved,
         onRetry = viewModel::retry,
         onDelete = viewModel::deleteFailed,
         onAcceptInvite = viewModel::acceptInvite,
@@ -1409,6 +1413,8 @@ internal fun ChatContent(
     viewportReadEnabled: Boolean = true,
     onDelete: (MessageEntity) -> Unit = {},
     onRedact: (MessageEntity) -> Unit = {},
+    observeSavedMessage: ((Long) -> Flow<Boolean>)? = null,
+    onSetSavedMessage: (Long, Boolean) -> Unit = { _, _ -> },
     onAcceptInvite: (Long) -> Unit = {},
     onDismissInvite: (Long) -> Unit = {},
     // Re-join the current channel from the parted banner.
@@ -5565,6 +5571,25 @@ internal fun ChatContent(
                         else -> !isServerBuffer && isSystemKind(it.kind)
                     }
                 }
+            val saveableKind =
+                when (target.kind) {
+                    MessageKind.PRIVMSG, MessageKind.ACTION, MessageKind.NOTICE -> true
+                    else -> false
+                }
+            val savedStatus =
+                if (observeSavedMessage != null &&
+                    (state.buffer?.type == BufferType.CHANNEL || state.buffer?.type == BufferType.QUERY) &&
+                    saveableKind &&
+                    target.pendingLabel == null &&
+                    !target.failed
+                ) {
+                    key(target.id) {
+                        val status = remember { observeSavedMessage(target.id) }
+                        status.collectAsStateWithLifecycle<Boolean?>(initialValue = null).value
+                    }
+                } else {
+                    null
+                }
             // Dismiss with the M3 hide animation, clearing the target only once it settles.
             val hideThen: (() -> Unit) -> Unit = { after ->
                 scope.launch { sheetState.hide() }.invokeOnCompletion {
@@ -5633,6 +5658,8 @@ internal fun ChatContent(
                 },
                 canRedact = canRedactMessage(target, state.buffer?.type, state.connState),
                 onRedact = { hideThen { redactionTarget = target } },
+                saved = savedStatus == true,
+                onToggleSaved = savedStatus?.let { { onSetSavedMessage(target.id, !it) } },
                 // Outbound share: the raw message text, no formatting or attribution.
                 onShare = { hideThen { shareMessageText(ctx, target.text) } },
             )

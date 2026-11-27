@@ -981,6 +981,8 @@
     <string name="chat_reply_target_unavailable">Original message not available</string>
     <string name="chat_reply_open">Go to replied message</string>
     <string name="chat_action_copy">Copy</string>
+    <string name="chat_action_save_message">Save</string>
+    <string name="chat_action_unsave_message">Unsave</string>
     <string name="chat_action_select_text">Select text</string>
     <string name="chat_action_quote">Quote</string>
     <string name="chat_action_forward">Forward</string>
@@ -2771,6 +2773,13 @@
     <string name="irc_link_connect">Connect and join</string>
     <string name="irc_link_connecting">Connecting…</string>
     <string name="irc_link_joining">Waiting for the server to confirm the join…</string>
+    <string name="saved_messages_title">Saved Messages</string>
+    <string name="saved_messages_empty_title">No saved messages</string>
+    <string name="saved_messages_empty_message">Saved messages stay on this device. If chat history is pruned, the saved copy stays here, but the original may no longer open.</string>
+    <string name="saved_messages_conversation">%1$s · %2$s</string>
+    <string name="saved_messages_redacted">Message was redacted</string>
+    <string name="saved_messages_remove">Remove from saved messages</string>
+    <string name="saved_messages_source_unavailable">The original message is no longer available on this device.</string>
     <string name="scheduled_title">Scheduled messages</string>
     <string name="scheduled_open">Schedule message</string>
     <string name="scheduled_when_connected">When connected</string>

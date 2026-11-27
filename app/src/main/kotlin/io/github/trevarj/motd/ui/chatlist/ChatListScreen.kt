@@ -90,6 +90,7 @@ import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material.icons.outlined.PushPin
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.Unarchive
 import androidx.compose.material.icons.outlined.Warning
 import androidx.compose.material3.AlertDialog
@@ -274,6 +275,7 @@ fun ChatListScreen(
     audioViewModel: AudioPlaybackViewModel = hiltViewModel(),
     newConversationSheetActive: () -> Boolean = { true },
     onOpenScheduledMessages: (() -> Unit)? = null,
+    onOpenSavedMessages: (() -> Unit)? = null,
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val community by viewModel.community.collectAsStateWithLifecycle()
@@ -377,6 +379,7 @@ fun ChatListScreen(
         onOpenBuffer = onOpenBuffer,
         onOpenSettings = onOpenSettings,
         onOpenScheduledMessages = onOpenScheduledMessages,
+        onOpenSavedMessages = onOpenSavedMessages,
         onOpenSearch = onOpenSearch,
         onOpenFeed = onOpenFeed,
         onOpenMentions = onOpenMentions,
@@ -531,6 +534,7 @@ fun ChatListContent(
     onCancelNewConversationJoin: () -> Unit = {},
     onConsumeNewConversationJoin: (Long) -> Boolean = { false },
     onOpenScheduledMessages: (() -> Unit)? = null,
+    onOpenSavedMessages: (() -> Unit)? = null,
     unreadFilter: MutableStateFlow<ChatListUnreadScope?> = remember { MutableStateFlow(null) },
     folderSelection: MutableStateFlow<Long?> = remember { MutableStateFlow(null) },
 ) {
@@ -1083,6 +1087,17 @@ fun ChatListContent(
                                                             onClick = {
                                                                 moreOpen = false
                                                                 onOpenScheduledMessages()
+                                                            },
+                                                        )
+                                                    }
+                                                    if (onOpenSavedMessages != null) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.saved_messages_title)) },
+                                                            leadingIcon = { Icon(Icons.Outlined.StarBorder, contentDescription = null) },
+                                                            modifier = Modifier.testTag("saved_messages_open"),
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                onOpenSavedMessages()
                                                             },
                                                         )
                                                     }

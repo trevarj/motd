@@ -21,6 +21,8 @@ import kotlinx.serialization.Serializable
     val bufferId: Long? = null,
 )
 
+@Serializable data object SavedMessagesRoute
+
 @Serializable data object OnboardingRoute
 
 @Serializable data object QrInviteScannerRoute

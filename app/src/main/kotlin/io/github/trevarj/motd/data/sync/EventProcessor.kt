@@ -24,6 +24,7 @@ import io.github.trevarj.motd.data.db.NetworkIdentityEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.ReactionEntity
+import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -313,12 +314,23 @@ class EventProcessor
             @Volatile var prefixModes: Map<Char, Char> = emptyMap(),
             @Volatile var chanModes: List<Set<Char>> = emptyList(),
             @Volatile var botMode: Char? = null,
+            private var previousSelfNicks: List<String> = emptyList(),
         ) {
             fun setNick(nick: String) {
+                previousSelfNicks = nicksBefore(nick)
                 selfNick = nick
             }
 
             fun isSelfNick(nick: String): Boolean = selfNick.isNotBlank() && normalize(nick) == normalize(selfNick)
+
+            fun wasSelfNick(nick: String): Boolean = isSelfNick(nick) || previousSelfNicks.any { normalize(it) == normalize(nick) }
+
+            fun nicksBefore(nextNick: String): List<String> =
+                if (selfNick.isNotBlank() && !isSelfNick(nextNick) && selfNick !in previousSelfNicks) {
+                    previousSelfNicks.takeLast(7) + selfNick
+                } else {
+                    previousSelfNicks
+                }
 
             fun normalize(name: String): String = identityRules.normalize(name)
 
@@ -405,6 +417,7 @@ class EventProcessor
                     prefixModes = parsePrefixModes(isupport["PREFIX"]),
                     chanModes = isupport["CHANMODES"]?.split(',')?.map(String::toSet).orEmpty(),
                     botMode = isupport["BOT"]?.singleOrNull(),
+                    previousSelfNicks = if (startsSession) emptyList() else states[networkId]?.nicksBefore(nick).orEmpty(),
                 )
             recordIdentityDiagnostic(networkId, identityRules)
         }
@@ -1004,7 +1017,7 @@ class EventProcessor
                         // its own; history, replay, and push revive only when they insert a genuinely new
                         // newest unread row, so backfill, gap fills, and duplicate transports retain the
                         // user's choice. Self echoes and system activity never revive.
-                        if (!sourceIsSelf && type != BufferType.SERVER) {
+                        if (!sourceIsSelf && type != BufferType.SERVER && ingested.event.kind != MessageKind.REDACTED) {
                             if (origin == EventOrigin.LIVE) {
                                 bufferDao.unarchiveIfUnmuted(ingested.event.bufferId)
                             } else if (ingested is IngestResult.Inserted) {
@@ -1230,19 +1243,41 @@ class EventProcessor
         ): Pair<RoomId, TimelineEventId>? {
             val st = stateFor(networkId)
             val route = resolveReactionRoute(networkId, event.source.nick, event.target, historyTarget, st)
-            val expectedRoomId = existingReactionRoomId(networkId, route, st, event.ctx.account) ?: return null
+            val channelName = event.target.takeIf { isChannel(networkId, it, st) }?.let(st::normalize)
 
             return db.withTransaction {
+                val historyRoomId = existingReactionRoomId(networkId, route, st, event.ctx.account)
+                if (historyTarget != null) {
+                    if (channelName != null) {
+                        if (route.type != BufferType.CHANNEL) return@withTransaction null
+                        if (channelName != st.normalize(historyTarget) &&
+                            (historyRoomId == null || bufferStore.resolveChannelRoom(networkId, channelName)?.id != historyRoomId)
+                        ) {
+                            return@withTransaction null
+                        }
+                    } else if (route.type != BufferType.QUERY || historyRoomId == null ||
+                        !matchesHistoryQueryRedaction(networkId, historyRoomId, historyTarget, event, st)
+                    ) {
+                        return@withTransaction null
+                    }
+                }
+                if (channelName == null && historyRoomId == null) return@withTransaction null
+                val canonicalExpectedRoomId = historyRoomId?.let { bufferDao.canonicalId(it) }
+                val savedMessages = db.savedMessagesDao()
+                val channelKey = canonicalExpectedRoomId?.let { savedMessages.channelKey(it) } ?: channelName
+
                 val target =
                     db.canonicalTimelineDao().eventByAlias(
                         networkId,
                         EventAliasNamespace.MSGID,
                         event.targetMsgid.toByteArray(Charsets.UTF_8),
-                    ) ?: return@withTransaction null
-                val canonicalExpectedRoomId = bufferDao.canonicalId(expectedRoomId) ?: expectedRoomId
-                if (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS) {
+                    )
+                if (target != null && (target.bufferId != canonicalExpectedRoomId || target.kind !in REDACTABLE_MESSAGE_KINDS)) {
                     return@withTransaction null
                 }
+                savedMessages.rememberRedaction(networkId, canonicalExpectedRoomId, channelKey, target?.id, event.targetMsgid)
+                savedMessages.redact(networkId, canonicalExpectedRoomId, channelKey, target?.id, event.targetMsgid)
+                if (target == null) return@withTransaction null
                 reactionDao.deleteForTarget(target.bufferId, event.targetMsgid)
                 // Retry post-commit retirement without rewriting an existing tombstone.
                 if (target.kind == MessageKind.REDACTED) return@withTransaction target.bufferId to target.id
@@ -1253,36 +1288,64 @@ class EventProcessor
                             ?.takeIf(String::isNotBlank)
                             ?.let { " ($it)" }
                             .orEmpty()
-                messageDao.update(
-                    target.copy(
-                        kind = MessageKind.REDACTED,
-                        text = tombstone,
-                        ircFormattedText = null,
-                        hasMention = false,
-                        highlightNick = null,
-                        highlightCaseMapping = null,
-                        pendingLabel = null,
-                        failed = false,
-                    ),
-                )
+                messageDao.update(target.redacted(tombstone))
                 target.bufferId to target.id
             }
         }
 
-        private suspend fun notifyCommittedRedactions(redactions: List<Pair<RoomId, TimelineEventId>>) {
-            for ((bufferId, eventId) in redactions) {
-                try {
-                    val canonical = messageDao.byCanonicalId(eventId)
-                    notifier.onMessageRedacted(canonical?.bufferId ?: bufferId, canonical?.id ?: eventId)
-                } catch (cancelled: CancellationException) {
-                    throw cancelled
-                } catch (error: Exception) {
-                    diagnostics.record("notifications", "redaction_failed") {
-                        mapOf("event_id" to eventId, "error" to error::class.simpleName)
-                    }
-                }
+        private suspend fun matchesHistoryQueryRedaction(
+            networkId: Long,
+            roomId: RoomId,
+            historyTarget: String,
+            event: IrcEvent.MessageRedacted,
+            st: NetworkState,
+        ): Boolean {
+            val account = event.ctx.account?.takeUnless { it.isEmpty() || it == "*" }
+            val aliases = db.roomAliasDao()
+            val accountRoomId =
+                account
+                    ?.let { aliases.byValue(networkId, RoomAliasNamespace.ACCOUNT, it) }
+                    ?.let { bufferDao.canonicalId(it.roomId) }
+            val source = st.normalize(event.source.nick)
+            val peer = st.normalize(historyTarget)
+            val sourceRoomId = bufferStore.resolveQueryRoom(networkId, source, account = null)?.id
+            val sourceIsPeer = accountRoomId == roomId || (accountRoomId == null && (source == peer || sourceRoomId == roomId))
+            val target = st.normalize(event.target)
+            val targetsPeer = target == peer || bufferStore.resolveQueryRoom(networkId, target, account = null)?.id == roomId
+            if (!sourceIsPeer && targetsPeer &&
+                (st.wasSelfNick(event.source.nick) || (accountRoomId == null && sourceRoomId == null))
+            ) {
+                return true
             }
+            if (accountRoomId != null) return accountRoomId == roomId
+            if (sourceRoomId != null && sourceRoomId != roomId) return false
+            if (account != null && aliases.forRoom(roomId).any { it.namespace == RoomAliasNamespace.ACCOUNT && it.value != account }) {
+                return false
+            }
+            return sourceIsPeer || (!st.isSelfNick(event.source.nick) && st.isSelfNick(event.target))
         }
+
+        private suspend fun notifyCommittedRedactions(redactions: List<Pair<RoomId, TimelineEventId>>) {
+            for ((bufferId, eventId) in redactions) dispatchCommittedRedaction(bufferId, eventId)
+            bufferStore.drainCommittedMergeRedactions(::dispatchCommittedRedaction)
+        }
+
+        private suspend fun dispatchCommittedRedaction(
+            bufferId: RoomId,
+            eventId: TimelineEventId,
+        ): Boolean =
+            try {
+                val canonical = messageDao.byCanonicalId(eventId)
+                notifier.onMessageRedacted(canonical?.bufferId ?: bufferId, canonical?.id ?: eventId)
+                true
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                diagnostics.record("notifications", "redaction_failed") {
+                    mapOf("event_id" to eventId, "error" to error::class.simpleName)
+                }
+                false
+            }
 
         private suspend fun onHistoryBatch(
             networkId: Long,
@@ -3504,12 +3567,14 @@ class EventProcessor
             }
             val oldRoomId = existingChannelBuffer(networkId, e.oldName, st)?.id
             val renamed =
-                bufferStore.renameChannel(
-                    networkId = networkId,
-                    oldNormalizedName = st.normalize(e.oldName),
-                    newNormalizedName = st.normalize(e.newName),
-                    newDisplayName = e.newName,
-                ) ?: return
+                db.withTransaction {
+                    bufferStore.renameChannel(
+                        networkId = networkId,
+                        oldNormalizedName = st.normalize(e.oldName),
+                        newNormalizedName = st.normalize(e.newName),
+                        newDisplayName = e.newName,
+                    )
+                } ?: return
             oldRoomId?.let { rosterSnapshots.remove(RosterKey(networkId, it)) }
             rosterSnapshots.remove(RosterKey(networkId, renamed.id))
             insertSystem(

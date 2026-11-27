@@ -374,7 +374,7 @@ class CanonicalTimelineStore
                         val other = dao.eventById(existing.timelineEventId)
                         val current = dao.eventById(currentEventId)
                         if (other != null && current != null) {
-                            currentEventId = coalesce(current, other, current)?.id ?: currentEventId
+                            currentEventId = coalesce(networkId, current, other, current)?.id ?: currentEventId
                         }
                     }
                 }
@@ -519,8 +519,9 @@ class CanonicalTimelineStore
             val inserted: Boolean
             if (candidate == null) {
                 val eventId = dao.nextTimelineEventId()
-                initial = incoming.copy(id = eventId, timelineOrder = eventId)
+                initial = applyKnownRedaction(observation.networkId, incoming.copy(id = eventId, timelineOrder = eventId))
                 dao.insertEvent(initial)
+                if (initial.msgid != null) db.savedMessagesDao().reconcileEvent(observation.networkId, initial)
                 inserted = true
             } else {
                 initial = candidate
@@ -534,7 +535,7 @@ class CanonicalTimelineStore
                 if (existingAlias != null && existingAlias.timelineEventId != canonical.id) {
                     val other = dao.eventById(existingAlias.timelineEventId) ?: continue
                     if (compatible(other, incoming) == null) continue
-                    val merged = coalesce(canonical, other, incoming) ?: continue
+                    val merged = coalesce(observation.networkId, canonical, other, incoming) ?: continue
                     redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
                     canonical = merged
                 } else if (existingAlias == null) {
@@ -549,7 +550,7 @@ class CanonicalTimelineStore
                 }
             }
             if (provisionalCandidate != null && provisionalCandidate.id != canonical.id) {
-                val merged = coalesce(canonical, provisionalCandidate, incoming)
+                val merged = coalesce(observation.networkId, canonical, provisionalCandidate, incoming)
                 if (merged != null) {
                     redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
                     canonical = merged
@@ -577,16 +578,21 @@ class CanonicalTimelineStore
                         observation.selfAttributionAuthoritative,
                     ),
                 )
-            if (enriched != canonical) {
-                dao.updateEvent(enriched)
-                db.bufferDao().retimeLocalReadAnchor(enriched.id, enriched.serverTime)
+            val updated = if (canonical != enriched) applyKnownRedaction(observation.networkId, enriched) else canonical
+            if (updated != canonical) {
+                if (canonical.kind != MessageKind.REDACTED && updated.kind == MessageKind.REDACTED) redactionMerged = true
+                dao.updateEvent(updated)
+                if (updated.msgid != canonical.msgid || updated.kind != canonical.kind) {
+                    db.savedMessagesDao().reconcileEvent(observation.networkId, updated)
+                }
+                db.bufferDao().retimeLocalReadAnchor(updated.id, updated.serverTime)
                 db.historyGapDao().repointEventBoundary(
-                    enriched.id,
-                    enriched.id,
-                    enriched.serverTime,
-                    enriched.timelineOrder,
+                    updated.id,
+                    updated.id,
+                    updated.serverTime,
+                    updated.timelineOrder,
                 )
-                canonical = enriched
+                canonical = updated
             }
 
             dao.insertObservation(
@@ -636,6 +642,25 @@ class CanonicalTimelineStore
                 else -> IngestResult.Merged(canonical, redactionMerged)
             }
         }
+
+        private suspend fun applyKnownRedaction(
+            networkId: Long,
+            event: TimelineEventEntity,
+        ): TimelineEventEntity {
+            val msgid = event.msgid?.takeIf(String::isNotEmpty) ?: return event
+            if (event.kind !in CHAT_MESSAGE_KINDS || !db.savedMessagesDao().wasRedacted(networkId, event.bufferId, msgid)) return event
+            return event.redactedFromMarker()
+        }
+
+        internal suspend fun applyMergedRedactions(
+            networkId: Long,
+            roomId: RoomId,
+        ): List<TimelineEventId> =
+            db.savedMessagesDao().roomMessagesToRedact(networkId, roomId).map { event ->
+                dao.updateEvent(event.redactedFromMarker())
+                db.reactionDao().deleteForTarget(roomId, checkNotNull(event.msgid))
+                event.id
+            }
 
         private suspend fun followEarlierLiveTies(event: TimelineEventEntity): TimelineEventEntity {
             val after = dao.lastLiveTieAfter(event.bufferId, event.serverTime, event.timelineOrder, event.id) ?: return event
@@ -746,6 +771,7 @@ class CanonicalTimelineStore
         }
 
         private suspend fun coalesce(
+            networkId: Long,
             first: TimelineEventEntity,
             second: TimelineEventEntity,
             incoming: TimelineEventEntity,
@@ -765,8 +791,9 @@ class CanonicalTimelineStore
                 } else {
                     combined
                 }
-            val merged = enrich(coalesced, incoming, provenanceOf(incoming))
+            val merged = applyKnownRedaction(networkId, enrich(coalesced, incoming, provenanceOf(incoming)))
             if (merged != winner) dao.updateEvent(merged)
+            db.savedMessagesDao().reconcileEvent(networkId, merged, loser.id)
             db.historyGapDao().repointEventBoundary(
                 loser.id,
                 winner.id,
@@ -1039,7 +1066,29 @@ class CanonicalTimelineStore
                     MessageKind.NETSPLIT,
                     MessageKind.NETJOIN,
                 )
+            val CHAT_MESSAGE_KINDS = setOf(MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION)
             const val DELIVERY_RECONCILIATION_WINDOW_MS = 2_000L
             const val PROVISIONAL_RECONCILIATION_WINDOW_MS = 30_000L
         }
     }
+
+internal fun TimelineEventEntity.redacted(tombstone: String = "Message deleted"): TimelineEventEntity =
+    copy(
+        kind = MessageKind.REDACTED,
+        text = tombstone,
+        ircFormattedText = null,
+        hasMention = false,
+        highlightNick = null,
+        highlightCaseMapping = null,
+        pendingLabel = null,
+        failed = false,
+    )
+
+private fun TimelineEventEntity.redactedFromMarker(): TimelineEventEntity =
+    redacted().copy(
+        notificationEligible = false,
+        notificationEligibilityResolved = true,
+        notificationWatched = false,
+        notificationHandled = true,
+        soundHandled = true,
+    )

@@ -25,6 +25,8 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.DeleteOutline
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material.icons.outlined.TextFields
 import androidx.compose.material.icons.outlined.Translate
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -107,6 +109,8 @@ fun MessageActionSheet(
     onSelectText: () -> Unit = {},
     initialReactionsTab: Boolean = false,
     eventInfo: MessageEntity? = null,
+    saved: Boolean = false,
+    onToggleSaved: (() -> Unit)? = null,
 ) {
     val canReplyOrReact = !isServerBuffer && eventInfo == null
     val hasReactions = eventInfo == null && reactions.isNotEmpty()
@@ -248,6 +252,14 @@ fun MessageActionSheet(
                                     modifier = actionModifier.testTag("message_action_forward"),
                                 )
                             }
+                            onToggleSaved?.let {
+                                ActionItem(
+                                    if (saved) Icons.Filled.Star else Icons.Outlined.StarBorder,
+                                    stringResource(if (saved) R.string.chat_action_unsave_message else R.string.chat_action_save_message),
+                                    it,
+                                    modifier = actionModifier.testTag("message_action_toggle_saved"),
+                                )
+                            }
                             ActionItem(
                                 Icons.Filled.Share,
                                 stringResource(R.string.chat_action_share),
@@ -274,6 +286,7 @@ fun MessageActionSheet(
                                 3 + (if (canReplyOrReact) 1 else 0) +
                                     (if (onTranslate != null) 1 else 0) +
                                     (if (onForward != null) 1 else 0) +
+                                    (if (onToggleSaved != null) 1 else 0) +
                                     (if (canSelectText) 1 else 0) +
                                     (if (canRedact) 1 else 0)
                             repeat((4 - actionCount % 4) % 4) { Spacer(actionModifier) }

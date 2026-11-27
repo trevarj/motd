@@ -936,8 +936,14 @@ class BufferStore
                         )
                     val mergedHistoryGaps = historyGapsForRoomMerge(winner.id, loser.id)
                     bufferDao.update(result)
+                    val savedMessages = db.savedMessagesDao()
+                    val fromChannelName = if (loser.type == BufferType.CHANNEL) savedMessages.channelKey(loser.id) else null
+                    val toChannelName = if (winner.type == BufferType.CHANNEL) savedMessages.channelKey(winner.id) else null
                     aliasDao.repoint(loser.id, winner.id)
                     canonicalTimeline.moveEventsToRoom(winner.networkId, loser.id, winner.id)
+                    savedMessages.repointRedactions(winner.networkId, loser.id, winner.id, fromChannelName, toChannelName)
+                    savedMessages.dropDuplicateRedactions(winner.networkId, loser.id)
+                    savedMessages.mergeRooms(winner.networkId, loser.id, winner.id)
                     bufferDao.refreshMonitorActivity(winner.id)
                     val canonicalMergedHistoryGaps =
                         canonicalizeMergedHistoryGaps(
@@ -948,6 +954,9 @@ class BufferStore
                     aliasDao.deleteMembers(loser.id)
                     aliasDao.copyReactions(loser.id, winner.id)
                     aliasDao.deleteReactions(loser.id)
+                    canonicalTimeline.applyMergedRedactions(winner.networkId, winner.id).forEach { eventId ->
+                        db.appStateDao().insert(AppStateEntity("$ROOM_MERGE_REDACTION_PREFIX${winner.id}:$eventId"))
+                    }
                     mergeComposerDrafts(winner.id, loser.id)
                     mergeHistoryCursors(winner.id, loser.id, result.historyComplete)
                     replaceMergedHistoryGaps(winner.id, loser.id, canonicalMergedHistoryGaps)
@@ -960,7 +969,10 @@ class BufferStore
                     )
                     result
                 }
-            if (!nestedTransaction) drainCommittedRoomMerges()
+            if (!nestedTransaction) {
+                drainCommittedRoomMerges()
+                drainCommittedMergeRedactions()
+            }
             return merged
         }
 
@@ -1279,9 +1291,14 @@ class BufferStore
                             verified = true,
                         ),
                     )
+                    db.savedMessagesDao().renameSavedChannel(networkId, updated.id, oldNormalizedName, newNormalizedName)
+                    db.savedMessagesDao().renameRedactedChannel(networkId, updated.id, oldNormalizedName, newNormalizedName)
                     updated
                 }
-            if (!nestedTransaction) drainCommittedRoomMerges()
+            if (!nestedTransaction) {
+                drainCommittedRoomMerges()
+                drainCommittedMergeRedactions()
+            }
             return renamed
         }
 
@@ -1316,6 +1333,24 @@ class BufferStore
                 notificationRoomMergeListener.onRoomsMerged(winnerId, loserId)
                 notifier.onRoomsMerged(winnerId, loserId)
                 state.delete(key)
+            }
+        }
+
+        internal suspend fun drainCommittedMergeRedactions(
+            dispatch: suspend (RoomId, Long) -> Boolean = { roomId, eventId ->
+                val event = db.messageDao().byCanonicalId(eventId)
+                notifier.onMessageRedacted(event?.bufferId ?: roomId, event?.id ?: eventId)
+                true
+            },
+        ) {
+            val state = db.appStateDao()
+            state.keysLike("$ROOM_MERGE_REDACTION_PREFIX%").forEach { key ->
+                val target = key.removePrefix(ROOM_MERGE_REDACTION_PREFIX)
+                val roomId = target.substringBefore(':').toLongOrNull()
+                val eventId = target.substringAfter(':', "").toLongOrNull()
+                if (roomId == null || eventId == null || dispatch(roomId, eventId)) {
+                    state.delete(key)
+                }
             }
         }
 
@@ -1421,6 +1456,7 @@ class BufferStore
     }
 
 internal const val ROOM_MERGE_PRESENTATION_PREFIX = "room_merge_notification:"
+private const val ROOM_MERGE_REDACTION_PREFIX = "room_merge_redaction:"
 
 internal fun roomMergePresentationKey(
     winnerId: RoomId,

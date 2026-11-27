@@ -6448,6 +6448,48 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun prunedSavedMessageFetchesExactSourceBeforeChatUiObservesState() =
+        runTest {
+            val target = channel.ircTarget
+            val transport =
+                RecordingTransport { line ->
+                    if (line == "CHATHISTORY AROUND $target msgid=saved-remote 100") {
+                        feed(":srv BATCH +saved chathistory $target")
+                        feed("@batch=saved;msgid=saved-remote;time=2026-07-20T09:00:00.000Z :alice!u@host PRIVMSG $target :Restored source")
+                        feed(":srv BATCH -saved")
+                    }
+                }
+            val client = testClient(transport)
+            client.start()
+            try {
+                runCurrent()
+                val caps = "batch message-tags server-time draft/chathistory"
+                transport.feed(":srv CAP * LS :$caps")
+                runCurrent()
+                transport.feed(":srv CAP me ACK :$caps")
+                transport.feed(":srv 005 me CHATHISTORY=100 MSGREFTYPES=msgid :supported")
+                transport.feed(":srv 001 me :Welcome")
+                runCurrent()
+                val vm =
+                    viewModel(
+                        channel,
+                        FakeConnectionManager(network.id, client = client),
+                        messages = seamRepository(),
+                        jumpToMsgid = "saved-remote",
+                    )
+
+                val (jump) =
+                    combine(vm.jumpTarget, vm.entryState, ::Pair)
+                        .first { (position, entry) -> position != null || entry is EntryPositionState.Unresolved }
+                val restored = db.messageDao().byMsgid(channel.id, "saved-remote")
+                assertEquals("Restored source", restored?.text)
+                assertEquals(restored?.id, checkNotNull(jump).expectedEventId)
+            } finally {
+                client.stop()
+            }
+        }
+
+    @Test
     fun `coalesced saved viewport follows canonical event and retains pixel offset`() =
         runTest {
             val winnerId =
@@ -8306,7 +8348,9 @@ class ChatViewModelTest {
         }
     }
 
-    private class RecordingTransport : IrcTransport {
+    private class RecordingTransport(
+        private val onSend: suspend RecordingTransport.(String) -> Unit = {},
+    ) : IrcTransport {
         private val inbound = Channel<String>(Channel.UNLIMITED)
         val sent = mutableListOf<String>()
 
@@ -8320,6 +8364,7 @@ class ChatViewModelTest {
 
         override suspend fun send(line: String) {
             sent += line
+            onSend(line)
         }
 
         override suspend fun close() {

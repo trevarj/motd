@@ -78,6 +78,7 @@ import io.github.trevarj.motd.ui.invite.JoinInviteScreen
 import io.github.trevarj.motd.ui.invite.QrInviteScannerScreen
 import io.github.trevarj.motd.ui.onboarding.OnboardingScreen
 import io.github.trevarj.motd.ui.profile.ProfileEditorScreen
+import io.github.trevarj.motd.ui.saved.SavedMessagesScreen
 import io.github.trevarj.motd.ui.search.SearchScreen
 import io.github.trevarj.motd.ui.settings.AppearanceSettingsScreen
 import io.github.trevarj.motd.ui.settings.BackupRestoreScreen
@@ -403,6 +404,23 @@ fun MotdNavGraph(
             ScheduledMessagesScreen(
                 bufferId = entry.toRoute<ScheduledMessagesRoute>().bufferId,
                 onBack = { navController.popBackStack() },
+            )
+        }
+        composable<SavedMessagesRoute> { entry ->
+            SavedMessagesScreen(
+                onBack = { navController.popBackStack() },
+                onOpenSource = { source ->
+                    if (navController.currentBackStackEntry == entry) {
+                        navController.navigate(
+                            ChatRoute(
+                                bufferId = source.bufferId,
+                                jumpToMsgid = source.msgid,
+                                jumpToTime = if (source.msgid == null) 0 else source.serverTime,
+                                jumpToEventId = source.eventId,
+                            ),
+                        )
+                    }
+                },
             )
         }
         composable<OnboardingRoute> {
@@ -975,6 +993,7 @@ private fun ChatListPane(
         },
         onOpenSettings = { navController.navigate(SettingsRoute()) },
         onOpenScheduledMessages = { navController.navigate(ScheduledMessagesRoute()) { launchSingleTop = true } },
+        onOpenSavedMessages = { navController.navigate(SavedMessagesRoute) { launchSingleTop = true } },
         onOpenSearch = { navController.navigate(SearchRoute()) },
         onOpenFeed = { navController.navigate(GlobalFeedRoute) },
         onOpenMentions = { navController.navigate(MentionsRoute) },

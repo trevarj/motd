@@ -21,6 +21,9 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.repo.ChatHistoryMediatorFactory
 import io.github.trevarj.motd.data.repo.MessageRepositoryImpl
+import io.github.trevarj.motd.data.saved.SavedMessageSource
+import io.github.trevarj.motd.data.saved.SavedMessagesRepository
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.service.NotificationRoomMergeListener
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
@@ -533,6 +536,7 @@ class BufferStoreCanonicalTest {
         runTest {
             val retirements = mutableListOf<Pair<Long, Long>>()
             val settingsMerges = mutableListOf<Pair<Long, Long>>()
+            val redactions = mutableListOf<Pair<Long, Long>>()
             val notifyingStore =
                 BufferStore(
                     db,
@@ -544,6 +548,15 @@ class BufferStoreCanonicalTest {
                             hasMention: Boolean,
                             message: io.github.trevarj.motd.irc.event.IrcEvent.ChatMessage,
                         ) = Unit
+
+                        override suspend fun onMessageRedacted(
+                            bufferId: Long,
+                            messageId: Long,
+                        ) {
+                            assertFalse(db.inTransaction())
+                            assertEquals(MessageKind.REDACTED, db.messageDao().byId(messageId)?.kind)
+                            redactions += bufferId to messageId
+                        }
 
                         override suspend fun onRoomsMerged(
                             winnerId: Long,
@@ -569,6 +582,23 @@ class BufferStoreCanonicalTest {
                 )
             val winner = notifyingStore.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
             val loser = notifyingStore.getOrCreate(networkId, "bob", "Bob", BufferType.QUERY)
+            val winnerMessage =
+                MessageEntity(
+                    bufferId = winner.id,
+                    msgid = "exact-msgid",
+                    serverTime = 1_000,
+                    sender = "alice",
+                    kind = MessageKind.PRIVMSG,
+                    text = "secret",
+                    ircFormattedText = "\u0002secret",
+                    dedupKey = "exact-msgid",
+                )
+            val (winningEvent, losingEvent) =
+                db.messageDao().insertAll(listOf(winnerMessage, winnerMessage.copy(bufferId = loser.id)))
+            val saved = SavedMessagesRepository(db, AppClock { 123L })
+            saved.setSaved(winningEvent, true)
+            db.savedMessagesDao().rememberRedaction(networkId, loser.id, null, losingEvent, "exact-msgid")
+            assertEquals(1, db.historyPruneDao().deleteOldest(loser.id, 1_001L, presence = false, chunk = 1))
 
             val failed =
                 runCatching {
@@ -581,6 +611,8 @@ class BufferStoreCanonicalTest {
             assertTrue(failed.isFailure)
             assertTrue(retirements.isEmpty())
             assertTrue(settingsMerges.isEmpty())
+            assertTrue(redactions.isEmpty())
+            assertEquals("secret", db.messageDao().byId(winningEvent)?.text)
             assertEquals(loser.id, db.bufferDao().observeById(loser.id)?.id)
             assertTrue(
                 db.appStateDao().keysLike("$ROOM_MERGE_PRESENTATION_PREFIX%").isEmpty(),
@@ -589,11 +621,50 @@ class BufferStoreCanonicalTest {
             db.withTransaction { notifyingStore.mergeRooms(winner.id, loser.id) }
             assertTrue(retirements.isEmpty())
             assertTrue(settingsMerges.isEmpty())
+            assertTrue(redactions.isEmpty())
+            val tombstone = checkNotNull(db.messageDao().byId(winningEvent))
+            assertEquals(MessageKind.REDACTED, tombstone.kind)
+            assertEquals("Message deleted", tombstone.text)
+            assertEquals(null, tombstone.ircFormattedText)
+            val redactedSnapshot = saved.observe().first().single()
+            assertEquals(null, redactedSnapshot.text)
             notifyingStore.drainCommittedRoomMerges()
+            notifyingStore.drainCommittedMergeRedactions { _, _ -> false }
+            assertTrue(redactions.isEmpty())
+            notifyingStore.drainCommittedMergeRedactions()
             assertEquals(listOf(winner.id to loser.id), retirements)
             assertEquals(listOf(winner.id to loser.id), settingsMerges)
+            assertEquals(listOf(winner.id to winningEvent), redactions)
             notifyingStore.drainCommittedRoomMerges()
+            notifyingStore.drainCommittedMergeRedactions()
             assertEquals(listOf(winner.id to loser.id), settingsMerges)
+            assertEquals(listOf(winner.id to winningEvent), redactions)
+        }
+
+    @Test
+    fun renameMergeAppliesRetiredChannelMarkerToExistingMessage() =
+        runTest {
+            val winner = store.getOrCreate(networkId, "#new", "#new", BufferType.CHANNEL)
+            val retired = store.getOrCreate(networkId, "#old", "#old", BufferType.CHANNEL)
+            val message =
+                MessageEntity(
+                    bufferId = winner.id,
+                    msgid = "exact-msgid",
+                    serverTime = 1_000,
+                    sender = "alice",
+                    kind = MessageKind.PRIVMSG,
+                    text = "secret",
+                    dedupKey = "exact-msgid",
+                )
+            val (originalId, eventId) = db.messageDao().insertAll(listOf(message.copy(bufferId = retired.id), message))
+            db.savedMessagesDao().rememberRedaction(networkId, retired.id, "#old", originalId, "exact-msgid")
+            db.bufferDao().deleteBuffer(retired.id)
+            store.getOrCreate(networkId, "#old", "#old", BufferType.CHANNEL)
+
+            store.renameChannel(networkId, "#old", "#new", "#new")
+
+            assertEquals(MessageKind.REDACTED, db.messageDao().byId(eventId)?.kind)
+            assertEquals("Message deleted", db.messageDao().byId(eventId)?.text)
         }
 
     @Test
@@ -703,7 +774,13 @@ class BufferStoreCanonicalTest {
                             ),
                         ),
                     ).single()
+            val saved = SavedMessagesRepository(db, AppClock { 123L })
+            saved.setSaved(eventId, true)
+            val snapshot = saved.observe().first().single()
             val merged = store.mergeRooms(winner.id, loser.id)
+            assertEquals(SavedMessageSource(merged.id, eventId, "redirected-message", 1_000L), saved.resolveSource(snapshot.id))
+            saved.remove(snapshot.id)
+            assertFalse(saved.observeSaved(eventId).first())
             var mediatorRoomId: Long? = null
             val repository =
                 MessageRepositoryImpl(
