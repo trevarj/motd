@@ -54,6 +54,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -129,6 +130,7 @@ import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.HostedImageSnapshot
 import io.github.trevarj.motd.attachment.HostedImageTooLarge
+import io.github.trevarj.motd.attachment.MAX_X0AT_LIMIT_BYTES
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
@@ -151,9 +153,14 @@ import io.github.trevarj.motd.ui.theme.readableForeground
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import io.github.trevarj.motd.ui.components.EffectDropdownMenu as DropdownMenu
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet as ModalBottomSheet
@@ -180,7 +187,32 @@ private sealed interface AttachmentFlow {
         val replaceDraft: Boolean,
         // Follow the default backend until the user explicitly chooses one.
         val backend: AttachmentBackend? = null,
-    ) : AttachmentFlow
+        val originalSizeIsLowerBound: Boolean = false,
+    ) : AttachmentFlow {
+        fun needsVideoSizeCheck(limitBytes: Long): Boolean = originalSizeIsLowerBound && (source.sizeOrNull() ?: 0L) <= limitBytes
+    }
+}
+
+private class VideoReviewConsent(
+    val request: AttachmentFlow.Confirm,
+    val config: PasteBackendConfig,
+    val context: AttachmentUploadContext,
+) {
+    var revoked by mutableStateOf(false)
+        private set
+
+    fun revoke() {
+        revoked = true
+    }
+
+    fun matches(
+        config: PasteBackendConfig,
+        context: AttachmentUploadContext,
+    ): Boolean =
+        !revoked && this.context == context &&
+            this.config.sizeLimitBytes == config.sizeLimitBytes &&
+            this.config.stripsHostedUploadMetadata(request.source) == config.stripsHostedUploadMetadata(request.source) &&
+            sameUploadConsent(this.config, config)
 }
 
 internal data class UploadDestination(
@@ -266,7 +298,19 @@ fun AttachmentSheets(
     var flow by remember { mutableStateOf<AttachmentFlow>(AttachmentFlow.Idle) }
     var pasteText by remember { mutableStateOf("") }
     val attempt by viewModel.attempt.collectAsStateWithLifecycle()
-    val lastAttempt = attempt?.let { AttachmentFlow.Confirm(it.source, it.replaceDraft, it.config.backend) }
+    var compressionConsent by remember { mutableStateOf<VideoReviewConsent?>(null) }
+    var compression by remember { mutableStateOf<UploadVideoReview?>(null) }
+    var compressionJob by remember { mutableStateOf<Job?>(null) }
+    var uploadingCompressed by remember { mutableStateOf(false) }
+    val readyVideo = (compression as? UploadVideoReview.Ready)?.video
+    val lastAttempt =
+        attempt?.let {
+            if (it.source === readyVideo?.source) {
+                compressionConsent?.takeUnless { consent -> consent.revoked }?.request
+            } else {
+                AttachmentFlow.Confirm(it.source, it.replaceDraft, it.config.backend)
+            }
+        }
     val reviewSession = rememberSaveable { UUID.randomUUID().toString() }
     val entryStarted = remember { mutableStateOf(false) }
     var captureName by rememberSaveable { mutableStateOf<String?>(null) }
@@ -298,8 +342,23 @@ fun AttachmentSheets(
         captureReady = false
     }
 
+    fun clearCompression(cancelUpload: Boolean = false) {
+        val ready = compression as? UploadVideoReview.Ready
+        if (cancelUpload && uploadingCompressed) {
+            viewModel.cancel()
+            viewModel.clearError()
+        }
+        uploadingCompressed = false
+        compressionConsent = null
+        compression = null
+        compressionJob?.cancel()
+        compressionJob = null
+        ready?.close()
+    }
+
     DisposableEffect(viewModel, reviewSession) {
         onDispose {
+            clearCompression(cancelUpload = true)
             if (activity?.isChangingConfigurations != true) {
                 viewModel.replaceReviewedImage(reviewSession)
                 clearCameraCapture()
@@ -321,6 +380,7 @@ fun AttachmentSheets(
             flow = AttachmentFlow.Idle
             backendPickerRequest = null
             contentUnavailable = false
+            clearCompression(cancelUpload = true)
             viewModel.replaceReviewedImage(reviewSession)
             clearCameraCapture()
         }
@@ -380,14 +440,24 @@ fun AttachmentSheets(
     LaunchedEffect(preparing) {
         preparing ?: return@LaunchedEffect
         try {
-            val limit = viewModel.imageReviewLimit()
-            val review = HostedImageSnapshot.capture(context, preparing.source, limit)
+            val configured = viewModel.currentConfig()
+            val limit = configured.sizeLimitBytes.coerceIn(1, MAX_X0AT_LIMIT_BYTES)
+            val source = preparing.source
+            val size =
+                if (source is AttachmentSource.Document && source.sizeOrNull() == null && source.isLocalUploadVideo()) {
+                    val selected = preferredUploadConfig(source, configured, latestContext.expectedSojuFileHostUrl != null, latestPreferSojuFileHost)
+                    context.contentResolver.probeVideoSize(source.uri, normalizedConfig(selected).sizeLimitBytes)
+                } else {
+                    null
+                }
+            val original = if (size != null && source is AttachmentSource.Document) source.copy(size = size.first) else source
+            val review = HostedImageSnapshot.capture(context, original, limit)
             if (flow !== preparing) {
                 review?.close()
                 return@LaunchedEffect
             }
             viewModel.replaceReviewedImage(reviewSession, review)
-            flow = AttachmentFlow.Confirm(review?.source ?: preparing.source, false)
+            flow = AttachmentFlow.Confirm(review?.source ?: original, false, originalSizeIsLowerBound = review == null && size?.second == true)
             if (preparing.camera) clearCameraCapture()
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -416,6 +486,7 @@ fun AttachmentSheets(
 
     fun closeSourceSheet() {
         flow = AttachmentFlow.Idle
+        clearCompression(cancelUpload = true)
         viewModel.replaceReviewedImage(reviewSession)
         clearCameraCapture()
         backendPickerRequest = null
@@ -452,21 +523,129 @@ fun AttachmentSheets(
         request.backend?.let(configured::forBackend)
             ?: normalizedConfig(preferredUploadConfig(request.source, configured, fileHostAvailable, preferFileHost))
 
+    fun currentUploadConfig(
+        request: AttachmentFlow.Confirm,
+        configured: PasteBackendConfig,
+    ): PasteBackendConfig = uploadConfig(request, configured, latestContext.expectedSojuFileHostUrl != null, latestPreferSojuFileHost)
+
+    val currentConfirmation = flow as? AttachmentFlow.Confirm
+    val currentLimit = currentConfirmation?.let { uploadConfig(it).sizeLimitBytes }
+    LaunchedEffect(currentConfirmation, currentLimit) {
+        val request = currentConfirmation ?: return@LaunchedEffect
+        val limit = currentLimit ?: return@LaunchedEffect
+        val source = request.source as? AttachmentSource.Document ?: return@LaunchedEffect
+        if (!request.needsVideoSizeCheck(limit)) return@LaunchedEffect
+        val size = context.contentResolver.probeVideoSize(source.uri, limit)
+        if (flow === request) {
+            flow = request.copy(source = source.copy(size = size?.first), originalSizeIsLowerBound = size?.second == true)
+        }
+    }
+
+    fun reconcileCompression(
+        consent: VideoReviewConsent,
+        settings: PasteBackendConfig,
+    ) {
+        if (compressionConsent !== consent) return
+        val confirmation = flow as? AttachmentFlow.Confirm
+        if ((confirmation == null || consent.request === confirmation) &&
+            consent.matches(currentUploadConfig(consent.request, settings), latestContext)
+        ) {
+            return
+        }
+        if (uploadingCompressed && viewModel.progress.value != null) {
+            // The accepted transfer can finish using its lease, but its review can never authorize retry.
+            consent.revoke()
+            (compression as? UploadVideoReview.Ready)?.close()
+            return
+        }
+        if (uploadingCompressed) {
+            viewModel.clearAttempt()
+            flow = consent.request
+        }
+        clearCompression()
+    }
+
+    LaunchedEffect(compressionConsent) {
+        val consent = compressionConsent ?: return@LaunchedEffect
+        viewModel.uploadPreferences
+            .catch { if (it !is IOException) throw it }
+            .collect { reconcileCompression(consent, it) }
+    }
+    LaunchedEffect(currentConfirmation, defaultConfig, disclosedContext, preferSojuFileHost, progress) {
+        compressionConsent?.let { reconcileCompression(it, defaultConfig) }
+    }
+
+    fun compressVideo(
+        request: AttachmentFlow.Confirm,
+        config: PasteBackendConfig,
+        destination: AttachmentUploadContext,
+    ) {
+        if (flow !== request || compression == UploadVideoReview.Working || compression is UploadVideoReview.Ready ||
+            !request.source.canCompressVideo(config.sizeLimitBytes)
+        ) {
+            return
+        }
+        val consent = VideoReviewConsent(request, config, destination)
+        compressionConsent = consent
+        compression = UploadVideoReview.Working
+        compressionJob =
+            consentScope.launch {
+                fun isCurrent(configured: PasteBackendConfig): Boolean =
+                    compressionConsent === consent && (flow === request || backendPickerRequest === request) &&
+                        consent.matches(currentUploadConfig(request, configured), latestContext)
+
+                var output: UploadVideoReview.Ready? = null
+                try {
+                    if (!isCurrent(viewModel.currentConfig())) return@launch
+                    output = UploadVideoReview.Ready(viewModel.compressVideo(context.applicationContext, request.source, config.sizeLimitBytes))
+                    if (!isCurrent(viewModel.currentConfig())) return@launch
+                    compression = output
+                    output = null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    if (compressionConsent === consent) compression = UploadVideoReview.Failed
+                } finally {
+                    output?.close()
+                    if (compressionConsent === consent && compression == UploadVideoReview.Working) {
+                        compressionConsent = null
+                        compression = null
+                    }
+                }
+            }
+    }
+
     suspend fun startUpload(
         request: AttachmentFlow.Confirm,
         disclosedConfig: PasteBackendConfig,
         uploadContext: AttachmentUploadContext,
         allowOriginalMetadata: Boolean = false,
         retry: AttachmentAttempt? = null,
+        compressed: UploadVideoReview.Ready? = null,
     ) {
         // The presentation flow can lag a completed preferences write.
-        val configured = viewModel.currentConfig()
+        val configured =
+            try {
+                viewModel.currentConfig()
+            } catch (failure: IOException) {
+                if (compressed == null) throw failure
+                if (compression === compressed) {
+                    if (retry != null && viewModel.attempt.value !== retry) return
+                    flow = request
+                    uploadingCompressed = false
+                    viewModel.fail(latestResources.getString(R.string.upload_compression_settings_unavailable))
+                }
+                return
+            }
         val requestStillCurrent = if (retry == null) flow === request else viewModel.attempt.value === retry
         if (!requestStillCurrent) return
+        val binding = compressionConsent
+        if (compressed != null && (compression !== compressed || binding?.request !== request)) return
+        val uploadSource = compressed?.video?.source ?: request.source
         val review = (request.source as? AttachmentSource.LocalFile)?.reviewedImage
         if (review != null && viewModel.reviewedImage(reviewSession) !== review) return
         val currentContext = latestContext
-        val config = uploadConfig(request, configured, currentContext.expectedSojuFileHostUrl != null, latestPreferSojuFileHost)
+        val config = currentUploadConfig(request, configured)
         val destinationChanged =
             !sameUploadConsent(disclosedConfig, config) ||
                 (request.source !is AttachmentSource.Text && disclosedConfig.stripsHostedUploadMetadata(request.source) && !config.stripsHostedUploadMetadata(request.source)) ||
@@ -474,15 +653,20 @@ fun AttachmentSheets(
                     config.backend == AttachmentBackend.SOJU_FILEHOST &&
                         (uploadContext != currentContext || currentContext.expectedSojuFileHostUrl == null)
                 )
-        if (destinationChanged || request.source.sizeOrNull()?.let { it > config.sizeLimitBytes } == true) {
+        if (compressed == null && request.needsVideoSizeCheck(config.sizeLimitBytes)) return
+        if (destinationChanged || uploadSource.sizeOrNull()?.let { it > config.sizeLimitBytes } == true ||
+            (compressed != null && binding?.matches(config, currentContext) != true)
+        ) {
+            if (compressed != null) clearCompression()
             viewModel.clearAttempt()
             flow = request
             return
         }
+        uploadingCompressed = compressed != null
         flow = AttachmentFlow.Idle
         val completeUpload = prepareUploadCompletion?.invoke((request.source as? AttachmentSource.Text)?.text.takeIf { request.replaceDraft })
         viewModel.upload(
-            request.source,
+            uploadSource,
             disclosedConfig.copy(
                 sizeLimitBytes = config.sizeLimitBytes,
                 stripMetadata = config.stripMetadata,
@@ -490,6 +674,21 @@ fun AttachmentSheets(
             ),
             uploadContext.copy(allowOriginalMetadata = allowOriginalMetadata),
             replaceDraft = request.replaceDraft,
+            canStart =
+                if (compressed != null && binding != null) {
+                    { settings ->
+                        val stillSelected = compression === compressed && flow === AttachmentFlow.Idle
+                        val valid = stillSelected && binding.matches(currentUploadConfig(request, settings), latestContext)
+                        if (!valid && stillSelected) {
+                            clearCompression()
+                            flow = request
+                        }
+                        valid
+                    }
+                } else {
+                    null
+                },
+            videoReview = compressed,
         ) { record ->
             if (completeUpload != null) {
                 completeUpload(record)
@@ -500,6 +699,7 @@ fun AttachmentSheets(
             }
             onUploaded?.invoke(record)
             viewModel.replaceReviewedImage(reviewSession)
+            if (compressed != null) clearCompression()
             onDismiss()
         }
     }
@@ -651,16 +851,32 @@ fun AttachmentSheets(
 
         is AttachmentFlow.Confirm -> {
             val disclosedConfig = uploadConfig(current)
+            val shownCompression =
+                compression.takeIf {
+                    val consent = compressionConsent
+                    consent != null && consent.request === current && consent.matches(disclosedConfig, disclosedContext)
+                }
             ConfirmationSheet(
                 source = current.source,
                 config = disclosedConfig,
                 sojuFileHostUrl = sojuFileHostUrl,
                 onChangeDestination = {
-                    backendPickerRequest = current
-                    flow = AttachmentFlow.Idle
+                    if (flow === current) {
+                        backendPickerRequest = current
+                        flow = AttachmentFlow.Idle
+                    }
                 },
+                compression = shownCompression,
+                onCompress = { compressVideo(current, disclosedConfig, disclosedContext) },
+                originalSizeIsLowerBound = current.originalSizeIsLowerBound,
+                checkingVideoSize = current.needsVideoSizeCheck(disclosedConfig.sizeLimitBytes),
+                onKeepOriginal = { if (flow === current && compression === shownCompression) clearCompression() },
                 onDismiss = ::closeSourceSheet,
-                onUpload = { consentScope.launch { startUpload(current, disclosedConfig, disclosedContext) } },
+                onUpload = {
+                    consentScope.launch {
+                        startUpload(current, disclosedConfig, disclosedContext, compressed = shownCompression as? UploadVideoReview.Ready)
+                    }
+                },
                 onStripMetadataChange = { viewModel.setStripMetadata(current.source, it) },
             )
         }
@@ -672,6 +888,7 @@ fun AttachmentSheets(
             config = uploadConfig(request),
             sojuFileHostAvailable = sojuFileHostAvailable,
             onSelect = { selected ->
+                clearCompression()
                 flow = request.copy(backend = selected.backend)
                 backendPickerRequest = null
             },
@@ -686,8 +903,11 @@ fun AttachmentSheets(
         UploadProgressSheet(
             progress = update,
             onCancel = {
-                val request = lastAttempt ?: viewModel.reviewedImage(reviewSession)?.let { AttachmentFlow.Confirm(it.source, false) }
+                val request =
+                    lastAttempt ?: compressionConsent?.request
+                        ?: viewModel.reviewedImage(reviewSession)?.let { AttachmentFlow.Confirm(it.source, false) }
                 viewModel.cancel()
+                uploadingCompressed = false
                 request?.let { flow = it }
             },
         )
@@ -713,7 +933,9 @@ fun AttachmentSheets(
             text = {
                 Column {
                     if (failure.metadataNotSupported) {
-                        Text(stringResource(R.string.upload_metadata_warning_body))
+                        val message =
+                            if (attempt?.source === readyVideo?.source) R.string.upload_compression_metadata_warning else R.string.upload_metadata_warning_body
+                        Text(stringResource(message))
                     } else {
                         Text(failure.message)
                     }
@@ -744,6 +966,8 @@ fun AttachmentSheets(
                                 uploadContext = retry.context,
                                 allowOriginalMetadata = failure.metadataNotSupported,
                                 retry = retry,
+                                compressed =
+                                    (compression as? UploadVideoReview.Ready)?.takeIf { it.video.source === retry.source },
                             )
                         }
                     }) {
@@ -753,7 +977,11 @@ fun AttachmentSheets(
                         }
                         Text(
                             stringResource(
-                                if (failure.metadataNotSupported) R.string.upload_send_original else R.string.upload_retry,
+                                when {
+                                    failure.metadataNotSupported && attempt?.source === readyVideo?.source -> R.string.upload_compression_send_unstripped
+                                    failure.metadataNotSupported -> R.string.upload_send_original
+                                    else -> R.string.upload_retry
+                                },
                             ),
                         )
                     }
@@ -828,6 +1056,10 @@ fun AttachmentBatchSheets(
     var picking by rememberSaveable(batchId) { mutableStateOf(false) }
     SideEffect { viewModel.updateBatchTarget(batchId, target) }
     LaunchedEffect(viewModel, batchId, resolver) { viewModel.reviewBatch(batchId, target, resolver) }
+    LaunchedEffect(viewModel, batchId) { viewModel.watchBatchCompressionDestination(batchId) }
+    DisposableEffect(viewModel, batchId) {
+        onDispose { viewModel.leaveBatchCompression(batchId) }
+    }
     val shown = review?.takeIf { it.request.id == batchId } ?: return
     if (picking && !shown.started && shown.settings != null) {
         BackendPickerSheet(
@@ -850,6 +1082,8 @@ fun AttachmentBatchSheets(
             onReviewChangedDestination = { viewModel.reviewChangedDestination(shown) },
             onUpload = { viewModel.uploadBatch(shown, context) },
             onRetry = { index, allowOriginal -> viewModel.retryBatch(shown, index, context, allowOriginal) },
+            onCompress = { viewModel.compressBatchVideo(shown, it, context) },
+            onKeepOriginal = { viewModel.keepBatchOriginal(shown, it) },
             onStop = { viewModel.stopBatch(batchId) },
             onFinish = { addLinks -> viewModel.finishBatch(batchId, addLinks, onFinished) },
         )
@@ -866,6 +1100,8 @@ internal fun AttachmentBatchReviewSheet(
     onReviewChangedDestination: () -> Unit,
     onUpload: () -> Unit,
     onRetry: (Int, Boolean) -> Unit,
+    onCompress: (Int) -> Unit,
+    onKeepOriginal: (Int) -> Unit,
     onStop: () -> Unit,
     onFinish: (Boolean) -> Unit,
 ) {
@@ -873,6 +1109,9 @@ internal fun AttachmentBatchReviewSheet(
     val hasUploads = review.hasUploads
     val preventDismiss by rememberUpdatedState(review.started || review.busy || hasUploads)
     val canUpload = destination != null && review.rows.any { it.status == AttachmentBatchStatus.Ready && it.isUploadable(destination) }
+    val compressing = review.rows.any { it.compression == UploadVideoReview.Working }
+    val uploadingCompressed =
+        destination != null && review.rows.any { it.compressedSource != null && it.status == AttachmentBatchStatus.Ready && it.isUploadable(destination) }
     ModalBottomSheet(
         onDismissRequest = { if (!preventDismiss) onFinish(false) },
         sheetState =
@@ -928,6 +1167,8 @@ internal fun AttachmentBatchReviewSheet(
                         started = review.started,
                         enabled = !review.busy && !singleBusy && !review.destinationChanged,
                         onAction = { allowOriginal -> onRetry(index, allowOriginal) },
+                        onCompress = { onCompress(index) },
+                        onKeepOriginal = { onKeepOriginal(index) },
                     )
                 }
             }
@@ -938,7 +1179,7 @@ internal fun AttachmentBatchReviewSheet(
                         Text(stringResource(R.string.upload_batch_saving_links))
                     }
 
-                    review.started && review.busy && !review.destinationChanged -> {
+                    review.started && review.busy && !review.destinationChanged && !compressing -> {
                         TextButton(
                             onClick = onStop,
                             enabled = !review.stopping,
@@ -965,7 +1206,15 @@ internal fun AttachmentBatchReviewSheet(
                         ) {
                             Icon(Icons.Outlined.CloudUpload, null)
                             Spacer(Modifier.width(8.dp))
-                            Text(stringResource(if (hasUploads) R.string.upload_batch_upload_remaining else R.string.upload_batch_upload))
+                            Text(
+                                stringResource(
+                                    when {
+                                        uploadingCompressed -> R.string.upload_compression_batch_upload
+                                        hasUploads -> R.string.upload_batch_upload_remaining
+                                        else -> R.string.upload_batch_upload
+                                    },
+                                ),
+                            )
                         }
                     }
                 }
@@ -1011,6 +1260,8 @@ private fun BatchReviewRow(
     started: Boolean,
     enabled: Boolean,
     onAction: (Boolean) -> Unit,
+    onCompress: () -> Unit,
+    onKeepOriginal: () -> Unit,
 ) {
     val name = row.name.ifBlank { stringResource(R.string.upload_type_unknown) }
     val config = destination?.config
@@ -1025,13 +1276,27 @@ private fun BatchReviewRow(
             val sizeLabel = size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)
             Text(stringResource(R.string.upload_metadata, mime, sizeLabel))
         }
-        if (oversized && size != null && config != null && row.status !is AttachmentBatchStatus.Uploaded) {
+        if (oversized && size != null && config != null && row.compressedSource == null && row.status !is AttachmentBatchStatus.Uploaded) {
             val sizeLabel = formatBytes(size)
             val limitLabel = formatBytes(config.sizeLimitBytes)
             val exact = sizeLabel == limitLabel
             Text(
                 stringResource(R.string.upload_over_size_limit, if (exact) "$size B" else sizeLabel, if (exact) "${config.sizeLimitBytes} B" else limitLabel),
                 color = MaterialTheme.colorScheme.error,
+            )
+        }
+        if (destination != null && size != null && (row.compression != null || row.canCompress(destination))) {
+            VideoCompressionControls(
+                originalBytes = size,
+                limitBytes = destination.config.sizeLimitBytes,
+                review = row.compression,
+                enabled = enabled,
+                tags = {
+                    if (it == "compress") "attachment-batch-compress-to-fit-$index" else "attachment-batch-compression-$it-$index"
+                },
+                onCompress = onCompress,
+                onKeepOriginal = onKeepOriginal,
+                originalSizeIsLowerBound = row.originalSizeIsLowerBound,
             )
         }
         when (val status = row.status) {
@@ -1044,7 +1309,7 @@ private fun BatchReviewRow(
                     Text(stringResource(R.string.upload_batch_ready))
                     if (started && uploadable) {
                         TextButton(onClick = { onAction(false) }, enabled = enabled, modifier = Modifier.testTag("attachment-batch-upload-$index")) {
-                            Text(stringResource(R.string.upload_action))
+                            Text(stringResource(if (row.compressedSource != null) R.string.upload_compression_upload else R.string.upload_action))
                         }
                     }
                 }
@@ -1069,14 +1334,15 @@ private fun BatchReviewRow(
             is AttachmentBatchStatus.Failed -> {
                 val error =
                     if (status.needsOriginalConsent) {
-                        stringResource(R.string.upload_metadata_warning_body)
+                        stringResource(if (row.compressedSource != null) R.string.upload_compression_metadata_warning else R.string.upload_metadata_warning_body)
                     } else {
                         status.details ?: stringResource(status.reason)
                     }
                 Text(error, color = MaterialTheme.colorScheme.error)
-                if (!oversized && started && uploadable) {
+                if (started && uploadable) {
                     val label =
                         when {
+                            status.needsOriginalConsent && row.compressedSource != null -> R.string.upload_compression_send_unstripped
                             status.needsOriginalConsent -> R.string.upload_send_original
                             status.reason == R.string.upload_batch_file_changed -> R.string.upload_action
                             else -> R.string.upload_retry
@@ -1090,7 +1356,9 @@ private fun BatchReviewRow(
                 }
             }
         }
-        if (needsCheck && (row.status is AttachmentBatchStatus.Ready || row.status is AttachmentBatchStatus.Failed)) {
+        if (needsCheck && row.compression != UploadVideoReview.Working &&
+            (row.status is AttachmentBatchStatus.Ready || row.status is AttachmentBatchStatus.Failed)
+        ) {
             TextButton(
                 onClick = { onAction(false) },
                 enabled = enabled,
@@ -1649,6 +1917,11 @@ internal fun ConfirmationSheet(
     onDismiss: () -> Unit,
     onUpload: () -> Unit,
     onStripMetadataChange: (Boolean) -> Unit = {},
+    compression: UploadVideoReview? = null,
+    onCompress: (() -> Unit)? = null,
+    onKeepOriginal: (() -> Unit)? = null,
+    originalSizeIsLowerBound: Boolean = false,
+    checkingVideoSize: Boolean = false,
 ) {
     val sourceUri =
         when (source) {
@@ -1708,7 +1981,7 @@ internal fun ConfirmationSheet(
                     Spacer(Modifier.height(12.dp))
                 }
                 if (previewFailed) Text(stringResource(R.string.settings_local_image_preview_failed), color = MaterialTheme.colorScheme.error, modifier = Modifier.testTag("attachment_thumbnail_error"))
-                AttachmentMetadata(source)
+                AttachmentMetadata(source, originalSizeIsLowerBound)
                 Spacer(Modifier.height(16.dp))
                 Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 ListItem(
@@ -1735,6 +2008,27 @@ internal fun ConfirmationSheet(
                     modifier = Modifier.clip(RoundedCornerShape(18.dp)).clickable(onClick = onChangeDestination).testTag("attachment_change_destination"),
                 )
                 Spacer(Modifier.height(12.dp))
+                if (oversizedBytes != null && onCompress != null && onKeepOriginal != null &&
+                    !sojuUnavailable && !customUnavailable && source.canCompressVideo(limit)
+                ) {
+                    VideoCompressionControls(
+                        originalBytes = oversizedBytes,
+                        limitBytes = limit,
+                        review = compression,
+                        enabled = true,
+                        tags = {
+                            when (it) {
+                                "compress" -> "attachment_compress_to_fit"
+                                "keep-original" -> "attachment_compression_keep_original"
+                                else -> "attachment_compression_$it"
+                            }
+                        },
+                        onCompress = onCompress,
+                        onKeepOriginal = onKeepOriginal,
+                        originalSizeIsLowerBound = originalSizeIsLowerBound,
+                    )
+                    Spacer(Modifier.height(8.dp))
+                }
                 UploadPrivacyCard(config)
                 if (source !is AttachmentSource.Text) {
                     val stripMetadata = config.stripsHostedUploadMetadata(source)
@@ -1757,17 +2051,23 @@ internal fun ConfirmationSheet(
                 }
                 Spacer(Modifier.height(8.dp))
             }
+            val compressedReady = compression is UploadVideoReview.Ready
             Column(Modifier.padding(horizontal = 16.dp)) {
-                if (oversizedBytes != null) {
+                if (checkingVideoSize) Text(stringResource(R.string.upload_checking_video_size), modifier = Modifier.padding(bottom = 8.dp))
+                if (oversizedBytes != null && !compressedReady) {
                     val sizeLabel = formatBytes(oversizedBytes)
                     val limitLabel = formatBytes(limit)
                     val sameRoundedLabels = sizeLabel == limitLabel
                     Text(
-                        stringResource(
-                            R.string.upload_over_size_limit,
-                            if (sameRoundedLabels) "$oversizedBytes B" else sizeLabel,
-                            if (sameRoundedLabels) "$limit B" else limitLabel,
-                        ),
+                        if (originalSizeIsLowerBound) {
+                            stringResource(R.string.upload_over_size_limit_minimum, oversizedBytes, limitLabel)
+                        } else {
+                            stringResource(
+                                R.string.upload_over_size_limit,
+                                if (sameRoundedLabels) "$oversizedBytes B" else sizeLabel,
+                                if (sameRoundedLabels) "$limit B" else limitLabel,
+                            )
+                        },
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.error,
                         modifier = Modifier.padding(bottom = 8.dp).testTag("attachment_size_limit_error"),
@@ -1775,12 +2075,14 @@ internal fun ConfirmationSheet(
                 }
                 Button(
                     onClick = onUpload,
-                    enabled = !sojuUnavailable && !customUnavailable && !unsupportedUri && !isUnreviewedImage && oversizedBytes == null,
+                    enabled =
+                        !checkingVideoSize && !sojuUnavailable && !customUnavailable && !unsupportedUri && !isUnreviewedImage &&
+                            (oversizedBytes == null || compressedReady),
                     modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("attachment_upload"),
                 ) {
                     Icon(Icons.Outlined.CloudUpload, null)
                     Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.upload_action))
+                    Text(stringResource(if (compressedReady) R.string.upload_compression_upload else R.string.upload_action))
                 }
                 TextButton(colors = readableTextButtonColors(), onClick = onDismiss, modifier = Modifier.fillMaxWidth()) { Text(stringResource(R.string.action_cancel)) }
                 Spacer(Modifier.height(12.dp))
@@ -1789,6 +2091,68 @@ internal fun ConfirmationSheet(
     }
     if (reviewing && preview != null) {
         LocalImageReviewDialog(preview, onDismiss = { reviewing = false })
+    }
+}
+
+@Composable
+private fun VideoCompressionControls(
+    originalBytes: Long,
+    limitBytes: Long,
+    review: UploadVideoReview?,
+    enabled: Boolean,
+    tags: (String) -> String,
+    onCompress: () -> Unit,
+    onKeepOriginal: () -> Unit,
+    originalSizeIsLowerBound: Boolean = false,
+) {
+    when (review) {
+        UploadVideoReview.Working -> {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Text(stringResource(R.string.upload_compression_working), modifier = Modifier.testTag(tags("working")))
+        }
+
+        is UploadVideoReview.Ready -> {
+            val label = if (originalSizeIsLowerBound) R.string.upload_compression_ready_minimum else R.string.upload_compression_ready
+            Text(
+                stringResource(label, originalBytes, checkNotNull(review.video.source.size), limitBytes),
+                modifier = Modifier.testTag(tags("ready")),
+            )
+        }
+
+        else -> {
+            if (review == UploadVideoReview.Failed) {
+                Text(
+                    stringResource(R.string.upload_compression_failed),
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.testTag(tags("failed")),
+                )
+            }
+            Text(stringResource(R.string.upload_compression_consent, formatBytes(limitBytes)))
+        }
+    }
+    if (review == UploadVideoReview.Working || review is UploadVideoReview.Ready) {
+        val working = review == UploadVideoReview.Working
+        TextButton(
+            onClick = onKeepOriginal,
+            enabled = working || enabled,
+            colors = readableTextButtonColors(),
+            modifier = Modifier.testTag(tags(if (working) "cancel" else "keep-original")),
+        ) {
+            Icon(Icons.Filled.Close, null)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(if (working) R.string.upload_compression_cancel else R.string.upload_compression_keep_original))
+        }
+    } else {
+        TextButton(
+            onClick = onCompress,
+            enabled = enabled,
+            colors = readableTextButtonColors(),
+            modifier = Modifier.testTag(tags("compress")),
+        ) {
+            Icon(Icons.Outlined.ArrowDownward, null)
+            Spacer(Modifier.width(8.dp))
+            Text(stringResource(R.string.upload_compression_action))
+        }
     }
 }
 
@@ -1838,7 +2202,10 @@ private fun BackendPickerSheet(
 }
 
 @Composable
-private fun AttachmentMetadata(source: AttachmentSource) {
+private fun AttachmentMetadata(
+    source: AttachmentSource,
+    originalSizeIsLowerBound: Boolean,
+) {
     Surface(shape = RoundedCornerShape(18.dp), color = MaterialTheme.colorScheme.surfaceContainerLow) {
         Row(Modifier.fillMaxWidth().padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
             val image =
@@ -1851,10 +2218,28 @@ private fun AttachmentMetadata(source: AttachmentSource) {
                 Text(source.displayName(), style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
                 io.github.trevarj.motd.ui.components.MetadataPill(
                     when (source) {
-                        is AttachmentSource.Text -> pluralStringResource(R.plurals.upload_character_count, source.text.length, source.text.length)
-                        is AttachmentSource.Document -> stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_unknown), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
-                        is AttachmentSource.Photo -> stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_photo), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
-                        is AttachmentSource.LocalFile -> stringResource(R.string.upload_metadata, source.mimeType, source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
+                        is AttachmentSource.Text -> {
+                            pluralStringResource(R.plurals.upload_character_count, source.text.length, source.text.length)
+                        }
+
+                        is AttachmentSource.Document -> {
+                            val size = source.size
+                            val label =
+                                when {
+                                    size == null -> stringResource(R.string.upload_size_unknown)
+                                    originalSizeIsLowerBound -> stringResource(R.string.upload_size_minimum, size)
+                                    else -> formatBytes(size)
+                                }
+                            stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_unknown), label)
+                        }
+
+                        is AttachmentSource.Photo -> {
+                            stringResource(R.string.upload_metadata, source.mimeType ?: stringResource(R.string.upload_type_photo), source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
+                        }
+
+                        is AttachmentSource.LocalFile -> {
+                            stringResource(R.string.upload_metadata, source.mimeType, source.size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown))
+                        }
                     },
                 )
             }
@@ -2037,12 +2422,46 @@ private fun android.content.ContentResolver.queryMeta(uri: Uri): Pair<String, Lo
     val cursor: Cursor? = query(uri, arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE), null, null, null)
     cursor?.use {
         if (it.moveToFirst()) {
-            name = it.getString(0) ?: name
-            if (!it.isNull(1)) size = it.getLong(1)
+            val nameColumn = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeColumn = it.getColumnIndex(OpenableColumns.SIZE)
+            if (nameColumn >= 0) name = it.getString(nameColumn) ?: name
+            if (sizeColumn >= 0 && !it.isNull(sizeColumn)) size = it.getLong(sizeColumn)
         }
     }
     return name to size
 }
+
+// Only read through the first byte beyond the selected cap, even if a provider streams an unbounded file.
+private suspend fun ContentResolver.probeVideoSize(
+    uri: Uri,
+    limit: Long,
+): Pair<Long, Boolean>? =
+    withContext(Dispatchers.IO) {
+        try {
+            val stat = runCatching { openAssetFileDescriptor(uri, "r")?.use { it.length } }.getOrNull()
+            if (stat != null && stat >= 0L) return@withContext stat to false
+            openInputStream(uri)?.use { input ->
+                val buffer = ByteArray(32 * 1024)
+                var size = 0L
+                while (size <= limit) {
+                    currentCoroutineContext().ensureActive()
+                    val count = input.read(buffer, 0, minOf(buffer.size.toLong(), limit - size + 1).toInt())
+                    if (count == -1) return@use size to false
+                    if (count == 0) {
+                        if (input.read() == -1) return@use size to false
+                        size++
+                    } else {
+                        size += count
+                    }
+                }
+                size to true
+            }
+        } catch (_: IOException) {
+            null
+        } catch (_: SecurityException) {
+            null
+        }
+    }
 
 internal fun ContentResolver.inspectBatchFile(file: PendingShare.File): AttachmentBatchRow {
     val uri = file.uri

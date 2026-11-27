@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.chat
 
 import android.content.ContentResolver
 import android.content.Context
+import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -12,25 +13,29 @@ import io.github.trevarj.motd.attachment.AttachmentPrefs
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
+import io.github.trevarj.motd.attachment.CompressedUploadVideo
 import io.github.trevarj.motd.attachment.HostedImageSnapshot
 import io.github.trevarj.motd.attachment.HostedImageTooLarge
-import io.github.trevarj.motd.attachment.MAX_X0AT_LIMIT_BYTES
 import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
+import io.github.trevarj.motd.attachment.compressUploadVideo
 import io.github.trevarj.motd.attachment.isHostedImage
+import io.github.trevarj.motd.attachment.sizeOrNull
 import io.github.trevarj.motd.attachment.stripsHostedUploadMetadata
 import io.github.trevarj.motd.ui.share.PendingShare
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -54,12 +59,17 @@ class AttachmentAttempt(
 
 @HiltViewModel
 class AttachmentViewModel
-    @Inject
-    constructor(
+    internal constructor(
         private val prefs: AttachmentPrefs,
         private val uploader: AttachmentUploader,
+        internal val compressVideo: suspend (Context, AttachmentSource, Long) -> CompressedUploadVideo,
     ) : ViewModel() {
+        @Inject
+        constructor(prefs: AttachmentPrefs, uploader: AttachmentUploader) : this(prefs, uploader, ::compressUploadVideo)
+
         internal suspend fun currentConfig(): PasteBackendConfig = prefs.config.first()
+
+        internal val uploadPreferences get() = prefs.config
 
         val config = prefs.config.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), PasteBackendConfig())
         val recent = prefs.recentUploads.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000, replayExpirationMillis = 0), emptyList())
@@ -79,6 +89,7 @@ class AttachmentViewModel
         private var batchJob: Job? = null
         private var batchTarget: AttachmentBatchTarget? = null
         private var batchLease: AutoCloseable? = null
+        private var latestBatchSettings: PasteBackendConfig? = null
 
         internal fun queueBatch(
             bufferId: Long,
@@ -97,7 +108,42 @@ class AttachmentViewModel
             id: String,
             target: AttachmentBatchTarget,
         ) {
-            if (_batchRequest.value?.id == id) batchTarget = target
+            if (_batchRequest.value?.id != id || batchTarget == target) return
+            batchTarget = target
+            invalidateBatchCompression()
+        }
+
+        internal suspend fun watchBatchCompressionDestination(id: String) {
+            prefs.config
+                .catch { if (it !is IOException) throw it }
+                .collect { settings ->
+                    if (_batchRequest.value?.id == id) {
+                        latestBatchSettings = settings
+                        invalidateBatchCompression()
+                    }
+                }
+        }
+
+        private fun invalidateBatchCompression() {
+            val review = _batchReview.value ?: return
+            if (!review.hasCompression) return
+            val working = review.rows.any { it.compression == UploadVideoReview.Working }
+            val settings = latestBatchSettings ?: review.settings ?: return
+            if (batchTarget?.destination(review.request, settings, review.selected) == review.destination) return
+            markBatchDestinationChanged(review.request.id)
+            if (working) batchJob?.cancel()
+        }
+
+        internal fun leaveBatchCompression(id: String) {
+            val review = _batchReview.value?.takeIf { it.request.id == id } ?: return
+            if (!review.hasCompression) return
+            val working = review.rows.any { it.compression == UploadVideoReview.Working }
+            updateBatch(id, AttachmentBatchReview::withoutCompression)
+            if (working) batchJob?.cancel()
+        }
+
+        private fun markBatchDestinationChanged(id: String) {
+            updateBatch(id) { it.withoutCompression().copy(destinationChanged = true) }
         }
 
         internal fun reviewBatch(
@@ -169,10 +215,80 @@ class AttachmentViewModel
                 ) {
                     review
                 } else {
-                    review.copy(selected = backend, destination = review.target.destination(review.request, settings, backend))
+                    val destination = review.target.destination(review.request, settings, backend)
+                    val updated = if (destination == review.destination) review else review.withoutCompression()
+                    updated.copy(selected = backend, destination = destination)
                 }
             }
         }
+
+        internal fun compressBatchVideo(
+            shown: AttachmentBatchReview,
+            index: Int,
+            context: Context,
+        ) {
+            val destination = shown.destination ?: return
+            val row = shown.rows.getOrNull(index) ?: return
+            if (_batchReview.value !== shown || shown.busy || shown.destinationChanged || job != null ||
+                !row.canCompress(destination) || row.compressedSource != null
+            ) {
+                return
+            }
+            val source = checkNotNull(row.source)
+            val id = shown.request.id
+            runBatch(shown) {
+                setBatchRow(id, index, row.copy(compression = UploadVideoReview.Working))
+                var output: CompressedUploadVideo? = null
+                try {
+                    if (!isCurrentBatchDestination(shown, destination, index)) return@runBatch
+                    val video = compressVideo(context, source, destination.config.sizeLimitBytes)
+                    output = video
+                    val verified =
+                        withContext(Dispatchers.IO) {
+                            HostedImageSnapshot.reviewBatchBytes(context.contentResolver, video.source.asDocument(), destination.config.sizeLimitBytes)
+                        }
+                    if (verified.size != video.source.size) throw IOException("Compressed copy changed")
+                    if (!isCurrentBatchDestination(shown, destination, index)) return@runBatch
+                    val current = _batchReview.value?.takeIf { it.request.id == id }
+                    if (current?.rows?.get(index)?.compression != UploadVideoReview.Working) return@runBatch
+                    setBatchRow(
+                        id,
+                        index,
+                        row.copy(status = AttachmentBatchStatus.Ready, reviewedDigest = verified.sha256, compression = UploadVideoReview.Ready(video)),
+                    )
+                    output = null
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    val current = _batchReview.value?.takeIf { it.request.id == id }
+                    if (current?.rows?.get(index)?.compression == UploadVideoReview.Working) {
+                        setBatchRow(id, index, row.copy(compression = UploadVideoReview.Failed))
+                    }
+                } finally {
+                    output?.close()
+                    val activeRow = _batchReview.value?.rows?.get(index)
+                    if (batchJob === currentCoroutineContext()[Job] && activeRow?.compression == UploadVideoReview.Working) {
+                        setBatchRow(id, index, row.withoutCompression())
+                    }
+                }
+            }
+        }
+
+        internal fun keepBatchOriginal(
+            shown: AttachmentBatchReview,
+            index: Int,
+        ) {
+            if (_batchReview.value !== shown || shown.destinationChanged) return
+            val row = shown.rows.getOrNull(index) ?: return
+            val working = row.compression == UploadVideoReview.Working
+            if (!working && shown.busy) return
+            val original = row.withoutCompression()
+            val restored = if (row.compressedSource != null) original.copy(status = AttachmentBatchStatus.Ready) else original
+            setBatchRow(shown.request.id, index, restored)
+            if (working) batchJob?.cancel()
+        }
+
+        private fun AttachmentSource.LocalFile.asDocument(): AttachmentSource.Document = AttachmentSource.Document(Uri.fromFile(file), name, mimeType, size)
 
         internal fun uploadBatch(
             shown: AttachmentBatchReview,
@@ -235,8 +351,9 @@ class AttachmentViewModel
                 } else {
                     emptyList()
                 }
-            batchJob?.cancel()
-            runBatch(review.copy(finishing = true, finishError = false)) {
+            val pending = batchJob
+            runBatch(review.withoutCompression().copy(finishing = true, finishError = false)) {
+                pending?.cancel()
                 val accepted =
                     try {
                         onFinished(urls)
@@ -256,6 +373,7 @@ class AttachmentViewModel
 
         private fun discardBatch(id: String) {
             if (_batchRequest.value?.id != id) return
+            latestBatchSettings = null
             batchTarget = null
             _batchReview.value = null
             _batchRequest.value = null
@@ -282,6 +400,7 @@ class AttachmentViewModel
                         if (batchJob === coroutineContext[Job]) {
                             batchJob = null
                             updateBatch(id) { it.copy(busy = false, stopping = false, finishing = false) }
+                            invalidateBatchCompression()
                         }
                     }
                 }
@@ -305,7 +424,7 @@ class AttachmentViewModel
                     } catch (cancelled: CancellationException) {
                         throw cancelled
                     } catch (oversized: HostedImageTooLarge) {
-                        row.copy(source = source.copy(size = oversized.minimumSize))
+                        row.copy(source = source.copy(size = oversized.minimumSize), originalSizeIsLowerBound = true)
                     } catch (_: Exception) {
                         row.copy(source = null, status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_unavailable))
                     }
@@ -322,45 +441,65 @@ class AttachmentViewModel
             val id = shown.request.id
             val row = shown.rows[index]
             val source = checkNotNull(row.source)
+            val compression = row.compression as? UploadVideoReview.Ready
+
+            fun currentRow(): AttachmentBatchRow? {
+                val review = _batchReview.value?.takeIf { it.request.id == id }
+                return review?.rows?.get(index)
+            }
+
+            if (compression != null && currentRow()?.compression !== compression) return
+
+            fun updateRow(updated: AttachmentBatchRow) {
+                val current = currentRow() ?: return
+                setBatchRow(id, index, if (compression != null && current.compression !== compression) updated.withoutCompression() else updated)
+            }
+
+            val compressed = row.compressedSource
+            val uploadSource = compressed ?: source
             val expectedDigest = checkNotNull(row.reviewedDigest)
             val destination = checkNotNull(shown.destination)
             var uploaded = false
             var snapshot: HostedImageSnapshot? = null
             var reviewedRow = row
-            setBatchRow(id, index, row.copy(status = AttachmentBatchStatus.Uploading(UploadProgress.Transferring(0, source.size))))
+            updateRow(row.copy(status = AttachmentBatchStatus.Uploading(UploadProgress.Transferring(0, uploadSource.sizeOrNull()))))
             try {
-                if (!isCurrentBatchDestination(shown, destination, index, row)) return
-                val inspected = withContext(Dispatchers.IO) { context.contentResolver.inspectBatchFile(shown.request.files[index]) }
-                val current = inspected.source
-                if (current == null || inspected.isOversized(destination)) {
-                    setBatchRow(
-                        id,
-                        index,
-                        if (current == null) inspected else inspected.copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed)),
-                    )
+                if (!isCurrentBatchDestination(shown, destination, index)) return
+                val inspected =
+                    if (compressed == null) {
+                        withContext(Dispatchers.IO) { context.contentResolver.inspectBatchFile(shown.request.files[index]) }
+                    } else {
+                        row
+                    }
+                val current = compressed?.asDocument() ?: inspected.source
+                if (current == null || (compressed == null && inspected.isOversized(destination))) {
+                    updateRow(if (current == null) inspected else inspected.copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed)))
                     return
                 }
-                val captured = HostedImageSnapshot.captureBatch(context, current, destination.config.sizeLimitBytes)
+                val lease = compression?.retain()
+                if (compression != null && lease == null) {
+                    updateRow(row)
+                    return
+                }
+                val captured = lease.use { HostedImageSnapshot.captureBatch(context, current, destination.config.sizeLimitBytes) }
                 snapshot = captured
                 val actual = current.copy(mimeType = captured.source.mimeType, size = captured.source.size)
                 val digest = checkNotNull(captured.contentDigest)
-                reviewedRow = inspected.copy(source = actual, reviewedDigest = digest)
+                if (compressed == null) reviewedRow = inspected.copy(source = actual, reviewedDigest = digest)
                 val changed =
-                    source.name != actual.name ||
-                        !source.mimeType.equals(actual.mimeType, ignoreCase = true) ||
-                        source.size != actual.size ||
+                    (compressed?.name ?: source.name) != actual.name ||
+                        !(if (compressed == null) source.mimeType else compressed.mimeType).equals(actual.mimeType, ignoreCase = true) ||
+                        uploadSource.sizeOrNull() != actual.size ||
                         !expectedDigest.contentEquals(digest)
                 if (changed) {
-                    setBatchRow(
-                        id,
-                        index,
-                        reviewedRow.copy(
-                            status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed),
-                        ),
-                    )
+                    updateRow(reviewedRow.withoutCompression().copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed)))
                     return
                 }
-                if (!isCurrentBatchDestination(shown, destination, index, reviewedRow)) return
+                if (!isCurrentBatchDestination(shown, destination, index)) return
+                if (compression != null && currentRow()?.compression !== compression) {
+                    updateRow(row)
+                    return
+                }
                 val policy = destination.config
                 // Unknown bytes cannot use an unverified image declaration to bypass document stripping.
                 val stripMetadata =
@@ -372,33 +511,44 @@ class AttachmentViewModel
                 uploader.upload(captured.source, policy.copy(stripMetadata = stripMetadata), destination.context.copy(allowOriginalMetadata = allowOriginal)).collect { progress ->
                     when (progress) {
                         is UploadProgress.Transferring -> {
-                            if (!uploaded) setBatchRow(id, index, reviewedRow.copy(status = AttachmentBatchStatus.Uploading(progress)))
+                            if (!uploaded) updateRow(reviewedRow.copy(status = AttachmentBatchStatus.Uploading(progress)))
                         }
 
                         is UploadProgress.Complete -> {
                             if (!uploaded) {
                                 uploaded = true
-                                setBatchRow(id, index, reviewedRow.copy(status = AttachmentBatchStatus.Uploaded(progress.record), reviewedDigest = null))
+                                updateRow(reviewedRow.withoutCompression().copy(status = AttachmentBatchStatus.Uploaded(progress.record), reviewedDigest = null))
                             }
                         }
                     }
                 }
-                if (!uploaded) setBatchRow(id, index, reviewedRow.copy(status = AttachmentBatchStatus.Failed()))
+                if (!uploaded) updateRow(reviewedRow.copy(status = AttachmentBatchStatus.Failed()))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (oversized: HostedImageTooLarge) {
+                if (compressed != null) {
+                    updateRow(reviewedRow.withoutCompression().copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed)))
+                    return
+                }
                 val overLimit = checkNotNull(reviewedRow.source).copy(size = oversized.minimumSize)
-                setBatchRow(
-                    id,
-                    index,
-                    reviewedRow.copy(source = overLimit, status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed), reviewedDigest = null),
+                updateRow(
+                    reviewedRow.copy(
+                        source = overLimit,
+                        status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed),
+                        reviewedDigest = null,
+                        originalSizeIsLowerBound = true,
+                    ),
                 )
             } catch (failure: Exception) {
                 if (!uploaded) {
+                    if (compressed != null && snapshot == null) {
+                        updateRow(reviewedRow.withoutCompression().copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_file_changed)))
+                        return
+                    }
                     val originalRejected = failure is MetadataNotSupportedException
                     val details = failure.message.takeUnless { originalRejected || failure is SecurityException }
                     val status = AttachmentBatchStatus.Failed(details = details, needsOriginalConsent = originalRejected && snapshot != null)
-                    setBatchRow(id, index, reviewedRow.copy(status = status))
+                    updateRow(reviewedRow.copy(status = status))
                 }
             } finally {
                 snapshot?.close()
@@ -409,12 +559,12 @@ class AttachmentViewModel
             shown: AttachmentBatchReview,
             destination: AttachmentBatchDestination,
             index: Int,
-            row: AttachmentBatchRow,
         ): Boolean {
             val latestSettings = currentConfig()
-            if (batchTarget?.destination(shown.request, latestSettings, shown.selected) == destination) return true
-            setBatchRow(shown.request.id, index, row.copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_destination_changed)))
-            updateBatch(shown.request.id) { it.copy(destinationChanged = true) }
+            val review = _batchReview.value?.takeIf { it.request.id == shown.request.id } ?: return false
+            if (!review.destinationChanged && batchTarget?.destination(shown.request, latestSettings, shown.selected) == destination) return true
+            setBatchRow(shown.request.id, index, review.rows[index].copy(status = AttachmentBatchStatus.Failed(R.string.upload_batch_destination_changed)))
+            markBatchDestinationChanged(shown.request.id)
             return false
         }
 
@@ -436,12 +586,6 @@ class AttachmentViewModel
             }
         }
 
-        internal suspend fun imageReviewLimit(): Long =
-            prefs.config
-                .first()
-                .sizeLimitBytes
-                .coerceIn(1, MAX_X0AT_LIMIT_BYTES)
-
         internal fun reviewedImage(session: String): HostedImageSnapshot? = reviews[session]
 
         internal fun replaceReviewedImage(
@@ -461,16 +605,20 @@ class AttachmentViewModel
         override fun onCleared() {
             reviews.values.forEach { it.close() }
             reviews.clear()
+            _batchReview.value?.rows?.forEach(AttachmentBatchRow::closeCompression)
             releaseBatchLease()
         }
 
-        fun upload(
+        internal fun upload(
             source: AttachmentSource,
             override: PasteBackendConfig = config.value,
             context: AttachmentUploadContext = AttachmentUploadContext(),
             replaceDraft: Boolean = false,
+            canStart: ((PasteBackendConfig) -> Boolean)? = null,
+            videoReview: UploadVideoReview.Ready? = null,
             onComplete: (UploadRecord) -> Unit,
         ) {
+            val videoLease = videoReview?.let { it.retain() ?: return }
             job?.cancel()
             val review = (source as? AttachmentSource.LocalFile)?.reviewedImage
             uploadingReview = review
@@ -480,7 +628,19 @@ class AttachmentViewModel
             job =
                 viewModelScope.launch(start = CoroutineStart.LAZY) {
                     try {
-                        val snapshot = prefs.config.first()
+                        val snapshot =
+                            try {
+                                prefs.config.first()
+                            } catch (failure: IOException) {
+                                if (canStart != null) {
+                                    _attempt.value = AttachmentAttempt(source, override, context.copy(allowOriginalMetadata = false), replaceDraft)
+                                }
+                                throw failure
+                            }
+                        if (canStart != null && !canStart(snapshot)) {
+                            _attempt.value = null
+                            return@launch
+                        }
                         val stripMetadata =
                             snapshot.stripsHostedUploadMetadata(source) || (source !is AttachmentSource.Text && override.stripsHostedUploadMetadata(source))
                         val destination =
@@ -514,6 +674,7 @@ class AttachmentViewModel
                         }
                     }
                 }
+            if (videoLease != null) checkNotNull(job).invokeOnCompletion { videoLease.close() }
             job?.start()
         }
 

@@ -79,6 +79,7 @@ import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
 import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
+import io.github.trevarj.motd.attachment.CompressedUploadVideo
 import io.github.trevarj.motd.attachment.HostedImageSnapshot
 import io.github.trevarj.motd.attachment.LocalUploadPreview
 import io.github.trevarj.motd.attachment.MetadataNotSupportedException
@@ -103,12 +104,15 @@ import io.github.trevarj.motd.ui.settings.UploadsSettingsContent
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 import okhttp3.mockwebserver.MockResponse
 import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertArrayEquals
@@ -973,6 +977,254 @@ class AttachmentConfirmationSheetUiTest {
     }
 
     @Test
+    fun sharedVideoCompressionDiscardsStaleOutputAndUploadsOnlyTheApprovedCopy() {
+        val mib = 1024L * 1024
+        val original = context.cacheDir.resolve("shared-compression-original.mp4")
+        RandomAccessFile(original, "rw").use { it.setLength(3 * mib) }
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(sizeLimitBytes = mib, stripMetadata = false)) }
+        val encoded = "encoded from the selected video"
+        val outputs = mutableListOf<File>()
+        val uploads = mutableListOf<File>()
+        val uploadedContents = mutableListOf<String>()
+        val releaseStaleEncoder = CompletableDeferred<Unit>()
+        var calls = 0
+        var visible by mutableStateOf(true)
+        val viewModel =
+            AttachmentViewModel(
+                prefs,
+                batchUploader { source, config, _ ->
+                    uploads.add(source.file)
+                    uploadedContents.add(source.file.readText())
+                    assertFalse(config.stripMetadata)
+                    UploadRecord("https://files.example/video", config.backend, source.name)
+                },
+            ) { _, _, _ ->
+                if (++calls == 1) withContext(NonCancellable) { releaseStaleEncoder.await() }
+                File.createTempFile("review-encoded-", ".mp4", context.cacheDir).let { file ->
+                    file.writeText(encoded)
+                    outputs.add(file)
+                    CompressedUploadVideo(AttachmentSource.LocalFile(file, original.name, "video/mp4"))
+                }
+            }
+        try {
+            compose.setContent {
+                MotdTheme {
+                    if (visible) {
+                        AttachmentSheets(
+                            open = true,
+                            currentDraft = "",
+                            networkId = 21L,
+                            sojuFileHostUrl = null,
+                            sharedFile = PendingShare.File(Uri.fromFile(original), "video/mp4"),
+                            onDismiss = { visible = false },
+                            onInsertUrl = {},
+                            onReplaceDraft = {},
+                            onOpenNetworkSettings = {},
+                            viewModel = viewModel,
+                        )
+                    }
+                }
+            }
+            awaitConfirmation()
+            val compress = compose.onNodeWithTag("attachment_compress_to_fit")
+            val upload = compose.onNodeWithTag("attachment_upload")
+            val ready = compose.onNodeWithTag("attachment_compression_ready")
+            awaitBatchCondition { compose.onAllNodesWithTag("attachment_compress_to_fit").fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(context.getString(R.string.upload_compression_consent, formatBytes(mib))).performScrollTo().assertIsDisplayed()
+            upload.assertIsNotEnabled()
+            compose.runOnIdle { assertEquals(0, calls) }
+
+            compress.performScrollTo().assertIsDisplayed().performClick()
+            compose.onNodeWithTag("attachment_compression_working").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("attachment_compression_cancel").performScrollTo().assertIsDisplayed()
+            upload.assertIsNotEnabled()
+            runBlocking { prefs.updateConfig { it.copy(sizeLimitBytes = 2 * mib) } }
+            awaitBatchCondition { compose.onAllNodesWithTag("attachment_compress_to_fit").fetchSemanticsNodes().isNotEmpty() }
+            releaseStaleEncoder.complete(Unit)
+            awaitBatchCondition { outputs.size == 1 && !outputs.single().exists() }
+            ready.assertDoesNotExist()
+
+            compress.performScrollTo().performClick()
+            ready
+                .performScrollTo()
+                .assertIsDisplayed()
+                .assertTextEquals(context.getString(R.string.upload_compression_ready, 3 * mib, encoded.length.toLong(), 2 * mib))
+            compose.runOnIdle { assertTrue(uploads.isEmpty()) }
+            compose.onNodeWithTag("attachment_compression_keep_original").performScrollTo().performClick()
+            ready.assertDoesNotExist()
+            upload.assertIsNotEnabled()
+            compose.runOnIdle { assertFalse(outputs.last().exists()) }
+
+            compress.performScrollTo().performClick()
+            ready.performScrollTo().assertIsDisplayed()
+            compose.runOnIdle { assertTrue(uploads.isEmpty()) }
+            upload.assertIsEnabled().performClick()
+            awaitBatchCondition { !visible }
+            awaitBatchCondition { outputs.none(File::exists) }
+            compose.runOnIdle {
+                assertEquals(listOf(outputs.last()), uploads)
+                assertEquals(listOf(encoded), uploadedContents)
+                assertTrue(outputs.none(File::exists))
+                assertEquals(3 * mib, original.length())
+            }
+        } finally {
+            releaseStaleEncoder.complete(Unit)
+            viewModel.viewModelScope.cancel()
+            outputs.forEach(File::delete)
+            original.delete()
+        }
+    }
+
+    @Test
+    fun pickedVideoWithoutSizeIsProbedOnlyThroughTheSelectedLimit() {
+        val mib = 1024L * 1024
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(sizeLimitBytes = mib)) }
+        val uri = Uri.parse("content://motd.test.unmeasured/unknown-size.mp4")
+        val readLengths = mutableListOf<Int>()
+        val input =
+            object : ByteArrayInputStream(ByteArray(2 * mib.toInt())) {
+                override fun close() {
+                    readLengths.add(pos)
+                    reset()
+                }
+            }
+        shadowOf(context.contentResolver).registerInputStream(uri, input)
+        showConditionalAttachments(prefs = prefs)
+
+        compose.onNodeWithText(context.getString(R.string.upload_file)).performClick()
+        returnFromFilePicker(uri)
+        awaitConfirmation()
+        compose.onNodeWithTag("attachment_compress_to_fit").performScrollTo().assertIsDisplayed()
+        compose.onNodeWithTag("attachment_upload").assertIsNotEnabled()
+        compose
+            .onNodeWithTag("attachment_size_limit_error")
+            .assertTextEquals(context.getString(R.string.upload_over_size_limit_minimum, mib + 1, formatBytes(mib)))
+        compose.runOnIdle { assertEquals(mib.toInt() + 1, readLengths.maxOrNull()) }
+    }
+
+    @Test
+    fun singleCompressedUploadRetainsItsFileUntilCancelledStagingExits() {
+        val file = File.createTempFile("pending-compressed-", ".mp4", context.cacheDir).apply { writeText("approved") }
+        val source = AttachmentSource.LocalFile(file, "approved.mp4", "video/mp4")
+        val review = UploadVideoReview.Ready(CompressedUploadVideo(source))
+        val enteringStaging = CompletableDeferred<Unit>()
+        val releaseStaging = CompletableDeferred<Unit>()
+        val observed = CompletableDeferred<String>()
+        val viewModel =
+            AttachmentViewModel(
+                AttachmentPrefsImpl(context),
+                batchUploader { current, _, _ ->
+                    enteringStaging.complete(Unit)
+                    try {
+                        awaitCancellation()
+                    } finally {
+                        withContext(NonCancellable) {
+                            releaseStaging.await()
+                            observed.complete(current.file.readText())
+                        }
+                    }
+                },
+            )
+        try {
+            compose.setContent {}
+            compose.runOnIdle { viewModel.upload(source, videoReview = review) { error("Cancelled transfer completed") } }
+            awaitBatchCondition { enteringStaging.isCompleted }
+            compose.runOnIdle {
+                viewModel.cancel()
+                review.close()
+                assertTrue(file.exists())
+            }
+            releaseStaging.complete(Unit)
+            awaitBatchCondition { observed.isCompleted && !file.exists() }
+            assertEquals("approved", runBlocking { observed.await() })
+        } finally {
+            releaseStaging.complete(Unit)
+            viewModel.viewModelScope.cancel()
+            review.close()
+        }
+    }
+
+    @Test
+    fun singleCompressedUploadCannotRetryAfterTheDestinationChangesAndReturns() {
+        val mib = 1024L * 1024
+        val original = File.createTempFile("review-original-", ".mp4", context.cacheDir)
+        RandomAccessFile(original, "rw").use { it.setLength(2 * mib) }
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(sizeLimitBytes = mib, stripMetadata = false)) }
+        val outputs = mutableListOf<File>()
+        val failTransfer = CompletableDeferred<Unit>()
+        val rejected = "Temporary failure after staging"
+        var calls = 0
+        var networkId by mutableStateOf(21L)
+        val viewModel =
+            AttachmentViewModel(
+                prefs,
+                batchUploader { source, _, _ ->
+                    calls++
+                    failTransfer.await()
+                    assertEquals("approved copy", source.file.readText())
+                    throw IOException(rejected)
+                },
+            ) { _, _, _ ->
+                val file = File.createTempFile("review-compressed-", ".mp4", context.cacheDir).apply { writeText("approved copy") }
+                outputs.add(file)
+                CompressedUploadVideo(AttachmentSource.LocalFile(file, original.name, "video/mp4"))
+            }
+        try {
+            compose.setContent {
+                MotdTheme {
+                    AttachmentSheets(
+                        open = true,
+                        currentDraft = "",
+                        networkId = networkId,
+                        sojuFileHostUrl = null,
+                        sharedFile = PendingShare.File(Uri.fromFile(original), "video/mp4"),
+                        onDismiss = { error("Failed upload dismissed review") },
+                        onInsertUrl = { error("Failed upload added a link") },
+                        onReplaceDraft = {},
+                        onOpenNetworkSettings = {},
+                        viewModel = viewModel,
+                    )
+                }
+            }
+            val compress = compose.onNodeWithTag("attachment_compress_to_fit")
+            val ready = compose.onNodeWithTag("attachment_compression_ready")
+            val upload = compose.onNodeWithTag("attachment_upload")
+            awaitBatchCondition { compose.onAllNodesWithTag("attachment_compress_to_fit").fetchSemanticsNodes().isNotEmpty() }
+            compress.performScrollTo().performClick()
+            ready.performScrollTo().assertIsDisplayed()
+            upload.performClick()
+            awaitBatchCondition { calls == 1 }
+
+            compose.runOnIdle { networkId = 22L }
+            compose.waitForIdle()
+            compose.runOnIdle { networkId = 21L }
+            compose.waitForIdle()
+            failTransfer.complete(Unit)
+            awaitBatchCondition { compose.onAllNodesWithText(rejected).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(context.getString(R.string.upload_retry)).assertDoesNotExist()
+            compose.onNodeWithText(context.getString(R.string.action_ok)).performClick()
+            ready.assertDoesNotExist()
+            upload.assertIsNotEnabled()
+            compose.runOnIdle {
+                assertNull(viewModel.attempt.value)
+                assertFalse(outputs.single().exists())
+                assertEquals(1, calls)
+            }
+            compress.performScrollTo().performClick()
+            ready.performScrollTo().assertIsDisplayed()
+            compose.runOnIdle { assertEquals(1, calls) }
+        } finally {
+            failTransfer.complete(Unit)
+            viewModel.viewModelScope.cancel()
+            outputs.forEach(File::delete)
+            original.delete()
+        }
+    }
+
+    @Test
     fun imagePickedAsDocumentReviewsAndUploadsOneSnapshotEvenWhenSourceChanges() {
         val file = context.cacheDir.resolve("image-clipboard/review-document.bin")
         file.parentFile!!.mkdirs()
@@ -1488,6 +1740,160 @@ class AttachmentConfirmationSheetUiTest {
         } finally {
             viewModel.viewModelScope.cancel()
             file.delete()
+        }
+    }
+
+    @Test
+    fun sharedBatchCompressionKeepsEachOriginalAndRejectsChangedCompressedBytes() {
+        val mib = 1024L * 1024
+        val originals =
+            listOf("batch-first-video.mp4", "batch-second-video.mp4").map { name ->
+                context.cacheDir.resolve(name).also { file -> RandomAccessFile(file, "rw").use { it.setLength(2 * mib) } }
+            }
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(sizeLimitBytes = mib, stripMetadata = false)) }
+        val outputs = mutableListOf<File>()
+        val uploads = mutableListOf<String>()
+        var visible by mutableStateOf(true)
+        val viewModel =
+            AttachmentViewModel(
+                prefs,
+                batchUploader { source, config, _ ->
+                    uploads.add(source.name)
+                    assertEquals("encoded", source.file.readText())
+                    UploadRecord("https://files.example/${source.name}", config.backend, source.name)
+                },
+            ) { _, source, _ ->
+                File.createTempFile("batch-encoded-", ".mp4", context.cacheDir).let { file ->
+                    file.writeText("encoded")
+                    outputs.add(file)
+                    CompressedUploadVideo(AttachmentSource.LocalFile(file, (source as AttachmentSource.Document).name, "video/mp4"))
+                }
+            }
+        try {
+            viewModel.queueBatch(42, originals.map { PendingShare.File(Uri.fromFile(it), "video/mp4") })
+            val request = checkNotNull(viewModel.batchRequest.value)
+            compose.setContent {
+                MotdTheme {
+                    if (visible) {
+                        AttachmentBatchSheets(
+                            batchId = request.id,
+                            bufferId = request.bufferId,
+                            files = request.files,
+                            networkId = 21L,
+                            sojuFileHostUrl = null,
+                            onFinished = { true },
+                            viewModel = viewModel,
+                        )
+                    }
+                }
+            }
+            awaitBatch(viewModel)
+            val upload = compose.onNodeWithTag("attachment-batch-upload")
+            upload.assertIsNotEnabled()
+            compose.onNodeWithTag("attachment-batch-compress-to-fit-0").performScrollTo().performClick()
+            awaitBatch(viewModel)
+            compose.onNodeWithTag("attachment-batch-compression-ready-0").performScrollTo().assertIsDisplayed()
+            compose.onNodeWithTag("attachment-batch-compression-keep-original-0").performScrollTo().performClick()
+            compose.runOnIdle { assertFalse(outputs.single().exists()) }
+            upload.assertIsNotEnabled()
+
+            compose.onNodeWithTag("attachment-batch-compress-to-fit-0").performScrollTo().performClick()
+            awaitBatch(viewModel)
+            compose.onNodeWithTag("attachment-batch-compress-to-fit-1").performScrollTo().performClick()
+            awaitBatch(viewModel)
+            compose.onNodeWithTag("attachment-batch-compression-ready-1").performScrollTo().assertIsDisplayed()
+            compose.runOnIdle {
+                assertTrue(uploads.isEmpty())
+                outputs[1].writeText("changed")
+            }
+            upload.assertIsEnabled().performClick()
+            val finished = awaitBatch(viewModel)
+            assertEquals(R.string.upload_batch_file_changed, (finished.rows[0].status as AttachmentBatchStatus.Failed).reason)
+            assertTrue(finished.rows[1].status is AttachmentBatchStatus.Uploaded)
+            compose.runOnIdle {
+                assertEquals(listOf(originals[1].name), uploads)
+                assertTrue(outputs.none(File::exists))
+            }
+            compose.onNodeWithTag("attachment-batch-compress-to-fit-0").performScrollTo().performClick()
+            awaitBatch(viewModel)
+            compose.onNodeWithTag("attachment-batch-compression-ready-0").performScrollTo().assertIsDisplayed()
+            compose.runOnIdle { visible = false }
+            compose.waitForIdle()
+            compose.runOnIdle {
+                assertEquals(listOf(originals[1].name), uploads)
+                assertTrue(outputs.none(File::exists))
+                assertTrue(originals.all { it.length() == 2 * mib })
+            }
+        } finally {
+            viewModel.viewModelScope.cancel()
+            outputs.forEach(File::delete)
+            originals.forEach(File::delete)
+        }
+    }
+
+    @Test
+    fun batchCompressionLatchesDestinationChangesWhileTheFirstReceiptIsPending() {
+        val mib = 1024L * 1024
+        val originals =
+            List(2) {
+                File.createTempFile("queued-original-", ".mp4", context.cacheDir).also { file ->
+                    RandomAccessFile(file, "rw").use { it.setLength(2 * mib) }
+                }
+            }
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(sizeLimitBytes = mib, stripMetadata = false)) }
+        val staged = CompletableDeferred<File>()
+        val releaseFirst = CompletableDeferred<Unit>()
+        val attempts = mutableListOf<String>()
+        val viewModel =
+            AttachmentViewModel(
+                prefs,
+                batchUploader { source, config, _ ->
+                    attempts.add(source.name)
+                    staged.complete(source.file)
+                    releaseFirst.await()
+                    assertEquals("approved ${originals.first().name}", source.file.readText())
+                    UploadRecord("https://files.example/${source.name}", config.backend, source.name)
+                },
+            ) { _, source, _ ->
+                val name = (source as AttachmentSource.Document).name
+                val file = File.createTempFile("queued-compressed-", ".mp4", context.cacheDir).apply { writeText("approved $name") }
+                CompressedUploadVideo(AttachmentSource.LocalFile(file, name, "video/mp4"))
+            }
+        val originalTarget = AttachmentBatchTarget(21L, null, false)
+        try {
+            compose.setContent {}
+            viewModel.queueBatch(42, originals.map { PendingShare.File(Uri.fromFile(it), "video/mp4") })
+            val request = checkNotNull(viewModel.batchRequest.value)
+            compose.runOnIdle { viewModel.reviewBatch(request.id, originalTarget, context.contentResolver) }
+            repeat(originals.size) { index ->
+                val review = awaitBatch(viewModel)
+                compose.runOnIdle { viewModel.compressBatchVideo(review, index, context) }
+            }
+            val reviewed = awaitBatch(viewModel)
+            val copies = reviewed.rows.map { checkNotNull(it.compressedSource).file }
+            compose.runOnIdle { viewModel.uploadBatch(reviewed, context) }
+            awaitBatchCondition { staged.isCompleted }
+            val activeSnapshot = runBlocking { staged.await() }
+            compose.runOnIdle {
+                viewModel.updateBatchTarget(request.id, originalTarget.copy(networkId = 22L))
+                viewModel.updateBatchTarget(request.id, originalTarget)
+                assertTrue(viewModel.batchReview.value?.destinationChanged == true)
+                assertTrue(copies.none(File::exists))
+                assertTrue(activeSnapshot.exists())
+            }
+            releaseFirst.complete(Unit)
+            val finished = awaitBatch(viewModel)
+            assertTrue(finished.rows.first().status is AttachmentBatchStatus.Uploaded)
+            assertNull(finished.rows.last().compressedSource)
+            assertEquals(listOf(originals.first().name), attempts)
+            assertFalse(activeSnapshot.exists())
+        } finally {
+            releaseFirst.complete(Unit)
+            compose.runOnIdle { viewModel.batchRequest.value?.let { viewModel.leaveBatchCompression(it.id) } }
+            viewModel.viewModelScope.cancel()
+            originals.forEach(File::delete)
         }
     }
 

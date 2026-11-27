@@ -5,14 +5,19 @@ import io.github.trevarj.motd.R
 import io.github.trevarj.motd.attachment.AttachmentBackend
 import io.github.trevarj.motd.attachment.AttachmentSource
 import io.github.trevarj.motd.attachment.AttachmentUploadContext
+import io.github.trevarj.motd.attachment.CompressedUploadVideo
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
+import io.github.trevarj.motd.attachment.guessMimeType
 import io.github.trevarj.motd.attachment.httpsUploadUri
+import io.github.trevarj.motd.attachment.isVideoCompressionInputUri
 import io.github.trevarj.motd.attachment.normalizedConfig
+import io.github.trevarj.motd.attachment.sizeOrNull
 import io.github.trevarj.motd.attachment.validateEndpoint
 import io.github.trevarj.motd.ui.share.PendingShare
+import java.io.Closeable
 
 internal data class AttachmentBatchRequest(
     val id: String,
@@ -69,6 +74,9 @@ internal data class AttachmentBatchReview(
     val finishError: Boolean = false,
 ) {
     val hasUploads: Boolean get() = rows.any { it.status is AttachmentBatchStatus.Uploaded }
+    val hasCompression: Boolean get() = rows.any { it.compression != null }
+
+    fun withoutCompression(): AttachmentBatchReview = if (hasCompression) copy(rows = rows.map(AttachmentBatchRow::withoutCompression)) else this
 }
 
 internal data class AttachmentBatchRow(
@@ -76,12 +84,86 @@ internal data class AttachmentBatchRow(
     val source: AttachmentSource.Document? = null,
     val status: AttachmentBatchStatus = AttachmentBatchStatus.Checking,
     val reviewedDigest: ByteArray? = null,
+    val compression: UploadVideoReview? = null,
+    val originalSizeIsLowerBound: Boolean = false,
 ) {
+    val compressedSource: AttachmentSource.LocalFile?
+        get() = (compression as? UploadVideoReview.Ready)?.video?.source
+
     fun isUploadable(destination: AttachmentBatchDestination): Boolean = destination.endpoint != null && !needsCheck(destination)
 
-    fun needsCheck(destination: AttachmentBatchDestination?): Boolean = source == null || reviewedDigest == null || (destination != null && isOversized(destination))
+    fun needsCheck(destination: AttachmentBatchDestination?): Boolean =
+        source == null || reviewedDigest == null ||
+            (destination != null && ((compressedSource ?: source).sizeOrNull() ?: 0L) > destination.config.sizeLimitBytes)
 
     fun isOversized(destination: AttachmentBatchDestination): Boolean = (source?.size ?: 0L) > destination.config.sizeLimitBytes
+
+    fun canCompress(destination: AttachmentBatchDestination): Boolean =
+        destination.endpoint != null && source?.canCompressVideo(destination.config.sizeLimitBytes) == true &&
+            (status is AttachmentBatchStatus.Ready || status is AttachmentBatchStatus.Failed)
+
+    fun closeCompression() {
+        (compression as? UploadVideoReview.Ready)?.close()
+    }
+
+    fun withoutCompression(): AttachmentBatchRow {
+        closeCompression()
+        return if (compression == null) this else copy(compression = null, reviewedDigest = if (compressedSource == null) reviewedDigest else null)
+    }
+}
+
+internal sealed interface UploadVideoReview {
+    data object Working : UploadVideoReview
+
+    data object Failed : UploadVideoReview
+
+    class Ready(
+        val video: CompressedUploadVideo,
+    ) : UploadVideoReview,
+        Closeable {
+        private var reviewOpen = true
+        private var owners = 1
+
+        @Synchronized
+        fun retain(): Closeable? {
+            if (!reviewOpen) return null
+            owners++
+            return Closeable(::release)
+        }
+
+        @Synchronized
+        override fun close() {
+            if (!reviewOpen) return
+            reviewOpen = false
+            release()
+        }
+
+        @Synchronized
+        private fun release() {
+            if (--owners == 0) video.close()
+        }
+    }
+}
+
+internal fun AttachmentSource.canCompressVideo(limitBytes: Long): Boolean = (sizeOrNull() ?: 0L) > limitBytes && isLocalUploadVideo()
+
+internal fun AttachmentSource.isLocalUploadVideo(): Boolean {
+    val mime =
+        when (this) {
+            is AttachmentSource.Document -> {
+                if (!uri.isVideoCompressionInputUri()) return false
+                mimeType.takeUnless { it.isNullOrBlank() || it.equals("application/octet-stream", ignoreCase = true) } ?: guessMimeType(name)
+            }
+
+            is AttachmentSource.LocalFile -> {
+                mimeType
+            }
+
+            else -> {
+                return false
+            }
+        }
+    return mime.startsWith("video/", ignoreCase = true)
 }
 
 internal sealed interface AttachmentBatchStatus {

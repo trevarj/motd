@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsNotDisplayed
+import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
@@ -489,6 +490,7 @@ class RequiredHeadlessE2eTest {
         compose.onNodeWithText(cancel).performClick()
         ChatRobot(compose).awaitTagGone("attachment_upload")
         exerciseOrderedSharedFiles(bootstrap, bufferId)
+        exerciseVideoCompression(bufferId)
     }
 
     private fun assertSharedImageReviewReturnsToUpload(bufferId: Long) {
@@ -527,6 +529,80 @@ class RequiredHeadlessE2eTest {
         } finally {
             fixture.delete()
         }
+    }
+
+    private fun exerciseVideoCompression(bufferId: Long) {
+        val instrumentation = InstrumentationRegistry.getInstrumentation()
+        val context = instrumentation.targetContext
+        val prefs = AttachmentPrefsImpl(context)
+        val originalConfig = runBlocking { prefs.config.first() }
+        val existingUrls = runBlocking { prefs.recentUploads.first().mapTo(HashSet()) { it.url } }
+        val directory = File(context.cacheDir, "camera").apply { mkdirs() }
+        val fixture = File.createTempFile("required-compression-", ".mp4", directory)
+        val limit = 96L * 1024
+        try {
+            val assets = instrumentation.context.assets
+            val original = assets.open("required-video-compression.mp4").use { it.readBytes() }
+            assertTrue(original.size > limit)
+            fixture.writeBytes(original)
+            runBlocking {
+                prefs.setConfig(originalConfig.forBackend(AttachmentBackend.SOJU_FILEHOST).copy(sizeLimitBytes = limit, stripMetadata = false))
+            }
+            val source = FileProvider.getUriForFile(context, "${context.packageName}.camera", fixture)
+            checkNotNull(scenario.scenario).onActivity { activity ->
+                activity.startActivity(
+                    Intent(Intent.ACTION_SEND)
+                        .setClass(activity, MainActivity::class.java)
+                        .setType("video/mp4")
+                        .putExtra(Intent.EXTRA_STREAM, source)
+                        .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_SINGLE_TOP),
+                )
+            }
+            val chat = ChatRobot(compose)
+            chat.awaitTag("share_picker_list")
+            ChatListRobot(compose).open(bufferId)
+            val upload = compose.onNodeWithTag("attachment_upload", useUnmergedTree = true)
+            chat.awaitTag("attachment_size_limit_error")
+            upload.assertIsNotEnabled()
+            chat.click("attachment_compress_to_fit")
+            chat.assertDisplayed("attachment_compression_ready")
+            assertTrue(runBlocking { prefs.recentUploads.first().all { it.url in existingUrls } })
+            assertTrue(original.contentEquals(fixture.readBytes()))
+
+            chat.click("attachment_compression_keep_original")
+            chat.awaitTagGone("attachment_compression_ready")
+            chat.awaitTag("attachment_size_limit_error")
+            upload.assertIsNotEnabled()
+            chat.click("attachment_compress_to_fit")
+            chat.assertDisplayed("attachment_compression_ready")
+            assertTrue(runBlocking { prefs.recentUploads.first().all { it.url in existingUrls } })
+            chat.click("attachment_upload")
+            val receipts =
+                awaitWhileComposing("approved video uploaded through the isolated Soju file host", 30_000) {
+                    prefs.recentUploads.first { rows -> rows.any { it.url !in existingUrls } }
+                }
+            val receipt = receipts.single { it.url !in existingUrls }
+            assertEquals(AttachmentBackend.SOJU_FILEHOST, receipt.backend)
+            assertEquals("video/mp4", receipt.mimeType)
+            assertTrue(checkNotNull(receipt.sizeBytes) in 1..limit)
+            assertTrue(original.contentEquals(fixture.readBytes()))
+            chat.awaitTagGone("attachment_confirmation_sheet")
+            val insertedLink = hasTestTag("chat_composer_field") and SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString(receipt.url))
+            compose.waitUntil("uploaded URL inserted in the draft", 10_000) {
+                compose.onAllNodes(insertedLink, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+            }
+            milestones.record("compressed_video_uploaded_after_approval", "size=${receipt.sizeBytes} cap=$limit")
+        } finally {
+            runBlocking {
+                prefs.recentUploads
+                    .first()
+                    .filter { it.url !in existingUrls }
+                    .forEach { prefs.removeUpload(it.url) }
+                prefs.setConfig(originalConfig)
+            }
+            fixture.delete()
+        }
+        ChatRobot(compose).replace("chat_composer_field", "")
     }
 
     private fun exerciseOrderedSharedFiles(
