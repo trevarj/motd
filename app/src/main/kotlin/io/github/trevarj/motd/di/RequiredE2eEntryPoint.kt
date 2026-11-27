@@ -11,6 +11,8 @@ import io.github.trevarj.motd.data.repo.SearchRepository
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.service.ConnectionManager
 import io.github.trevarj.motd.service.HistoryResyncController
+import io.github.trevarj.motd.ui.chat.ComposerDraftStore
+import io.github.trevarj.motd.ui.share.PendingShareStore
 
 /** Access to existing production seams for out-of-process instrumentation. */
 @EntryPoint
@@ -29,6 +31,10 @@ interface RequiredE2eEntryPoint {
     fun history(): HistoryResyncController
 
     fun voiceMessages(): VoiceMessageSender
+
+    fun pendingShares(): PendingShareStore
+
+    fun composerDrafts(): ComposerDraftStore
 
     /**
      * The app's own decision journal, so a required-gate failure can carry WHY.

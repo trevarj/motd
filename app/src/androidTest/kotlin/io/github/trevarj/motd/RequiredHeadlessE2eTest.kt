@@ -47,6 +47,9 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import androidx.test.rule.GrantPermissionRule
 import io.github.trevarj.motd.ai.WhisperNativeAssertions
+import io.github.trevarj.motd.attachment.AttachmentBackend
+import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
+import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
 import io.github.trevarj.motd.data.db.NetworkRole
@@ -96,6 +99,7 @@ import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.service.MotdNotifications
 import io.github.trevarj.motd.service.NotificationActionService
+import io.github.trevarj.motd.ui.share.PendingShare
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Dispatchers
@@ -480,6 +484,10 @@ class RequiredHeadlessE2eTest {
             fixture.delete()
         }
         assertSharedImageReviewReturnsToUpload(bufferId)
+        val cancel = InstrumentationRegistry.getInstrumentation().targetContext.getString(R.string.action_cancel)
+        compose.onNodeWithText(cancel).performClick()
+        ChatRobot(compose).awaitTagGone("attachment_upload")
+        exerciseOrderedSharedFiles(bootstrap, bufferId)
     }
 
     private fun assertSharedImageReviewReturnsToUpload(bufferId: Long) {
@@ -518,6 +526,76 @@ class RequiredHeadlessE2eTest {
         } finally {
             fixture.delete()
         }
+    }
+
+    private fun exerciseOrderedSharedFiles(
+        bootstrap: E2eBootstrap,
+        bufferId: Long,
+    ) {
+        val context = InstrumentationRegistry.getInstrumentation().targetContext
+        val prefs = AttachmentPrefsImpl(context)
+        val original = runBlocking { prefs.config.first() }
+        val directory = File(context.cacheDir, "camera").apply { mkdirs() }
+        val fixtures = List(2) { index -> File.createTempFile("required-share-$index-", ".png", directory) }
+        val chat = ChatRobot(compose)
+        val draft = "Draft kept before shared links"
+        val field = compose.onNodeWithTag("chat_composer_field", useUnmergedTree = true)
+        try {
+            runBlocking {
+                prefs.setConfig(original.forBackend(AttachmentBackend.SOJU_FILEHOST).copy(stripHostedImageMetadata = false))
+            }
+            fixtures.zip(listOf(Color.RED, Color.BLUE)).forEach { (file, color) ->
+                val bitmap = Bitmap.createBitmap(12, 12, Bitmap.Config.ARGB_8888)
+                try {
+                    bitmap.eraseColor(color)
+                    file.outputStream().use { assertTrue(bitmap.compress(Bitmap.CompressFormat.PNG, 100, it)) }
+                } finally {
+                    bitmap.recycle()
+                }
+            }
+            val shared =
+                fixtures.map { file ->
+                    PendingShare.File(FileProvider.getUriForFile(context, "${context.packageName}.camera", file), "image/png")
+                }
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            ChatListRobot(compose).awaitTag("chatlist_row_$bufferId")
+            runBlocking { bootstrap.seams.composerDrafts().saveDraft(bufferId, draft, null) }
+            bootstrap.seams.pendingShares().assignAttachment(bufferId, PendingShare.Files(shared))
+            ChatListRobot(compose).open(bufferId)
+            chat.awaitTag("attachment-batch-review")
+            for ((index, fixture) in fixtures.withIndex()) {
+                val row = "attachment-batch-row-$index"
+                val label = context.getString(R.string.upload_batch_item, index + 1, fixture.name)
+                val item = hasText(label) and hasAnyAncestor(hasTestTag(row))
+                compose.waitUntil("shared file $index is reviewed in order", 10_000) {
+                    compose.onAllNodes(item, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                }
+                compose.onNode(item, useUnmergedTree = true).performScrollTo().assertIsDisplayed()
+            }
+            val names = fixtures.map(File::getName)
+            assertTrue(runBlocking { prefs.recentUploads.first() }.none { it.displayName in names })
+            chat.click("attachment-batch-upload")
+            val records =
+                awaitWhileComposing("both shared files uploaded through the isolated file host", 30_000) {
+                    prefs.recentUploads.first { rows -> names.all { name -> rows.any { it.displayName == name } } }
+                }
+            val links = names.map { name -> records.single { it.displayName == name }.url }
+            chat.click("attachment-batch-add-links")
+            chat.awaitTagGone("attachment-batch-review")
+            field.assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString((listOf(draft) + links).joinToString("\n"))))
+            milestones.record("ordered_shared_files_inserted", "buffer=$bufferId count=${links.size}")
+        } finally {
+            runBlocking {
+                val names = fixtures.map(File::getName)
+                prefs.recentUploads
+                    .first()
+                    .filter { it.displayName in names }
+                    .forEach { prefs.removeUpload(it.url) }
+                prefs.setConfig(original)
+            }
+            fixtures.forEach { it.delete() }
+        }
+        chat.replace("chat_composer_field", "")
     }
 
     @Test

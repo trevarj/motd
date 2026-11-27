@@ -113,7 +113,7 @@ import io.github.trevarj.motd.ui.settings.labs.GestureMenuEditorScreen
 import io.github.trevarj.motd.ui.settings.labs.LabsScreen
 import io.github.trevarj.motd.ui.share.IncomingContentNavigation
 import io.github.trevarj.motd.ui.share.PaletteIntentIntake
-import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.SharePickerScreen
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import kotlin.reflect.typeOf
@@ -139,7 +139,7 @@ fun MotdNavGraph(
     isNotificationTargetCurrent: () -> Boolean = { true },
     notificationSource: android.content.Intent? = null,
     incomingIntake: PaletteIntentIntake? = null,
-    onIncomingShare: (PendingShare) -> Unit = {},
+    pendingShareStore: PendingShareStore? = null,
     onIncomingConsumed: (android.content.Intent) -> Unit = {},
     launcherStartupReady: Boolean = false,
 ) {
@@ -155,6 +155,7 @@ fun MotdNavGraph(
         // Replace an existing chat entry so a warm notification tap for the already-open buffer
         // receives a fresh route-scoped ViewModel and resolves the requested message. A
         // single-top navigation would retain the old ViewModel and silently ignore new jump args.
+        // An active file review owns its old entry; keep it on Back while opening the jump fresh.
         navController.openChat(
             ChatRoute(
                 target.bufferId,
@@ -162,12 +163,12 @@ fun MotdNavGraph(
                 target.jumpToTime,
                 target.jumpToEventId,
             ),
-            replaceCurrentChat = true,
+            replaceCurrentChat = pendingShareStore?.hasActiveBatchReview != true,
         )
         onNotificationTargetHandled()
     }
-    incomingIntake?.let {
-        IncomingContentNavigation(it, navController, onIncomingShare, onIncomingConsumed)
+    if (incomingIntake != null && pendingShareStore != null) {
+        IncomingContentNavigation(incomingIntake, navController, pendingShareStore, onIncomingConsumed)
     }
     val presentations = remember(navController) { ChatPresentationRegistry() }
     val listWidth = rememberSaveable { mutableFloatStateOf(CHAT_LIST_INITIAL_DP) }
@@ -782,7 +783,7 @@ fun MotdNavGraph(
                 // Leave the picker before opening the chat so back returns to the previous screen
                 // rather than the (now empty) picker.
                 onPicked = { bufferId ->
-                    navController.completeShareNavigation(bufferId)
+                    navController.completeShareNavigation(bufferId, pendingShareStore)
                 },
                 onCancel = { navController.popBackStack() },
             )
@@ -1055,9 +1056,20 @@ internal fun NavHostController.returnToChatList() {
     }
 }
 
-internal fun NavHostController.completeShareNavigation(bufferId: Long) {
+internal fun NavHostController.completeShareNavigation(
+    bufferId: Long,
+    shares: PendingShareStore? = null,
+) {
+    val assigned = shares?.peekAttachment(bufferId)
     popBackStack()
     openChat(ChatRoute(bufferId), replaceCurrentChat = true)
+    if (assigned != null) {
+        currentBackStackEntry?.lifecycle?.addObserver(
+            LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_DESTROY) shares.discardAttachment(bufferId, assigned)
+            },
+        )
+    }
 }
 
 private fun NavHostController.openSettingsResult(destination: SettingsSearchDestination) {

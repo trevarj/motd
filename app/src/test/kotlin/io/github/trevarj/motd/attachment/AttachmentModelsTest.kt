@@ -1,10 +1,13 @@
 package io.github.trevarj.motd.attachment
 
+import okhttp3.mockwebserver.MockResponse
+import okhttp3.mockwebserver.MockWebServer
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.net.HttpURLConnection
 
 class AttachmentModelsTest {
     @Test fun endpointPresetsAreHttps() {
@@ -280,6 +283,34 @@ class AttachmentModelsTest {
             "Soju file host upload failed (HTTP 500).",
             sojuUploadFailureMessage(500, "", "image/*", "image/jpeg"),
         )
+    }
+
+    @Test fun sojuFailureShowsPlainDiagnosticsButNotHtmlErrorPages() {
+        MockWebServer().use { server ->
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(503)
+                    .setHeader("Content-Type", "text/html; charset=utf-8")
+                    .setBody("<!doctype html><title>Bad gateway</title>"),
+            )
+            server.enqueue(
+                MockResponse()
+                    .setResponseCode(415)
+                    .setHeader("Content-Type", "text/plain; charset=utf-8")
+                    .setBody("unsupported charset"),
+            )
+
+            fun message(): String {
+                val connection = server.url("/upload").toUrl().openConnection() as HttpURLConnection
+                return try {
+                    sojuUploadFailureMessage(connection.responseCode, readBodySnippet(connection), null, "image/jpeg")
+                } finally {
+                    connection.disconnect()
+                }
+            }
+            assertEquals("Soju file host upload failed (HTTP 503).", message())
+            assertEquals("Soju file host upload failed (HTTP 415): unsupported charset.", message())
+        }
     }
 
     @Test fun unknownAttachmentMimeFallsBackToFilenameExtension() {

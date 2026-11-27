@@ -92,13 +92,18 @@ class SharePickerViewModel
             queryState.value = value
         }
 
-        /** Picking only hands off a draft or file; it never sends a message. */
+        /** Picking only hands off a draft or files; it never sends a message. */
         suspend fun pick(bufferId: Long): Boolean {
             val current = share ?: return false
-            if (!store.consumeIfUnchanged(current)) return false
             when (current) {
-                is PendingShare.Text -> draftStore.push(bufferId, ComposerPrefill(current.text))
-                is PendingShare.File -> store.assignFile(bufferId, current)
+                is PendingShare.Text -> {
+                    if (!store.consumeIfUnchanged(current)) return false
+                    draftStore.push(bufferId, ComposerPrefill(current.text))
+                }
+
+                is PendingShare.Attachment -> {
+                    if (!store.assignPendingAttachment(bufferId, current)) return false
+                }
             }
             handled = true
             return true

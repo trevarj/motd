@@ -74,10 +74,10 @@
             android:launchMode="singleTop"
             android:theme="@style/Theme.Motd.Splash"
             android:windowSoftInputMode="adjustResize">
-            <!-- Inbound share target: a single text or stream item routed to the chat picker.
-                 SEND_MULTIPLE is deliberately not handled. -->
+            <!-- Inbound text and file shares go through the chat picker. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />
+                <action android:name="android.intent.action.SEND_MULTIPLE" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="text/plain" />
                 <data android:mimeType="*/*" />

@@ -333,7 +333,7 @@ class MainActivity :
                                     isNotificationTargetCurrent = { notificationIntent != null && notificationSource === notificationIntent && intent === notificationIntent },
                                     onNotificationTargetHandled = { consumeNotificationTarget(notificationIntent) },
                                     incomingIntake = incomingIntake,
-                                    onIncomingShare = pendingShareStore::set,
+                                    pendingShareStore = pendingShareStore,
                                     onIncomingConsumed = ::consumeIncomingIntent,
                                 )
                             }, overlays = {

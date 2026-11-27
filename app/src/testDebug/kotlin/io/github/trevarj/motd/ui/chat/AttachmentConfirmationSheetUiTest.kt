@@ -59,6 +59,7 @@ import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.core.app.ActivityOptionsCompat
 import androidx.core.content.FileProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.R
@@ -73,6 +74,7 @@ import io.github.trevarj.motd.attachment.AttachmentUploader
 import io.github.trevarj.motd.attachment.AttachmentUploaderImpl
 import io.github.trevarj.motd.attachment.HostedImageSnapshot
 import io.github.trevarj.motd.attachment.LocalUploadPreview
+import io.github.trevarj.motd.attachment.MetadataNotSupportedException
 import io.github.trevarj.motd.attachment.OffHostUploadException
 import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.SOJU_FILEHOST_TOKEN
@@ -93,6 +95,7 @@ import io.github.trevarj.motd.ui.settings.AttachmentSettingsViewModel
 import io.github.trevarj.motd.ui.settings.UploadsSettingsContent
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.MotdTheme
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -1003,6 +1006,392 @@ class AttachmentConfirmationSheetUiTest {
         assertTrue(file.exists())
         file.delete()
     }
+
+    @Test
+    fun sharedBatchRequiresConsentAndAddsRetriedLinksInIncomingOrderOnce() {
+        val first = batchFixture("batch-first.txt")
+        val second = batchFixture("batch-second.txt")
+        val missing = context.cacheDir.resolve("missing-batch.txt")
+        val attempts = mutableListOf<String>()
+        val completed = mutableListOf<List<String>>()
+        var visible by mutableStateOf(true)
+        var hydrated by mutableStateOf(false)
+        var acceptsLinks = false
+        val persistLinks = CompletableDeferred<Unit>()
+        var leaseCloses = 0
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(stripMetadata = false)) }
+        val viewModel =
+            AttachmentViewModel(
+                prefs,
+                batchUploader { source, config, _ ->
+                    attempts.add(source.name)
+                    assertEquals("text/plain", source.mimeType)
+                    assertFalse(config.stripMetadata)
+                    if (attempts.size == 1) throw IOException("Temporary upload failure")
+                    UploadRecord("https://files.example/${source.name}", config.backend, source.name)
+                },
+            )
+        try {
+            viewModel.queueBatch(
+                42,
+                listOf(
+                    PendingShare.File(FileProvider.getUriForFile(context, "${context.packageName}.camera", first), "*/*"),
+                    PendingShare.File(Uri.fromFile(second), "text/plain\r\nX-Evil: header"),
+                    PendingShare.File(Uri.fromFile(missing), "text/plain"),
+                ),
+                lease = AutoCloseable { leaseCloses++ },
+            )
+            compose.setContent {
+                val request by viewModel.batchRequest.collectAsStateWithLifecycle()
+                MotdTheme {
+                    request?.takeIf { visible }?.let {
+                        AttachmentBatchSheets(
+                            batchId = it.id,
+                            bufferId = it.bufferId,
+                            files = it.files,
+                            networkId = null,
+                            sojuFileHostUrl = null,
+                            canAddLinks = hydrated,
+                            onFinished = { links ->
+                                if (acceptsLinks) {
+                                    persistLinks.await()
+                                    completed.add(links)
+                                } else {
+                                    false
+                                }
+                            },
+                            viewModel = viewModel,
+                        )
+                    }
+                }
+            }
+            awaitBatch(viewModel)
+            compose.onNodeWithTag("attachment-batch-review").assertIsDisplayed()
+            compose.onNodeWithText("File 1: ${first.name}").assertExists()
+            compose.onNodeWithText("File 2: ${second.name}").assertExists()
+            compose.onNodeWithText("File 3: ${missing.name}").assertExists()
+            compose.onNodeWithText(AttachmentBackend.CRAFTERBIN.endpoint!!).assertExists()
+            compose.runOnIdle { assertTrue(attempts.isEmpty() && completed.isEmpty()) }
+
+            compose.onNodeWithTag("attachment-batch-upload").assertIsEnabled().performClick()
+            val partial = awaitBatch(viewModel)
+            assertTrue(partial.rows[0].status is AttachmentBatchStatus.Failed)
+            assertTrue(partial.rows[1].status is AttachmentBatchStatus.Uploaded)
+            assertEquals(R.string.upload_batch_file_unavailable, (partial.rows[2].status as AttachmentBatchStatus.Failed).reason)
+            compose.onNodeWithTag("attachment-batch-retry-0").performScrollTo().performClick()
+            val readyToAdd = awaitBatch(viewModel)
+            compose.runOnIdle {
+                assertEquals(listOf(first.name, second.name, first.name), attempts)
+                assertTrue(completed.isEmpty())
+            }
+
+            compose.onNodeWithTag("attachment-batch-add-links").assertIsNotEnabled()
+            compose.runOnIdle { hydrated = true }
+            compose.onNodeWithTag("attachment-batch-add-links").assertIsEnabled().performClick()
+            awaitBatchCondition { viewModel.batchReview.value?.finishError == true && viewModel.batchReview.value?.busy == false }
+            compose.onNodeWithText(context.getString(R.string.upload_batch_draft_save_failed)).assertExists()
+            compose.runOnIdle {
+                assertEquals(readyToAdd.rows, viewModel.batchReview.value?.rows)
+                assertEquals(0, leaseCloses)
+                assertTrue(completed.isEmpty())
+                visible = false
+            }
+            compose.onNodeWithTag("attachment-batch-review").assertDoesNotExist()
+            compose.runOnIdle {
+                assertEquals(readyToAdd.rows, viewModel.batchReview.value?.rows)
+                acceptsLinks = true
+                visible = true
+            }
+            compose.onNodeWithTag("attachment-batch-add-links").assertIsEnabled().performClick()
+            compose.onNodeWithText(context.getString(R.string.upload_batch_saving_links)).assertExists()
+            compose.onNodeWithTag("attachment-batch-add-links").assertDoesNotExist()
+            compose.runOnIdle {
+                assertFalse(viewModel.finishBatch(partial.request.id, addLinks = true) { error("Already saving") })
+                assertEquals(0, leaseCloses)
+                persistLinks.complete(Unit)
+            }
+            awaitBatchCondition { viewModel.batchRequest.value == null }
+            compose.runOnIdle {
+                assertEquals(listOf(listOf("https://files.example/${first.name}", "https://files.example/${second.name}")), completed)
+                assertEquals(1, leaseCloses)
+                assertFalse(viewModel.finishBatch(partial.request.id, addLinks = true) { error("Already accepted") })
+            }
+            compose.onNodeWithTag("attachment-batch-review").assertDoesNotExist()
+        } finally {
+            viewModel.viewModelScope.cancel()
+            first.delete()
+            second.delete()
+        }
+    }
+
+    @Test
+    fun sharedBatchRevalidatesSojuAndSettingsBetweenFilesAndGuardsRapidRetry() {
+        val first = batchFixture("first.txt")
+        val second = batchFixture("second.txt")
+        val advertised = "https://irc.example/filehost/"
+        val newAdvertised = "https://elsewhere.example/new"
+        val target = AttachmentBatchTarget(12, advertised, preferSojuFileHost = true)
+        val originalSettings = PasteBackendConfig(stripMetadata = false)
+        val settings = AttachmentPrefsImpl(context)
+        runBlocking { settings.setConfig(originalSettings) }
+        val firstTransfer = CompletableDeferred<Unit>()
+        val firstTransferStarted = CompletableDeferred<Unit>()
+        val attempts = mutableListOf<String>()
+        val destinations = mutableListOf<Pair<String?, Boolean>>()
+        val resolver = context.contentResolver
+        val viewModel =
+            AttachmentViewModel(
+                settings,
+                batchUploader { source, config, uploadContext ->
+                    attempts.add(source.name)
+                    assertEquals(AttachmentBackend.SOJU_FILEHOST, config.backend)
+                    destinations.add(uploadContext.expectedSojuFileHostUrl to config.stripMetadata)
+                    if (source.name == first.name) {
+                        firstTransferStarted.complete(Unit)
+                        firstTransfer.await()
+                    }
+                    if (source.name == second.name && attempts.size == 2) throw IOException("Retry this file")
+                    UploadRecord("https://irc.example/${source.name}", config.backend, source.name)
+                },
+            )
+        try {
+            compose.setContent {}
+            compose.runOnIdle {
+                viewModel.queueBatch(42, listOf(first, second).map { PendingShare.File(Uri.fromFile(it), "text/plain") })
+                viewModel.reviewBatch(viewModel.batchRequest.value!!.id, target, resolver)
+            }
+            val initial = awaitBatch(viewModel)
+            compose.runOnIdle { viewModel.uploadBatch(initial, context) }
+            awaitBatchCondition { firstTransferStarted.isCompleted }
+            compose.runOnIdle {
+                val active = viewModel.batchReview.value
+                viewModel.reviewBatch(initial.request.id, target, resolver)
+                assertSame(active, viewModel.batchReview.value)
+                assertFalse(viewModel.finishBatch(initial.request.id, addLinks = true) { error("Batch still working") })
+                viewModel.updateBatchTarget(initial.request.id, target.copy(sojuFileHostUrl = newAdvertised))
+                firstTransfer.complete(Unit)
+            }
+            val partial = awaitBatch(viewModel)
+            assertEquals(listOf(first.name), attempts)
+            assertTrue(partial.rows[0].status is AttachmentBatchStatus.Uploaded)
+            assertEquals(R.string.upload_batch_destination_changed, (partial.rows[1].status as AttachmentBatchStatus.Failed).reason)
+
+            runBlocking { settings.setConfig(originalSettings.copy(stripMetadata = true)) }
+            compose.runOnIdle {
+                viewModel.retryBatch(partial, 1, context)
+                assertSame(partial, viewModel.batchReview.value)
+                viewModel.reviewChangedDestination(partial)
+            }
+            val refreshed = awaitBatch(viewModel)
+            assertEquals(listOf(first.name), attempts)
+            assertFalse(refreshed.started)
+            assertEquals(newAdvertised, refreshed.destination?.endpoint)
+            assertEquals(partial.rows[0], refreshed.rows[0])
+            compose.runOnIdle { viewModel.uploadBatch(refreshed, context) }
+            val failed = awaitBatch(viewModel)
+            assertTrue(failed.rows[1].status is AttachmentBatchStatus.Failed)
+            compose.runOnIdle {
+                viewModel.retryBatch(failed, 1, context)
+                viewModel.retryBatch(failed, 1, context)
+            }
+            val complete = awaitBatch(viewModel)
+            compose.runOnIdle {
+                assertEquals(listOf(first.name, second.name, second.name), attempts)
+                assertEquals(listOf(advertised to false, newAdvertised to true, newAdvertised to true), destinations)
+                val accepted =
+                    viewModel.finishBatch(complete.request.id, addLinks = true) { urls ->
+                        assertEquals(listOf("https://irc.example/${first.name}", "https://irc.example/${second.name}"), urls)
+                        assertFalse(viewModel.finishBatch(complete.request.id, addLinks = true) { error("Reentrant completion") })
+                        true
+                    }
+                assertTrue(accepted)
+            }
+        } finally {
+            viewModel.viewModelScope.cancel()
+            first.delete()
+            second.delete()
+        }
+    }
+
+    @Test
+    fun sharedBatchStopKeepsTheCurrentReceiptAndSkipsTheRemainingFile() {
+        val fixture = batchFixture("stop-upload.txt")
+        val transferStarted = CompletableDeferred<Unit>()
+        val finishTransfer = CompletableDeferred<Unit>()
+        val viewModel =
+            AttachmentViewModel(
+                AttachmentPrefsImpl(context),
+                batchUploader { source, config, _ ->
+                    check(transferStarted.complete(Unit)) { "Stop must not start the second transfer" }
+                    finishTransfer.await()
+                    UploadRecord("https://files.example/finished", config.backend, source.name)
+                },
+            )
+        val resolver = context.contentResolver
+        try {
+            compose.setContent {}
+            compose.runOnIdle {
+                val file = PendingShare.File(Uri.fromFile(fixture), "text/plain")
+                viewModel.queueBatch(42, listOf(file, file))
+                viewModel.reviewBatch(viewModel.batchRequest.value!!.id, AttachmentBatchTarget(null, null, false), resolver)
+            }
+            val initial = awaitBatch(viewModel)
+            compose.runOnIdle { viewModel.uploadBatch(initial, context) }
+            awaitBatchCondition { transferStarted.isCompleted }
+            compose.runOnIdle {
+                viewModel.stopBatch(initial.request.id)
+                finishTransfer.complete(Unit)
+            }
+            val stopped = awaitBatch(viewModel)
+            assertTrue(stopped.rows[0].status is AttachmentBatchStatus.Uploaded)
+            assertEquals(AttachmentBatchStatus.Ready, stopped.rows[1].status)
+            compose.runOnIdle {
+                assertTrue(viewModel.finishBatch(stopped.request.id, addLinks = true) { it == listOf("https://files.example/finished") })
+            }
+        } finally {
+            viewModel.viewModelScope.cancel()
+            fixture.delete()
+        }
+    }
+
+    @Test
+    fun sharedBatchDetectsGenericImagesAndBindsSendOriginalToReviewedBytes() {
+        val image = batchFixture("batch-image.bin")
+        Bitmap.createBitmap(8, 8, Bitmap.Config.ARGB_8888).also { bitmap ->
+            image.outputStream().use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            bitmap.recycle()
+        }
+        val original = image.readBytes() + byteArrayOf(1)
+        val updated = original.copyOf().also { it[it.lastIndex] = 2 }
+        image.writeBytes(original)
+        val prefs = AttachmentPrefsImpl(context)
+        runBlocking { prefs.setConfig(PasteBackendConfig(stripMetadata = false, stripHostedImageMetadata = true)) }
+        val snapshots = mutableListOf<File>()
+        val viewModel =
+            AttachmentViewModel(
+                prefs,
+                batchUploader { source, config, uploadContext ->
+                    snapshots.add(source.file)
+                    assertEquals("image/png", source.mimeType)
+                    assertTrue(config.stripMetadata)
+                    if (!uploadContext.allowOriginalMetadata) throw MetadataNotSupportedException()
+                    image.writeBytes(original)
+                    assertArrayEquals(updated, source.file.readBytes())
+                    UploadRecord("https://files.example/photo", config.backend, source.name)
+                },
+            )
+        try {
+            compose.setContent {}
+            compose.runOnIdle {
+                val file = PendingShare.File(Uri.fromFile(image), "application/octet-stream")
+                viewModel.queueBatch(42, listOf(file))
+                viewModel.reviewBatch(viewModel.batchRequest.value!!.id, AttachmentBatchTarget(null, null, false), context.contentResolver)
+            }
+            val initial = awaitBatch(viewModel)
+            compose.runOnIdle { viewModel.uploadBatch(initial, context) }
+            val detected = awaitBatch(viewModel)
+            assertTrue(snapshots.isEmpty())
+            assertEquals("image/png", detected.rows[0].source?.mimeType)
+            assertEquals(R.string.upload_batch_file_changed, (detected.rows[0].status as AttachmentBatchStatus.Failed).reason)
+
+            compose.runOnIdle { viewModel.retryBatch(detected, 0, context) }
+            val firstWarning = awaitBatch(viewModel)
+            assertTrue((firstWarning.rows[0].status as AttachmentBatchStatus.Failed).needsOriginalConsent)
+            assertFalse(snapshots.single().exists())
+
+            image.writeBytes(updated)
+            compose.runOnIdle { viewModel.retryBatch(firstWarning, 0, context, allowOriginal = true) }
+            val changed = awaitBatch(viewModel)
+            assertEquals(1, snapshots.size)
+            assertEquals(R.string.upload_batch_file_changed, (changed.rows[0].status as AttachmentBatchStatus.Failed).reason)
+
+            compose.runOnIdle { viewModel.retryBatch(changed, 0, context) }
+            val secondWarning = awaitBatch(viewModel)
+            compose.runOnIdle { viewModel.retryBatch(secondWarning, 0, context, allowOriginal = true) }
+            assertTrue(awaitBatch(viewModel).rows[0].status is AttachmentBatchStatus.Uploaded)
+            assertEquals(3, snapshots.size)
+            assertTrue(snapshots.none(File::exists))
+        } finally {
+            viewModel.viewModelScope.cancel()
+            image.delete()
+        }
+    }
+
+    @Test
+    fun sharedBatchRejectsSameSizeReplacementBeforeFirstUpload() {
+        val file = batchFixture("changed-before-upload.txt")
+        val uploads = mutableListOf<String>()
+        val viewModel =
+            AttachmentViewModel(
+                AttachmentPrefsImpl(context),
+                batchUploader { source, config, _ ->
+                    uploads.add(source.file.readText())
+                    UploadRecord("https://files.example/changed", config.backend, source.name)
+                },
+            )
+        try {
+            compose.setContent {}
+            compose.runOnIdle {
+                viewModel.queueBatch(42, listOf(PendingShare.File(Uri.fromFile(file), "text/plain")))
+                viewModel.reviewBatch(viewModel.batchRequest.value!!.id, AttachmentBatchTarget(null, null, false), context.contentResolver)
+            }
+            val reviewed = awaitBatch(viewModel)
+            val reviewedRow = reviewed.rows.single()
+            assertEquals(7L, reviewedRow.source?.size)
+            assertEquals("text/plain", reviewedRow.source?.mimeType)
+            assertTrue(reviewedRow.reviewedDigest != null)
+
+            file.writeText("replace")
+            compose.runOnIdle { viewModel.uploadBatch(reviewed, context) }
+            val changed = awaitBatch(viewModel)
+            assertTrue(uploads.isEmpty())
+            assertEquals(reviewed.rows.single().source, changed.rows.single().source)
+            assertEquals(R.string.upload_batch_file_changed, (changed.rows.single().status as AttachmentBatchStatus.Failed).reason)
+
+            compose.runOnIdle { viewModel.retryBatch(changed, 0, context) }
+            assertTrue(awaitBatch(viewModel).rows.single().status is AttachmentBatchStatus.Uploaded)
+            assertEquals(listOf("replace"), uploads)
+        } finally {
+            viewModel.viewModelScope.cancel()
+            file.delete()
+        }
+    }
+
+    private fun awaitBatch(viewModel: AttachmentViewModel): AttachmentBatchReview {
+        awaitBatchCondition { viewModel.batchReview.value?.busy == false }
+        return checkNotNull(viewModel.batchReview.value)
+    }
+
+    private fun awaitBatchCondition(condition: () -> Boolean) {
+        compose.waitUntil(5_000) {
+            // waitUntil advances the Compose clock, but Robolectric also has to drain Android Main
+            // to resume the ViewModel after resolver IO.
+            compose.waitForIdle()
+            condition()
+        }
+    }
+
+    private fun batchFixture(name: String): File =
+        context.cacheDir.resolve("image-clipboard/$name").also {
+            it.parentFile!!.mkdirs()
+            it.writeText("fixture")
+        }
+
+    private fun batchUploader(
+        upload: suspend (AttachmentSource.LocalFile, PasteBackendConfig, AttachmentUploadContext) -> UploadRecord,
+    ): AttachmentUploader =
+        object : AttachmentUploader {
+            override fun upload(
+                source: AttachmentSource,
+                config: PasteBackendConfig,
+                context: AttachmentUploadContext,
+            ) = flow {
+                emit(UploadProgress.Complete(upload(source as AttachmentSource.LocalFile, config, context)))
+            }
+
+            override suspend fun delete(record: UploadRecord) = error("No deletes expected")
+        }
 
     private fun showConditionalAttachments(
         currentDraft: String = "",

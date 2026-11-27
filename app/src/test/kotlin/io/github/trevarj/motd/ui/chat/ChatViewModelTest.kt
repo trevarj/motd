@@ -2651,6 +2651,30 @@ class ChatViewModelTest {
         }
 
     @Test
+    fun orderedShareLinksWaitForTheOwningDraftAndPreserveItsContents() =
+        runTest {
+            val drafts = ComposerDraftStore(db)
+            drafts.saveDraft(channel.id, "First line\nSecond line", null)
+            val manager = FakeConnectionManager(network.id)
+            val vm = viewModel(channel, manager)
+            val links = listOf("https://files.example/first", "https://files.example/second")
+
+            assertFalse(vm.appendSharedLinks(channel.id, links))
+            vm.state.first { it.buffer != null }
+            vm.composerDraft.first { it.hydrated }
+            assertFalse(vm.appendSharedLinks(channel.id + 1, links))
+            drafts.saveDraft(channel.id, "First line\nEdit from a newer entry", null)
+            assertTrue(vm.appendSharedLinks(channel.id, links))
+            val expected = "First line\nEdit from a newer entry\nhttps://files.example/first\nhttps://files.example/second"
+            assertEquals(expected, vm.composerDraft.value.text)
+            assertEquals(expected, drafts.loadDraft(channel.id)?.text)
+            db.bufferDao().update(channel.copy(dismissed = true))
+            assertFalse(vm.appendSharedLinks(channel.id, listOf("https://files.example/third")))
+            assertEquals(expected, vm.composerDraft.value.text)
+            assertTrue(manager.messageAttempts.isEmpty())
+        }
+
+    @Test
     fun `mention nicks resolve from the cached roster without an authoritative roster load`() =
         runTest {
             db.memberDao().insertAll(

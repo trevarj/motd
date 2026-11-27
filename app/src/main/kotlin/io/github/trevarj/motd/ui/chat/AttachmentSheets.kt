@@ -69,12 +69,14 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.SheetValue
 import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -119,6 +121,7 @@ import io.github.trevarj.motd.attachment.PasteBackendConfig
 import io.github.trevarj.motd.attachment.UploadProgress
 import io.github.trevarj.motd.attachment.UploadRecord
 import io.github.trevarj.motd.attachment.forBackend
+import io.github.trevarj.motd.attachment.guessMimeType
 import io.github.trevarj.motd.attachment.isHostedAttachmentUri
 import io.github.trevarj.motd.attachment.isHostedImage
 import io.github.trevarj.motd.attachment.normalizedConfig
@@ -788,6 +791,300 @@ fun AttachmentSheets(
     }
 }
 
+@Composable
+fun AttachmentBatchSheets(
+    batchId: String,
+    bufferId: Long,
+    files: List<PendingShare.File>,
+    networkId: Long?,
+    sojuFileHostUrl: String?,
+    preferSojuFileHost: Boolean = false,
+    canAddLinks: Boolean = true,
+    onFinished: suspend (List<String>) -> Boolean,
+    viewModel: AttachmentViewModel = hiltViewModel(),
+) {
+    val context = LocalContext.current.applicationContext
+    val resolver = context.contentResolver
+    val target = AttachmentBatchTarget(networkId, sojuFileHostUrl, preferSojuFileHost)
+    val scheduled = viewModel.batchRequest.value
+    if (scheduled?.id != batchId || scheduled.bufferId != bufferId || scheduled.files != files) return
+    val review by viewModel.batchReview.collectAsStateWithLifecycle()
+    val singleProgress by viewModel.progress.collectAsStateWithLifecycle()
+    var picking by rememberSaveable(batchId) { mutableStateOf(false) }
+    SideEffect { viewModel.updateBatchTarget(batchId, target) }
+    LaunchedEffect(viewModel, batchId, resolver) { viewModel.reviewBatch(batchId, target, resolver) }
+    val shown = review?.takeIf { it.request.id == batchId } ?: return
+    if (picking && !shown.started && shown.settings != null) {
+        BackendPickerSheet(
+            source = shown.request.binarySource,
+            config = shown.settings,
+            selected = shown.destination?.config ?: shown.settings,
+            sojuFileHostAvailable = shown.target.sojuFileHostUrl != null,
+            onSelect = {
+                viewModel.selectBatchBackend(batchId, it.backend)
+                picking = false
+            },
+            onDismiss = { picking = false },
+        )
+    } else {
+        AttachmentBatchReviewSheet(
+            review = shown,
+            singleBusy = singleProgress != null,
+            canAddLinks = canAddLinks,
+            onDestinationChange = { picking = true },
+            onReviewChangedDestination = { viewModel.reviewChangedDestination(shown) },
+            onUpload = { viewModel.uploadBatch(shown, context) },
+            onRetry = { index, allowOriginal -> viewModel.retryBatch(shown, index, context, allowOriginal) },
+            onStop = { viewModel.stopBatch(batchId) },
+            onFinish = { addLinks -> viewModel.finishBatch(batchId, addLinks, onFinished) },
+        )
+    }
+}
+
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+@Composable
+internal fun AttachmentBatchReviewSheet(
+    review: AttachmentBatchReview,
+    singleBusy: Boolean,
+    canAddLinks: Boolean,
+    onDestinationChange: () -> Unit,
+    onReviewChangedDestination: () -> Unit,
+    onUpload: () -> Unit,
+    onRetry: (Int, Boolean) -> Unit,
+    onStop: () -> Unit,
+    onFinish: (Boolean) -> Unit,
+) {
+    val destination = review.destination
+    val hasUploads = review.hasUploads
+    val preventDismiss by rememberUpdatedState(review.started || review.busy || hasUploads)
+    val canUpload = destination != null && review.rows.any { it.status == AttachmentBatchStatus.Ready && it.isUploadable(destination) }
+    ModalBottomSheet(
+        onDismissRequest = { if (!preventDismiss) onFinish(false) },
+        sheetState =
+            rememberModalBottomSheetState(
+                skipPartiallyExpanded = true,
+                confirmValueChange = { it != SheetValue.Hidden || !preventDismiss },
+            ),
+        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("attachment-batch-review"),
+    ) {
+        SheetSystemBars()
+        Column(Modifier.fillMaxWidth()) {
+            Column(
+                modifier = Modifier.weight(1f, fill = false).verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                Text(stringResource(R.string.upload_batch_review), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+                Text(stringResource(R.string.upload_batch_consent))
+                if (destination != null) {
+                    val config = destination.config
+                    Text(stringResource(R.string.upload_destination), style = MaterialTheme.typography.titleSmall)
+                    Text(config.backend.label, fontWeight = FontWeight.SemiBold)
+                    if (destination.endpoint != null) {
+                        Text(destination.endpoint)
+                        Text(stringResource(R.string.upload_batch_size_limit, formatBytes(config.sizeLimitBytes)))
+                        // x0.at ignores secret-link requests.
+                        UploadPrivacyCard(if (config.backend == AttachmentBackend.X0_AT) config.copy(secretUrl = false) else config)
+                        val stripImages = config.stripHostedImageMetadata == true
+                        Text(stringResource(R.string.upload_batch_image_policy, batchMetadataPolicy(stripImages)))
+                        Text(stringResource(R.string.upload_batch_other_policy, batchMetadataPolicy(config.stripMetadata)))
+                        if (stripImages != config.stripMetadata) Text(stringResource(R.string.upload_batch_unknown_policy))
+                    } else {
+                        val message = if (config.backend == AttachmentBackend.SOJU_FILEHOST) R.string.upload_soju_unavailable else R.string.upload_custom_unavailable
+                        Text(stringResource(message), color = MaterialTheme.colorScheme.error)
+                    }
+                    if (!review.started) {
+                        TextButton(
+                            onClick = onDestinationChange,
+                            enabled = !review.busy,
+                            modifier = Modifier.testTag("attachment-batch-change-destination"),
+                        ) {
+                            Text(stringResource(R.string.upload_destination_change))
+                        }
+                    }
+                } else if (!review.busy) {
+                    Text(stringResource(R.string.upload_batch_settings_unavailable), color = MaterialTheme.colorScheme.error)
+                }
+                review.rows.forEachIndexed { index, row ->
+                    HorizontalDivider()
+                    BatchReviewRow(
+                        index = index,
+                        row = row,
+                        destination = destination,
+                        started = review.started,
+                        enabled = !review.busy && !singleBusy && !review.destinationChanged,
+                        onAction = { allowOriginal -> onRetry(index, allowOriginal) },
+                    )
+                }
+            }
+            Column(Modifier.padding(horizontal = 16.dp, vertical = 8.dp)) {
+                when {
+                    review.finishing -> {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                        Text(stringResource(R.string.upload_batch_saving_links))
+                    }
+
+                    review.started && review.busy && !review.destinationChanged -> {
+                        TextButton(
+                            onClick = onStop,
+                            enabled = !review.stopping,
+                            modifier = Modifier.fillMaxWidth().testTag("attachment-batch-stop"),
+                        ) {
+                            Text(stringResource(if (review.stopping) R.string.upload_batch_stopping else R.string.upload_batch_stop))
+                        }
+                    }
+
+                    review.destinationChanged && !review.busy -> {
+                        Button(
+                            onClick = onReviewChangedDestination,
+                            modifier = Modifier.fillMaxWidth().testTag("attachment-batch-review-destination"),
+                        ) {
+                            Text(stringResource(R.string.upload_batch_review_destination))
+                        }
+                    }
+
+                    !review.started -> {
+                        Button(
+                            onClick = onUpload,
+                            enabled = !review.busy && !singleBusy && canUpload,
+                            modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("attachment-batch-upload"),
+                        ) {
+                            Icon(Icons.Outlined.CloudUpload, null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(stringResource(if (hasUploads) R.string.upload_batch_upload_remaining else R.string.upload_batch_upload))
+                        }
+                    }
+                }
+                if (!review.busy && review.finishError) {
+                    Text(stringResource(R.string.upload_batch_draft_save_failed), color = MaterialTheme.colorScheme.error)
+                }
+                if (!review.busy && hasUploads) {
+                    Button(
+                        onClick = { onFinish(true) },
+                        enabled = canAddLinks,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 52.dp).testTag("attachment-batch-add-links"),
+                    ) {
+                        Icon(Icons.Outlined.InsertLink, null)
+                        Spacer(Modifier.width(8.dp))
+                        Text(stringResource(R.string.upload_batch_add_links))
+                    }
+                }
+                if (!review.finishing && (!review.started || !review.busy)) {
+                    val closeLabel =
+                        when {
+                            hasUploads -> R.string.upload_batch_close_without_adding
+                            review.started -> R.string.upload_batch_done
+                            else -> R.string.action_cancel
+                        }
+                    TextButton(
+                        onClick = { onFinish(false) },
+                        modifier = Modifier.fillMaxWidth().testTag("attachment-batch-cancel"),
+                    ) { Text(stringResource(closeLabel)) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun batchMetadataPolicy(strip: Boolean): String = stringResource(if (strip) R.string.upload_batch_policy_strip else R.string.upload_batch_policy_original)
+
+@Composable
+private fun BatchReviewRow(
+    index: Int,
+    row: AttachmentBatchRow,
+    destination: AttachmentBatchDestination?,
+    started: Boolean,
+    enabled: Boolean,
+    onAction: (Boolean) -> Unit,
+) {
+    val name = row.name.ifBlank { stringResource(R.string.upload_type_unknown) }
+    val config = destination?.config
+    val size = row.source?.size
+    val uploadable = destination != null && row.isUploadable(destination)
+    val oversized = destination != null && row.isOversized(destination)
+    val needsCheck = row.needsCheck(destination)
+    Column(Modifier.fillMaxWidth().testTag("attachment-batch-row-$index")) {
+        Text(stringResource(R.string.upload_batch_item, index + 1, name), fontWeight = FontWeight.SemiBold)
+        if (row.source != null) {
+            val mime = row.source.mimeType ?: stringResource(R.string.upload_type_unknown)
+            val sizeLabel = size?.let(::formatBytes) ?: stringResource(R.string.upload_size_unknown)
+            Text(stringResource(R.string.upload_metadata, mime, sizeLabel))
+        }
+        if (oversized && size != null && config != null && row.status !is AttachmentBatchStatus.Uploaded) {
+            val sizeLabel = formatBytes(size)
+            val limitLabel = formatBytes(config.sizeLimitBytes)
+            val exact = sizeLabel == limitLabel
+            Text(
+                stringResource(R.string.upload_over_size_limit, if (exact) "$size B" else sizeLabel, if (exact) "${config.sizeLimitBytes} B" else limitLabel),
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        when (val status = row.status) {
+            AttachmentBatchStatus.Checking -> {
+                Text(stringResource(R.string.upload_batch_checking))
+            }
+
+            AttachmentBatchStatus.Ready -> {
+                if (!needsCheck) {
+                    Text(stringResource(R.string.upload_batch_ready))
+                    if (started && uploadable) {
+                        TextButton(onClick = { onAction(false) }, enabled = enabled, modifier = Modifier.testTag("attachment-batch-upload-$index")) {
+                            Text(stringResource(R.string.upload_action))
+                        }
+                    }
+                }
+            }
+
+            is AttachmentBatchStatus.Uploading -> {
+                val progress = status.progress
+                val total = progress.totalBytes
+                if (total != null && total > 0) {
+                    LinearProgressIndicator(progress = { (progress.bytesSent.toDouble() / total).toFloat().coerceIn(0f, 1f) }, modifier = Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.upload_progress_of, formatBytes(progress.bytesSent), formatBytes(total)))
+                } else {
+                    LinearProgressIndicator(Modifier.fillMaxWidth())
+                    Text(stringResource(R.string.upload_uploading))
+                }
+            }
+
+            is AttachmentBatchStatus.Uploaded -> {
+                Text(stringResource(R.string.upload_batch_uploaded))
+            }
+
+            is AttachmentBatchStatus.Failed -> {
+                val error =
+                    if (status.needsOriginalConsent) {
+                        stringResource(R.string.upload_metadata_warning_body)
+                    } else {
+                        status.details ?: stringResource(status.reason)
+                    }
+                Text(error, color = MaterialTheme.colorScheme.error)
+                if (!oversized && started && uploadable) {
+                    val label =
+                        when {
+                            status.needsOriginalConsent -> R.string.upload_send_original
+                            status.reason == R.string.upload_batch_file_changed -> R.string.upload_action
+                            else -> R.string.upload_retry
+                        }
+                    val action = if (status.needsOriginalConsent) "send-original" else "retry"
+                    TextButton(
+                        onClick = { onAction(status.needsOriginalConsent) },
+                        enabled = enabled,
+                        modifier = Modifier.testTag("attachment-batch-$action-$index"),
+                    ) { Text(stringResource(label)) }
+                }
+            }
+        }
+        if (needsCheck && (row.status is AttachmentBatchStatus.Ready || row.status is AttachmentBatchStatus.Failed)) {
+            TextButton(
+                onClick = { onAction(false) },
+                enabled = enabled,
+                modifier = Modifier.testTag("attachment-batch-retry-$index"),
+            ) { Text(stringResource(R.string.upload_batch_check_again)) }
+        }
+    }
+}
+
 @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 internal fun PhotoPickerSheet(
@@ -1367,6 +1664,7 @@ private fun BackendPickerSheet(
     sojuFileHostAvailable: Boolean,
     onSelect: (PasteBackendConfig) -> Unit,
     onDismiss: () -> Unit,
+    selected: PasteBackendConfig = config,
 ) {
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1392,7 +1690,7 @@ private fun BackendPickerSheet(
                             backendRetention(destination.config),
                             stringResource(R.string.upload_destination_size_limit, formatBytes(destination.config.sizeLimitBytes)),
                         ),
-                    selected = sameDestination(config, destination.config),
+                    selected = sameDestination(selected, destination.config),
                     enabled = true,
                     onClick = { onSelect(destination.config) },
                     modifier = Modifier.clip(RoundedCornerShape(16.dp)),
@@ -1608,6 +1906,48 @@ private fun android.content.ContentResolver.queryMeta(uri: Uri): Pair<String, Lo
         }
     }
     return name to size
+}
+
+internal fun ContentResolver.inspectBatchFile(file: PendingShare.File): AttachmentBatchRow {
+    val uri = file.uri
+    var name = uri.lastPathSegment.orEmpty()
+    val status =
+        try {
+            if (!uri.isHostedAttachmentUri()) {
+                AttachmentBatchStatus.Failed(R.string.settings_local_media_required)
+            } else {
+                val meta = queryMeta(uri)
+                name = meta.first
+                val descriptorLength =
+                    if (uri.scheme == ContentResolver.SCHEME_FILE && meta.second == null) {
+                        null
+                    } else {
+                        openAssetFileDescriptor(uri, "r")?.use { it.length }
+                    }
+                if (descriptorLength == null) {
+                    AttachmentBatchStatus.Failed(R.string.upload_batch_file_unavailable)
+                } else {
+                    val size = descriptorLength.takeIf { it >= 0 } ?: meta.second?.takeIf { it >= 0 }
+                    val mime =
+                        getType(uri).concreteMime() ?: file.mimeType.concreteMime()
+                            ?: guessMimeType(name).concreteMime() ?: "application/octet-stream"
+                    return AttachmentBatchRow(name, AttachmentSource.Document(uri, name, mime, size), AttachmentBatchStatus.Ready)
+                }
+            }
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (_: Exception) {
+            AttachmentBatchStatus.Failed(R.string.upload_batch_file_unavailable)
+        }
+    return AttachmentBatchRow(name, status = status)
+}
+
+private const val MIME_TOKEN = "[A-Za-z0-9][A-Za-z0-9!#\$&^_.+-]{0,126}"
+private val BATCH_MIME_TYPE = Regex("$MIME_TOKEN/$MIME_TOKEN")
+
+private fun String?.concreteMime(): String? {
+    if (this == null || any { it != '\t' && it !in ' '..'~' }) return null
+    return substringBefore(';').trim().takeIf(BATCH_MIME_TYPE::matches)
 }
 
 fun isLongDraft(text: String): Boolean = text.length >= 1_200 || text.lineSequence().count() >= 4

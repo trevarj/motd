@@ -109,7 +109,7 @@ import io.github.trevarj.motd.ui.components.deriveChannelNotificationPresentatio
 import io.github.trevarj.motd.ui.components.insertAtCursor
 import io.github.trevarj.motd.ui.nav.ChatRoute
 import io.github.trevarj.motd.ui.settings.FoolPreferencesEditor
-import io.github.trevarj.motd.ui.share.PendingShare
+import io.github.trevarj.motd.ui.share.AssignedAttachment
 import io.github.trevarj.motd.ui.share.PendingShareStore
 import io.github.trevarj.motd.ui.share.filterShareTargets
 import kotlinx.coroutines.CancellationException
@@ -231,6 +231,12 @@ private data class DraftSubmissionKey(
 private sealed interface DraftCommand {
     data class Persist(
         val snapshot: DraftSnapshot,
+    ) : DraftCommand
+
+    data class AppendSharedLinks(
+        val roomId: Long,
+        val urls: List<String>,
+        val result: CompletableDeferred<Boolean>,
     ) : DraftCommand
 
     data class PrepareSubmission(
@@ -1855,7 +1861,11 @@ class ChatViewModel
                         withContext(NonCancellable) {
                             while (true) {
                                 val command = draftCommands.tryReceive().getOrNull() ?: break
-                                if (command is DraftCommand.ClearSubmission) clearPersistedSubmission(command)
+                                when (command) {
+                                    is DraftCommand.ClearSubmission -> clearPersistedSubmission(command)
+                                    is DraftCommand.AppendSharedLinks -> command.result.complete(false)
+                                    else -> Unit
+                                }
                             }
                         }
                     }
@@ -3250,8 +3260,8 @@ class ChatViewModel
                 .filter { it == operationalBufferId.value }
                 .mapNotNull { draftStore.consume(it) }
 
-        /** Consume-once shared file routed here by the share picker; the screen opens the upload sheet. */
-        fun consumeSharedFile(): PendingShare.File? = pendingShareStore.consumeFile(operationalBufferId.value)
+        /** Consume the share assigned to this conversation without changing its single or batch form. */
+        fun consumeSharedAttachment(): AssignedAttachment? = pendingShareStore.consumeAttachment(operationalBufferId.value)
 
         /** Consume-once attachment-sheet request queued for this conversation before it was entered. */
         fun consumeAttachmentRequest(): Boolean = attachmentRequestStore.consume(operationalBufferId.value)
@@ -3261,6 +3271,65 @@ class ChatViewModel
             attachmentRequestStore.requests
                 .filter { it == operationalBufferId.value && attachmentRequestStore.consume(it) }
                 .map { }
+
+        internal suspend fun appendSharedLinks(
+            roomId: Long,
+            urls: List<String>,
+        ): Boolean {
+            if (urls.isEmpty()) return true
+            val result = CompletableDeferred<Boolean>()
+            val queued =
+                synchronized(draftStateLock) {
+                    if (!canAppendSharedLinksLocked(roomId)) return@synchronized false
+                    draftCommands.trySend(DraftCommand.AppendSharedLinks(roomId, urls, result)).isSuccess
+                }
+            return queued && result.await()
+        }
+
+        private fun canAppendSharedLinksLocked(roomId: Long): Boolean =
+            _composerDraft.value.hydrated && draftWriter?.isActive == true &&
+                roomId == operationalBufferId.value && roomId == buffer.value?.id
+
+        private suspend fun persistSharedLinks(command: DraftCommand.AppendSharedLinks): Boolean {
+            var draftChanged = false
+            while (true) {
+                val snapshot =
+                    synchronized(draftStateLock) {
+                        if (!canAppendSharedLinksLocked(command.roomId)) return false
+                        DraftSnapshot(command.roomId, currentDraftText, currentReplyToEventId, _composerDraft.value.revision)
+                    }
+                val persisted =
+                    try {
+                        if (draftChanged) {
+                            draftStore.saveDraft(snapshot.roomId, appendSharedDraftLines(snapshot.text, command.urls), snapshot.replyToEventId)
+                        } else {
+                            draftStore.appendSharedLinks(snapshot.roomId, command.urls)
+                        }
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                if (persisted == null) return false
+                val reply =
+                    if (persisted.replyToEventId == snapshot.replyToEventId) {
+                        synchronized(draftStateLock) { currentReplyTo }
+                    } else {
+                        persisted.replyToEventId?.let { id -> runCatching { messageRepository.byId(id) }.getOrNull() }
+                    }
+                synchronized(draftStateLock) {
+                    if (_composerDraft.value.revision == snapshot.revision) {
+                        currentDraftText = persisted.text
+                        currentReplyToEventId = persisted.replyToEventId
+                        currentReplyTo = reply
+                        draftTextEdited = true
+                        advanceDraftRevisionLocked()
+                        return true
+                    }
+                }
+                draftChanged = true
+            }
+        }
 
         internal fun beginComposerUpload(
             roomId: Long,
@@ -3436,6 +3505,10 @@ class ChatViewModel
                                 )
                             }
                         }
+                    }
+
+                    is DraftCommand.AppendSharedLinks -> {
+                        withContext(NonCancellable) { command.result.complete(persistSharedLinks(command)) }
                     }
 
                     is DraftCommand.PrepareSubmission -> {

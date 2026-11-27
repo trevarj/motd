@@ -13,6 +13,7 @@ import java.io.Closeable
 import java.io.File
 import java.io.IOException
 import java.io.InputStream
+import java.security.MessageDigest
 import java.util.Locale
 
 /** One private input for review, sanitization and any explicitly approved original upload. */
@@ -20,6 +21,8 @@ internal class HostedImageSnapshot private constructor(
     val file: File,
     name: String,
     mimeType: String,
+    val detectedImageMime: String?,
+    val contentDigest: ByteArray?,
 ) : Closeable {
     val source = AttachmentSource.LocalFile(this, name, mimeType)
     private var owners = 1
@@ -41,6 +44,18 @@ internal class HostedImageSnapshot private constructor(
         private const val BUFFER_BYTES = 32 * 1024
         private val reapedDirectories = mutableSetOf<File>()
 
+        suspend fun reviewBatchBytes(
+            resolver: ContentResolver,
+            source: AttachmentSource.Document,
+            limitBytes: Long,
+        ): BatchFingerprint {
+            require(limitBytes > 0)
+            val digest = MessageDigest.getInstance("SHA-256")
+            val input = resolver.openLocalImageSource(source.uri) ?: throw IOException("Unable to open attachment")
+            val size = input.use { it.readBounded(ByteArray(BUFFER_BYTES), limitBytes) { buffer, count -> digest.update(buffer, 0, count) } }
+            return BatchFingerprint(size, digest.digest())
+        }
+
         @Synchronized
         fun reapStale(context: Context): File =
             File(context.cacheDir.canonicalFile, "hosted-image-review").also { directory ->
@@ -60,11 +75,24 @@ internal class HostedImageSnapshot private constructor(
             context: Context,
             source: AttachmentSource,
             limitBytes: Long,
+        ): HostedImageSnapshot? = capture(context, source, limitBytes, stageAnyFile = false)
+
+        suspend fun captureBatch(
+            context: Context,
+            source: AttachmentSource.Document,
+            limitBytes: Long,
+        ): HostedImageSnapshot = checkNotNull(capture(context, source, limitBytes, stageAnyFile = true))
+
+        private suspend fun capture(
+            context: Context,
+            source: AttachmentSource,
+            limitBytes: Long,
+            stageAnyFile: Boolean,
         ): HostedImageSnapshot? {
             var snapshot: HostedImageSnapshot? = null
             try {
                 return withContext(Dispatchers.IO) {
-                    stage(context, source, limitBytes).also { snapshot = it }
+                    stage(context, source, limitBytes, stageAnyFile).also { snapshot = it }
                 }
             } catch (failure: Throwable) {
                 snapshot?.close()
@@ -76,6 +104,7 @@ internal class HostedImageSnapshot private constructor(
             context: Context,
             source: AttachmentSource,
             limitBytes: Long,
+            stageAnyFile: Boolean,
         ): HostedImageSnapshot? {
             require(limitBytes > 0)
             val (name, declaredMime) =
@@ -90,28 +119,30 @@ internal class HostedImageSnapshot private constructor(
             val stream =
                 try {
                     when (source) {
-                        is AttachmentSource.Photo -> context.openLocalImageSource(source.uri)
-                        is AttachmentSource.Document -> context.openLocalImageSource(source.uri)
+                        is AttachmentSource.Photo -> context.contentResolver.openLocalImageSource(source.uri)
+                        is AttachmentSource.Document -> context.contentResolver.openLocalImageSource(source.uri)
                         is AttachmentSource.LocalFile -> source.file.inputStream()
                         is AttachmentSource.Text -> return null
                     }
                 } catch (cancelled: CancellationException) {
                     throw cancelled
                 } catch (failure: Exception) {
-                    if (expectsImage) throw failure
+                    if (stageAnyFile || expectsImage) throw failure
                     return null // Leave unrelated documents to the normal on-upload path.
                 }
             if (stream == null) {
+                if (stageAnyFile) throw IOException("Unable to open attachment")
                 if (expectsImage) throw IOException("Unable to open image")
                 return null
             }
             var temporary: File? = null
+            val digest = if (stageAnyFile) MessageDigest.getInstance("SHA-256") else null
             try {
                 val actualMime =
                     stream.use { input ->
                         val buffer = ByteArray(BUFFER_BYTES)
                         val prefixSize =
-                            if (expectsImage) {
+                            if (stageAnyFile || expectsImage) {
                                 0
                             } else {
                                 try {
@@ -121,35 +152,54 @@ internal class HostedImageSnapshot private constructor(
                                 }
                             }
                         val probedMime = if (prefixSize == 0) null else detectableMime(buffer, prefixSize)
-                        if (!expectsImage && probedMime == null) return null
-                        var total = prefixSize.toLong()
-                        if (total > limitBytes) throw HostedImageTooLarge(total, limitBytes)
+                        if (!stageAnyFile && !expectsImage && probedMime == null) return null
+                        if (prefixSize > limitBytes) throw HostedImageTooLarge(prefixSize.toLong(), limitBytes)
                         val directory = reapStale(context)
                         if (!directory.isDirectory && !directory.mkdirs() && !directory.isDirectory) throw IOException("Unable to create image review directory")
                         val file = File.createTempFile("image-", ".tmp", directory).also { temporary = it }
                         file.outputStream().use { output ->
                             output.write(buffer, 0, prefixSize)
-                            while (true) {
-                                currentCoroutineContext().ensureActive()
-                                val count = input.read(buffer, 0, minOf(buffer.size.toLong(), limitBytes - total + 1).toInt())
-                                if (count < 0) break
-                                total += count
-                                if (total > limitBytes) throw HostedImageTooLarge(total, limitBytes)
-                                output.write(buffer, 0, count)
-                            }
-                            if (total == 0L) throw IOException("Image is empty")
+                            val total =
+                                input.readBounded(buffer, limitBytes, prefixSize) { bytes, count ->
+                                    output.write(bytes, 0, count)
+                                    digest?.update(bytes, 0, count)
+                                }
+                            if (total == 0L && !stageAnyFile) throw IOException("Image is empty")
                         }
                         probedMime ?: detectableMime(file)
                     }
-                return HostedImageSnapshot(checkNotNull(temporary), name, actualMime ?: mime ?: guessMimeType(name)).also { temporary = null }
+                return HostedImageSnapshot(
+                    checkNotNull(temporary),
+                    name,
+                    actualMime ?: mime ?: guessMimeType(name),
+                    actualMime,
+                    digest?.digest(),
+                ).also { temporary = null }
             } finally {
                 temporary?.delete()
             }
         }
 
-        private fun Context.openLocalImageSource(uri: Uri): InputStream? {
+        private fun ContentResolver.openLocalImageSource(uri: Uri): InputStream? {
             require(uri.isHostedAttachmentUri()) { "Image review requires a local file" }
-            return contentResolver.openInputStream(uri)
+            return openInputStream(uri)
+        }
+
+        private suspend fun InputStream.readBounded(
+            buffer: ByteArray,
+            limitBytes: Long,
+            prefixSize: Int = 0,
+            onChunk: (ByteArray, Int) -> Unit,
+        ): Long {
+            var total = prefixSize.toLong()
+            while (true) {
+                currentCoroutineContext().ensureActive()
+                val count = read(buffer, 0, minOf(buffer.size.toLong(), limitBytes - total + 1).toInt())
+                if (count < 0) return total
+                total += count
+                if (total > limitBytes) throw HostedImageTooLarge(total, limitBytes)
+                onChunk(buffer, count)
+            }
         }
 
         private suspend fun InputStream.readPrefix(buffer: ByteArray): Int {
@@ -179,6 +229,11 @@ internal class HostedImageSnapshot private constructor(
         }
     }
 }
+
+internal class BatchFingerprint(
+    val size: Long,
+    val sha256: ByteArray,
+)
 
 internal class HostedImageTooLarge(
     val minimumSize: Long,

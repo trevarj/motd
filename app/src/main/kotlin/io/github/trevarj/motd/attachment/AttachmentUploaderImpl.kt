@@ -640,14 +640,17 @@ internal fun sojuUploadFailureMessage(
     return "Soju file host upload failed (HTTP $code)$detail.$hint"
 }
 
-private fun readBodySnippet(connection: HttpURLConnection): String =
-    runCatching {
+internal fun readBodySnippet(connection: HttpURLConnection): String {
+    val mediaType = connection.contentType?.substringBefore(';')?.trim()
+    if (mediaType.equals("text/html", ignoreCase = true) || mediaType.equals("application/xhtml+xml", ignoreCase = true)) return ""
+    return runCatching {
         (connection.errorStream ?: connection.inputStream)?.bufferedReader()?.use { reader ->
             val buffer = CharArray(1024)
             val count = reader.read(buffer)
             if (count > 0) String(buffer, 0, count) else ""
         }
     }.getOrNull()?.trim().orEmpty()
+}
 
 /** Extra multipart fields for the 0x0-compatible upload path. x0.at ignores secret/expires, so it
  * sends only the file field; other 0x0-compatible backends forward the secret-url and expiry prefs. */

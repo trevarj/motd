@@ -4,23 +4,28 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 
-/** A single inbound ACTION_SEND payload waiting for the user to pick a destination buffer. */
+/** An inbound share payload waiting for the user to pick a destination buffer. */
 sealed interface PendingShare {
     data class Text(
         val text: String,
     ) : PendingShare
 
+    /** Keeps single SEND and SEND_MULTIPLE distinct even when the batch contains one file. */
+    sealed interface Attachment : PendingShare
+
     data class File(
         val uri: Uri,
         val mimeType: String?,
-    ) : PendingShare
+    ) : Attachment
+
+    data class Files(
+        val files: List<File>,
+    ) : Attachment
 }
 
 /**
- * Extract the payload from a single-item share intent, or null when the intent isn't one we
- * handle (SEND_MULTIPLE, a launcher intent, an empty share). A stream wins over text unless the
- * sender declared text/plain and supplied real text — several apps attach both, with the stream as
- * a redundant copy of the same text.
+ * Extract an ACTION_SEND payload. A stream wins over text unless the sender declared text/plain
+ * and supplied real text — several apps attach both, with the stream as a redundant copy.
  */
 fun parseSharedContent(intent: Intent?): PendingShare? {
     if (intent?.action != Intent.ACTION_SEND) return null

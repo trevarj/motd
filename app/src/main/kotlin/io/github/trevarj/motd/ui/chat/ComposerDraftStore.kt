@@ -94,6 +94,15 @@ class ComposerDraftStore
                 draft
             }
 
+        internal suspend fun appendSharedLinks(
+            bufferId: Long,
+            urls: List<String>,
+        ): ComposerDraftEntity? =
+            db.withTransaction {
+                val existing = loadDraft(bufferId)
+                saveDraft(bufferId, appendSharedDraftLines(existing?.text.orEmpty(), urls), existing?.replyToEventId)
+            }
+
         /** Atomically append a failed first notification reply without replacing composer edits. */
         suspend fun appendNotificationReply(
             bufferId: Long,
@@ -148,6 +157,16 @@ class ComposerDraftStore
             /** A prefill is one user gesture; a handful in flight is already more than realistic. */
             const val PREFILL_PUSH_BUFFER = 8
         }
+    }
+
+internal fun appendSharedDraftLines(
+    existing: String,
+    urls: List<String>,
+): String =
+    buildString {
+        append(existing)
+        if (isNotEmpty() && last() != '\n') append('\n')
+        urls.joinTo(this, "\n")
     }
 
 /** Append a failed reply to whatever the composer already holds, preserving both. */

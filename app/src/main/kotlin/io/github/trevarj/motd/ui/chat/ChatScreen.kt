@@ -314,6 +314,7 @@ import io.github.trevarj.motd.ui.profile.rememberProfileMetadataSupported
 import io.github.trevarj.motd.ui.saved.SavedMessagesViewModel
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
+import io.github.trevarj.motd.ui.share.AssignedAttachment
 import io.github.trevarj.motd.ui.share.PendingShare
 import io.github.trevarj.motd.ui.theme.ConversationTypography
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
@@ -834,13 +835,14 @@ fun ChatScreen(
         onVoiceErrorDismissed = voiceViewModel::clearError,
         onVoiceNoticeDismissed = voiceViewModel::clearNotice,
         consumePrefill = viewModel::consumePrefill,
-        consumeSharedFile = viewModel::consumeSharedFile,
+        consumeSharedAttachment = viewModel::consumeSharedAttachment,
         consumeAttachmentRequest = viewModel::consumeAttachmentRequest,
         attachmentSheetRequests = viewModel.attachmentSheetRequests,
         attachmentViewModel = hiltViewModel(),
         composerDraft = composerDraft,
         composerUpload = composerUpload,
         onBeginComposerUpload = viewModel::beginComposerUpload,
+        onAppendSharedLinks = viewModel::appendSharedLinks,
         scheduledComposer = scheduledComposer,
         aiTextState = aiTextState,
         aiTextEnabled = AiFeature.TEXT_TOOLS in aiLabsState.enabledFeatures,
@@ -1436,8 +1438,8 @@ internal fun ChatContent(
     // Re-join the current channel from the parted banner.
     onRejoin: () -> Unit = {},
     consumePrefill: () -> List<ComposerPrefill>? = { null },
-    // Consume-once file routed here by the share picker; opens the upload confirmation sheet.
-    consumeSharedFile: () -> PendingShare.File? = { null },
+    // Consume-once files routed here by the share picker.
+    consumeSharedAttachment: () -> AssignedAttachment? = { null },
     // Consume-once attachment request queued (by the gesture orb) before this screen was entered.
     consumeAttachmentRequest: () -> Boolean = { false },
     // The same request aimed at this conversation while it is already open; see ChatViewModel.
@@ -1446,6 +1448,7 @@ internal fun ChatContent(
     composerDraft: ComposerDraftState = ComposerDraftState(),
     composerUpload: ComposerUploadCompletion? = null,
     onBeginComposerUpload: ((Long, String?) -> ComposerUploadAttempt)? = null,
+    onAppendSharedLinks: suspend (Long, List<String>) -> Boolean = { _, _ -> false },
     aiTextState: AiTextUiState = AiTextUiState.Closed,
     aiTextEnabled: Boolean = false,
     onAiComposer: () -> Unit = {},
@@ -1895,6 +1898,12 @@ internal fun ChatContent(
         var uploadCurrentDraftDirectly by key(traceBufferId) { rememberSaveable { mutableStateOf(false) } }
         // A shared or pasted file opens the same upload confirmation without changing the draft.
         var sharedFile by remember(traceBufferId) { mutableStateOf<PendingShare.File?>(null) }
+        val attachmentBatch =
+            attachmentViewModel
+                ?.batchRequest
+                ?.collectAsStateWithLifecycle()
+                ?.value
+                ?.takeIf { it.bufferId == traceBufferId }
         val activeComposerUpload = composerUpload?.takeIf { it.roomId == traceBufferId }
         var pendingComposerUploadId by key(traceBufferId) { rememberSaveable { mutableStateOf<Long?>(null) } }
         LaunchedEffect(activeComposerUpload?.id, pendingComposerUploadId) {
@@ -1906,17 +1915,31 @@ internal fun ChatContent(
                 sharedFile = null
             }
         }
-        LaunchedEffect(traceBufferId) {
-            if (traceBufferId == null) return@LaunchedEffect
-            consumeSharedFile()?.let { file ->
-                sharedFile = file
-                uploadCurrentDraftDirectly = false
-                attachmentSheetOpen = true
-            }
-            if (consumeAttachmentRequest()) {
-                sharedFile = null
-                uploadCurrentDraftDirectly = false
-                attachmentSheetOpen = true
+        LaunchedEffect(traceBufferId, attachmentSheetOpen, attachmentBatch?.id) {
+            if (traceBufferId == null || attachmentSheetOpen || attachmentBatch != null) return@LaunchedEffect
+            val assigned = consumeSharedAttachment()
+            when (val shared = assigned?.share) {
+                is PendingShare.File -> {
+                    sharedFile = shared
+                    uploadCurrentDraftDirectly = false
+                    attachmentSheetOpen = true
+                }
+
+                is PendingShare.Files -> {
+                    if (attachmentViewModel != null) {
+                        attachmentViewModel.queueBatch(traceBufferId, shared.files, assigned.batchLease)
+                    } else {
+                        assigned.batchLease?.close()
+                    }
+                }
+
+                null -> {
+                    if (consumeAttachmentRequest()) {
+                        sharedFile = null
+                        uploadCurrentDraftDirectly = false
+                        attachmentSheetOpen = true
+                    }
+                }
             }
         }
         LaunchedEffect(traceBufferId, attachmentSheetRequests) {
@@ -1935,7 +1958,7 @@ internal fun ChatContent(
             scheduledComposer != null && buffer != null &&
                 (buffer.type == BufferType.CHANNEL || buffer.type == BufferType.QUERY)
         val scheduleAttachmentPending =
-            attachmentSheetOpen || sharedFile != null ||
+            attachmentSheetOpen || attachmentBatch != null || sharedFile != null ||
                 voiceState.recording != null || voiceState.staged != null || voiceState.sending
 
         fun scheduleDraftRejection(text: String): Int? =
@@ -5480,7 +5503,27 @@ internal fun ChatContent(
             )
         }
 
-        if (attachmentSheetOpen) {
+        if (attachmentBatch != null && attachmentViewModel != null) {
+            key(attachmentBatch.id) {
+                AttachmentBatchSheets(
+                    batchId = attachmentBatch.id,
+                    bufferId = attachmentBatch.bufferId,
+                    files = attachmentBatch.files,
+                    networkId = state.buffer?.networkId,
+                    sojuFileHostUrl =
+                        (state.connState as? IrcClientState.Ready)
+                            ?.isupport
+                            ?.let(::advertisedSojuFileHostUrl),
+                    preferSojuFileHost = activeDickordChannel,
+                    canAddLinks = composerDraft.hydrated,
+                    onFinished = { links ->
+                        links.isEmpty() ||
+                            (attachmentBatch.bufferId == latestAttachmentRoom && onAppendSharedLinks(attachmentBatch.bufferId, links))
+                    },
+                    viewModel = attachmentViewModel,
+                )
+            }
+        } else if (attachmentSheetOpen) {
             AttachmentSheets(
                 open = true,
                 currentDraft = composerText.text,

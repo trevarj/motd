@@ -1,6 +1,5 @@
 package io.github.trevarj.motd
 
-import android.app.Application
 import android.content.ContentProvider
 import android.content.ContentValues
 import android.content.Intent
@@ -72,14 +71,14 @@ import java.util.concurrent.atomic.AtomicInteger
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-@Config(qualifiers = "w411dp-h891dp")
+@Config(application = ShareGrantTestApplication::class, qualifiers = "w411dp-h891dp")
 class PaletteImportUiTest {
     @get:Rule(order = 1)
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
     private val restoration = StateRestorationTester(compose)
-    private val context = ApplicationProvider.getApplicationContext<Application>()
+    private val context = ApplicationProvider.getApplicationContext<ShareGrantTestApplication>()
     private val prefs = AppearancePrefsImpl(context)
     private val settings = DataStoreSettingsRepository(context)
     private val models = ViewModelStore()
@@ -431,7 +430,7 @@ class PaletteImportUiTest {
         assertEquals(baseline, current())
     }
 
-    @Test fun inviteTextAndMultipleRetainTheirNativeClassification() {
+    @Test fun inviteTextAndOrderedFilesRetainTheirNativeClassification() {
         mount()
         val invite = JoinInviteV1(networkName = "Ergo", host = "irc.example", port = 6697, channel = "#friends")
         receive(Intent(Intent.ACTION_VIEW, Uri.parse(JoinInviteCodec.appUri(invite))))
@@ -449,17 +448,110 @@ class PaletteImportUiTest {
         assertEquals(PendingShare.Text("hello channel"), shares.consume())
         assertEquals(0, provider.entry(attachment).opens.get())
         compose.runOnIdle { nav.popBackStack() }
+        val image = source(byteArrayOf(1, 2, 3), "photo.png")
+        val palette = source(fixture, "theme.motd-palette.json")
+        context.grantShareRead(palette, image)
         val multiple =
             Intent(Intent.ACTION_SEND_MULTIPLE).apply {
-                type = "application/json"
-                putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(attachment))
+                type = "*/*"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(palette, image))
             }
-        assertNull(runBlocking { classifyIncomingContent(context, multiple) })
+        val batch = PendingShare.Files(listOf(PendingShare.File(palette, "*/*"), PendingShare.File(image, "*/*")))
         receive(multiple)
+        await { nav.currentDestination?.hasRoute<SharePickerRoute>() == true }
+        assertEquals(batch, shares.consume())
+        assertEquals(0, provider.entry(palette).opens.get())
+        assertEquals(0, provider.entry(image).opens.get())
+        assertSame(multiple, consumed.last())
+        assertEquals(3, consumed.size)
+        compose.runOnIdle { nav.popBackStack() }
+
+        val restored = SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) })
+        compose.runOnIdle {
+            intake = owner(restored)
+            intake!!.receive(Intent(multiple), restoring = true)
+        }
         compose.waitForIdle()
         assertTrue(nav.currentDestination!!.hasRoute<ChatListRoute>())
-        assertEquals(2, consumed.size)
+        assertEquals(3, consumed.size)
+        assertNull(shares.peek())
+
+        val reversed = Intent(multiple).putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(image, palette))
+        compose.runOnIdle { intake!!.receive(reversed, restoring = true) }
+        await { nav.currentDestination?.hasRoute<SharePickerRoute>() == true }
+        assertEquals(PendingShare.Files(batch.files.reversed()), shares.consume())
+        assertSame(reversed, consumed.last())
+        assertEquals(4, consumed.size)
         assertEquals(baseline, current())
+    }
+
+    @Test fun malformedBatchShowsShareErrorWithoutOpeningPicker() {
+        mount()
+        val intent = Intent(Intent.ACTION_SEND_MULTIPLE).setType("image/*")
+        receive(intent)
+
+        val title = context.getString(R.string.share_batch_error_title)
+        compose.waitUntil(10_000) { compose.onAllNodesWithText(title).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(title).assertIsDisplayed()
+        compose.onNodeWithText(context.getString(R.string.share_batch_error_invalid)).assertIsDisplayed()
+        assertTrue(nav.currentDestination!!.hasRoute<ChatListRoute>())
+        assertNull(shares.peek())
+        assertEquals(listOf(intent), consumed)
+    }
+
+    @Test fun restoredPickerWithoutItsProcessLocalShareClosesWithError() {
+        mount()
+        val image = source(byteArrayOf(1, 2, 3), "photo.png")
+        context.grantShareRead(image)
+        val incoming =
+            Intent(Intent.ACTION_SEND_MULTIPLE).apply {
+                type = "image/png"
+                putParcelableArrayListExtra(Intent.EXTRA_STREAM, arrayListOf(image))
+            }
+        receive(incoming)
+        await { nav.currentDestination?.hasRoute<SharePickerRoute>() == true }
+
+        val restored = SavedStateHandle(handle.keys().associateWith { handle.get<Any?>(it) })
+        compose.runOnIdle {
+            shares.consume()
+            intake = owner(restored)
+            intake!!.receive(Intent(incoming), restoring = true)
+        }
+        restoration.emulateSavedInstanceStateRestore()
+
+        val message = context.getString(R.string.share_batch_error_expired)
+        compose.waitUntil(10_000) { compose.onAllNodesWithText(message).fetchSemanticsNodes().isNotEmpty() }
+        compose.onNodeWithText(message).assertIsDisplayed()
+        assertTrue(nav.currentDestination!!.hasRoute<ChatListRoute>())
+        assertNull(shares.peek())
+        assertEquals(listOf(incoming), consumed)
+    }
+
+    @Test fun activeBatchReviewRejectsAnotherShareUntilItsLeaseCloses() {
+        mount()
+        val blocked =
+            Intent(Intent.ACTION_SEND).apply {
+                type = "text/plain"
+                putExtra(Intent.EXTRA_TEXT, "another share")
+            }
+        val batch = PendingShare.Files(listOf(PendingShare.File(Uri.parse("content://palette-import.test/review"), "image/png")))
+        assertTrue(shares.assignAttachment(1L, batch))
+        val assignment = checkNotNull(shares.consumeAttachment(1L))
+        checkNotNull(assignment.batchLease).use {
+            receive(blocked)
+            val message = context.getString(R.string.share_batch_error_review_active)
+            compose.waitUntil(10_000) { compose.onAllNodesWithText(message).fetchSemanticsNodes().isNotEmpty() }
+            compose.onNodeWithText(message).assertIsDisplayed()
+            assertTrue(nav.currentDestination!!.hasRoute<ChatListRoute>())
+            assertNull(shares.peek())
+            assertEquals(listOf(blocked), consumed)
+        }
+
+        val retried = Intent(blocked)
+        receive(retried)
+        await { nav.currentDestination?.hasRoute<SharePickerRoute>() == true }
+        assertEquals(PendingShare.Text("another share"), shares.consume())
+        assertEquals(listOf(blocked, retried), consumed)
     }
 
     @Test fun markerAndDecodeUseSameDuplicateLastWinsTree() {
@@ -553,7 +645,7 @@ class PaletteImportUiTest {
                         composable<JoinInviteRoute> { Text("Join invite") }
                         composable<SharePickerRoute> { Text("Share picker") }
                     }
-                    IncomingContentNavigation(intake!!, nav, shares::set, { consumed.add(it) })
+                    IncomingContentNavigation(intake!!, nav, shares, { consumed.add(it) })
                 }
             }
         }
