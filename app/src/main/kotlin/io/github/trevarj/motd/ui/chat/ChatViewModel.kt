@@ -2693,6 +2693,7 @@ class ChatViewModel
             raw: String,
             onOpenBuffer: (Long) -> Unit,
             onOpenChannelList: (Long) -> Unit = {},
+            followNewest: Boolean = true,
         ) = viewModelScope.launch {
             val current = state.value.buffer
             val networkId = current?.networkId
@@ -2706,22 +2707,16 @@ class ChatViewModel
                 is ChatCommand.None -> {}
 
                 is ChatCommand.Message -> {
-                    // Sending parks the author at the live bottom: the screen scrolls there as part of
-                    // the same gesture. Entry positioning can still be pending here (an empty room is
-                    // still waiting on history, or the screen has not materialized the target yet), and
-                    // while it is pending the screen keeps the whole auto-follow machinery disarmed, so
-                    // the echoed message would land with the viewport anchored one row above it.
-                    // Abandon the stale one-shot positioning exactly as the newest FAB does — including
-                    // the post-catch-up correction — since a divider entry is moot for a reader already
-                    // conversing at the bottom.
+                    // A live-end send takes over pending entry placement and its catch-up correction;
+                    // a send from history leaves both alone.
                     // Launch the ghost before anything suspends, so it leaves the composer on the same
                     // frame as the tap that cleared it rather than after the durable write.
                     //
                     // An emote is deliberately not flown: the manager rewrites it into an ACTION row
                     // whose text has lost the `/me ` prefix, so the ghost would neither match its
                     // landing row nor look anything like the tinted action bubble it becomes.
-                    val flight = if (isActionCommand(cmd.text)) null else launchFlight(cmd.text)
-                    jumpToNewest()
+                    val flight = if (followNewest && !isActionCommand(cmd.text)) launchFlight(cmd.text) else null
+                    if (followNewest) jumpToNewest()
                     val roomId = operationalBufferId.value
                     val submission =
                         reserveDraftForSend(raw, submitsReply = true) ?: run {
@@ -3760,6 +3755,9 @@ class ChatViewModel
                 null
             }
         private var jumpResolveJob: Job? = null
+
+        val hasPendingJump: Boolean
+            get() = activeJumpRequest != null
 
         private val retainedLinkOwnsPosition: Boolean
             get() = activeJumpRequest?.conversationLink != null

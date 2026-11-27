@@ -51,7 +51,7 @@ them in motion on the [landing page](https://trevs.site/motd/).
 ## Features
 
 - **Telegram-style chat** — unified chat list, grouped bubbles, day separators, event pills, inline images, and link previews. **Show unread chats** temporarily filters the current network or folder to chats with local unread messages.
-- **Infinite scrollback** — `draft/chathistory` paging through a bouncer, local-only history on plain networks. A floating date shows the day at the top of the timeline while you scroll. The timeline jump button names its destination and offers a separate accessible jump to newest when an unread mention is pending.
+- **Infinite scrollback** — `draft/chathistory` paging through a bouncer, local-only history on plain networks. A floating date shows the day at the top of the timeline while you scroll. Sending a message while reading older history keeps your place. The timeline jump button names its destination and offers a separate accessible jump to newest when an unread mention is pending.
 - **Cross-device read state** — `draft/read-marker` sync
 - **Multi-network** — several networks over one bouncer connection (`soju.im/bouncer-networks`)
 - **Push or persistent socket** — UnifiedPush + `soju.im/webpush` with on-device decryption, or a foreground service. Search Settings for **Test this alert** to post a local Android Messages or Mentions notification without testing IRC or push.

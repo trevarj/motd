@@ -244,9 +244,9 @@ class ComposerUploadedImageUiTest {
                                 onOpenMedia = { _, _ -> error("The draft preview is local-only") },
                                 onOpenPalette = { _, _ -> },
                                 nickNormalizer = String::lowercase,
-                                onSubmit = {
-                                    submissions += it
-                                    if (acceptSend) owner.submit(it, onOpenBuffer = {})
+                                onSubmit = { text, followNewest ->
+                                    submissions += text
+                                    if (acceptSend) owner.submit(text, onOpenBuffer = {}, followNewest = followNewest)
                                 },
                                 onTyping = {},
                                 onSetReply = {},

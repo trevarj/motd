@@ -529,6 +529,7 @@ class ComposerSendClearUiTest {
         collapseTitleBar: () -> Boolean = { true },
         onAudioToggle: (AudioPlaybackRequest) -> Unit = {},
         initialTarget: () -> ChatPositionTarget? = { null },
+        hasPendingJump: () -> Boolean = { false },
         entryState: () -> EntryPositionState = { EntryPositionState.Settled },
         unreadEntrySnapshot: UnreadEntrySnapshot? = null,
         onInitialPositionHandled: () -> Unit = {},
@@ -555,7 +556,7 @@ class ComposerSendClearUiTest {
         chatViewModel: ChatViewModel? = null,
         forwardEnabled: Boolean = false,
         surfaceEffects: SurfaceEffects = SurfaceEffects(),
-        onSubmit: (String) -> Unit,
+        onSubmit: (String, Boolean) -> Unit,
     ) {
         compose.setContent {
             backDispatcher = LocalOnBackPressedDispatcherOwner.current?.onBackPressedDispatcher
@@ -650,6 +651,7 @@ class ComposerSendClearUiTest {
                             onDraftChanged = onDraftChanged,
                             onFlightSettled = onFlightSettled,
                             initialTarget = initialTarget(),
+                            hasPendingJump = hasPendingJump,
                             entryState = entryState(),
                             unreadEntrySnapshot = unreadEntrySnapshot,
                             onInitialPositionHandled = onInitialPositionHandled,
@@ -715,7 +717,7 @@ class ComposerSendClearUiTest {
             pages = flowOf(PagingData.from(listOf(row))),
             onDraftChanged = { saved += it },
             onSenderClick = { menus += it },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val field = compose.onNodeWithTag("chat_composer_field")
         field.performSemanticsAction(SemanticsActions.SetSelection) { it(selectionStart, selectionEnd, false) }
@@ -773,7 +775,7 @@ class ComposerSendClearUiTest {
                     )
                 }
             },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val field = compose.onNodeWithTag("chat_composer_field")
         field.performSemanticsAction(SemanticsActions.SetSelection) { it(4, 7, false) }
@@ -805,7 +807,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState("", hydrated = true, revision = 1) },
             voiceEnabled = { enabled },
-            onSubmit = { sent += it },
+            onSubmit = { text, _ -> sent += text },
         )
         val send = compose.onNodeWithTag("chat_composer_send")
         send.assertIsDisplayed().assertIsNotEnabled()
@@ -854,7 +856,7 @@ class ComposerSendClearUiTest {
             identityRules = rules,
             nicknameTapAction = NicknameTapAction.USER_MENU,
             onSenderClick = { senderClicks += it },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         fun senderNode(
@@ -943,7 +945,7 @@ class ComposerSendClearUiTest {
             chatBuffer = { currentBuffer },
             dickordEnabled = { enabled },
             onAudioToggle = { played = it },
-        ) {}
+        ) { _, _ -> }
 
         compose.onNodeWithText("Alice Smith", useUnmergedTree = true).assertIsDisplayed()
         for (body in listOf(url, "<$url>")) {
@@ -1008,7 +1010,7 @@ class ComposerSendClearUiTest {
             },
             dickordEnabled = { true },
             layoutDensity = { density },
-        ) {}
+        ) { _, _ -> }
 
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().size == 1
@@ -1077,7 +1079,7 @@ class ComposerSendClearUiTest {
             onMarkRead = { marksRead++ },
             showImages = false,
             showLinkPreviews = false,
-        ) {}
+        ) { _, _ -> }
 
         compose.waitUntil(10_000) {
             compose.onAllNodesWithTag("audio_player", useUnmergedTree = true).fetchSemanticsNodes().size == 2
@@ -1134,7 +1136,7 @@ class ComposerSendClearUiTest {
                     owner.saveDraft(it)
                 },
                 onSetReply = { error("Holding or canceling must not change the reply") },
-                onSubmit = { error("Holding or canceling must not submit the composer") },
+                onSubmit = { _, _ -> error("Holding or canceling must not submit the composer") },
             )
             waitForForward(owner) {
                 owner.composerDraft.value.hydrated && owner.state.value.buffer
@@ -1316,7 +1318,7 @@ class ComposerSendClearUiTest {
                     owner.saveDraft(it)
                 },
                 onSetReply = { ++replies },
-                onSubmit = { ++submits },
+                onSubmit = { _, _ -> ++submits },
             )
             waitForForward(owner) {
                 owner.composerDraft.value.hydrated && owner.state.value.replyTo
@@ -1442,7 +1444,7 @@ class ComposerSendClearUiTest {
                 forwardEnabled = true,
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onDraftChanged = { error("forward changed draft") },
-                onSubmit = { error("forward submitted composer") },
+                onSubmit = { _, _ -> error("forward submitted composer") },
             )
             waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
@@ -1503,7 +1505,7 @@ class ComposerSendClearUiTest {
                 forwardEnabled = true,
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onDraftChanged = { error("forward changed draft") },
-                onSubmit = { error("forward submitted composer") },
+                onSubmit = { _, _ -> error("forward submitted composer") },
             )
             waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
@@ -1554,7 +1556,7 @@ class ComposerSendClearUiTest {
                 forwardEnabled = true,
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onDraftChanged = { error("forward changed draft") },
-                onSubmit = { error("forward submitted composer") },
+                onSubmit = { _, _ -> error("forward submitted composer") },
             )
             waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
@@ -1623,7 +1625,7 @@ class ComposerSendClearUiTest {
                 forwardEnabled = true,
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onDraftChanged = { error("forward changed draft") },
-                onSubmit = { error("forward submitted composer") },
+                onSubmit = { _, _ -> error("forward submitted composer") },
             )
             waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
@@ -1685,7 +1687,7 @@ class ComposerSendClearUiTest {
                 forwardEnabled = true,
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onDraftChanged = { error("forward changed draft") },
-                onSubmit = { error("forward submitted composer") },
+                onSubmit = { _, _ -> error("forward submitted composer") },
             )
             waitForForward(owner) { owner.composerDraft.value.hydrated }
             holdMessageBubble(parent)
@@ -1723,7 +1725,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState("Unsent draft", hydrated = true, revision = 17) },
             pages = flowOf(PagingData.from(listOf(parent))),
-            onSubmit = { error("forward submitted composer") },
+            onSubmit = { _, _ -> error("forward submitted composer") },
         )
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_action_sheet").assertIsDisplayed()
@@ -1747,7 +1749,7 @@ class ComposerSendClearUiTest {
                     ++draftChanges
                     owner.saveDraft(it)
                 },
-                onSubmit = { ++submits },
+                onSubmit = { _, _ -> ++submits },
             )
             compose.waitUntil(5_000) {
                 owner.composerDraft.value.hydrated &&
@@ -1817,7 +1819,7 @@ class ComposerSendClearUiTest {
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onSetReply = { ++replies },
                 onDraftChanged = owner::saveDraft,
-                onSubmit = { error("reply swipe sent") },
+                onSubmit = { _, _ -> error("reply swipe sent") },
             )
             compose.waitUntil(5_000) { owner.composerDraft.value.hydrated && owner.state.value.buffer != null }
             compose.runOnIdle { assertNull(owner.state.value.replyTo) }
@@ -1842,7 +1844,7 @@ class ComposerSendClearUiTest {
                 pages = flowOf(PagingData.from(listOf(parent))),
                 activityResults = pickerOwner,
                 onDraftChanged = { error("external result changed draft") },
-                onSubmit = { error("external result sent") },
+                onSubmit = { _, _ -> error("external result sent") },
             )
             compose.waitUntil(5_000) {
                 owner.composerDraft.value.hydrated &&
@@ -1896,7 +1898,7 @@ class ComposerSendClearUiTest {
                 pages = flowOf(PagingData.from(listOf(parent))),
                 activityResults = pickerOwner,
                 onDraftChanged = { error("external handoff changed draft") },
-                onSubmit = { error("external handoff sent") },
+                onSubmit = { _, _ -> error("external handoff sent") },
             )
             compose.waitUntil(5_000) {
                 owner.composerDraft.value.hydrated &&
@@ -1963,7 +1965,7 @@ class ComposerSendClearUiTest {
                 onCompleteExternalTranslation = { returned += it },
                 onAbortExternalTranslationLaunch = { error("unexpected launch abort") },
                 onDraftChanged = { error("translation changed draft") },
-                onSubmit = { error("translation sent") },
+                onSubmit = { _, _ -> error("translation sent") },
             )
             openTranslationPicker()
             compose.onNodeWithTag("message_translation_local").assertDoesNotExist()
@@ -2020,7 +2022,7 @@ class ComposerSendClearUiTest {
             onCompleteExternalTranslation = { returned += it },
             onAbortExternalTranslationLaunch = { error("unexpected launch abort") },
             onDraftChanged = { error("translation changed draft") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         val results =
             listOf(
@@ -2068,7 +2070,7 @@ class ComposerSendClearUiTest {
             onCompleteExternalTranslation = { error("SEND promised a returned result") },
             onAbortExternalTranslationLaunch = { ++reservationsReleased },
             onDraftChanged = { error("translation changed draft") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
         openTranslationPicker()
@@ -2102,7 +2104,7 @@ class ComposerSendClearUiTest {
             onCompleteExternalTranslation = { error("canceling picker completed a request") },
             onAbortExternalTranslationLaunch = { error("canceling picker aborted a request") },
             onDraftChanged = { error("translation changed draft") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
         openTranslationPicker()
@@ -2129,7 +2131,7 @@ class ComposerSendClearUiTest {
             pages = flowOf(PagingData.from(listOf(parent))),
             chatBuffer = { buffer.copy(type = BufferType.SERVER) },
             activityResults = pickerOwner,
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         openTranslationPicker()
         compose.onNodeWithTag("message_translation_local").assertDoesNotExist()
@@ -2148,7 +2150,7 @@ class ComposerSendClearUiTest {
             reactionChips = { listOf(ReactionChip("👍", 1, mine = false, reactorDisplayNames = listOf("bob"))) },
             activityResults = pickerOwner,
             onBeginExternalTranslation = { error("Opening or canceling the picker must not launch translation") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         val pill = compose.onNodeWithTag("chat_system_pill")
         pill.performTouchInput { longClick() }
@@ -2209,7 +2211,7 @@ class ComposerSendClearUiTest {
             onAbortExternalTranslationLaunch = { error("unreserved request aborted") },
             externalTranslationInFlight = { busy },
             onDraftChanged = { error("translation changed draft") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         openTranslationPicker()
         compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
@@ -2227,7 +2229,7 @@ class ComposerSendClearUiTest {
             draft = { ComposerDraftState("", hydrated = true, revision = 1) },
             pages = flowOf(PagingData.from(listOf(translationMessage()))),
             activityResults = pickerOwner,
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         openTranslationPicker()
         compose.onNodeWithTag("message_translation_app_com.deepl.mobiletranslator").performClick()
@@ -2247,7 +2249,7 @@ class ComposerSendClearUiTest {
             onCompleteExternalTranslation = {},
             onAbortExternalTranslationLaunch = { error("unavailable handler aborted a request") },
             onDraftChanged = { error("translation changed draft") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         compose.runOnIdle { shadowOf(RuntimeEnvironment.getApplication()).clearNextStartedActivities() }
         openTranslationPicker()
@@ -2273,7 +2275,7 @@ class ComposerSendClearUiTest {
             onCompleteExternalTranslation = { error("failed launch returned a result") },
             onAbortExternalTranslationLaunch = { ++aborted },
             onDraftChanged = { error("translation changed draft") },
-            onSubmit = { error("translation sent") },
+            onSubmit = { _, _ -> error("translation sent") },
         )
         for ((index, failure) in listOf(ActivityNotFoundException("Removed after query"), SecurityException("Permission changed")).withIndex()) {
             compose.runOnIdle { pickerLaunchFailure = failure }
@@ -2310,7 +2312,7 @@ class ComposerSendClearUiTest {
                 replyTo = { parent },
                 pages = flowOf(PagingData.from(listOf(parent))),
                 onDraftChanged = { error("translation changed draft") },
-                onSubmit = { error("translation sent") },
+                onSubmit = { _, _ -> error("translation sent") },
                 onTranslateMessage = { ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(it.bufferId, it.id, it.msgid, it.text)) },
                 aiSheet = {
                     AiTextSheet(ai, emptyList(), null, onGenerate = {
@@ -2358,7 +2360,7 @@ class ComposerSendClearUiTest {
             onReact = { source, emoji -> picked += source to emoji },
             onSetReply = { error("reaction changed reply") },
             onDraftChanged = { error("reaction changed draft") },
-            onSubmit = { error("reaction submitted the composer") },
+            onSubmit = { _, _ -> error("reaction submitted the composer") },
         )
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_more_reactions").performClick()
@@ -2421,7 +2423,7 @@ class ComposerSendClearUiTest {
             liveConnection = { connection },
             reactionChips = { msgid -> chips.takeIf { msgid == message.msgid }.orEmpty() },
             onReact = { source, value -> picked += source to value },
-            onSubmit = { error("Opening reaction details must not submit the composer") },
+            onSubmit = { _, _ -> error("Opening reaction details must not submit the composer") },
         )
 
         compose
@@ -2501,7 +2503,7 @@ class ComposerSendClearUiTest {
             },
             onReact = { source, emoji -> picked += source to emoji },
             onDraftChanged = { error("reaction changed draft") },
-            onSubmit = { error("reaction submitted the composer") },
+            onSubmit = { _, _ -> error("reaction submitted the composer") },
         )
         holdMessageBubble(parent)
         val thumb = compose.onNode(hasText("👍") and hasAnyAncestor(hasTestTag("message_action_sheet")))
@@ -2542,7 +2544,7 @@ class ComposerSendClearUiTest {
             },
             onReact = { source, emoji -> picked += source to emoji },
             onDraftChanged = { error("reaction changed draft") },
-            onSubmit = { error("reaction submitted the composer") },
+            onSubmit = { _, _ -> error("reaction submitted the composer") },
         )
         holdMessageBubble(parent)
         compose.onNode(hasText("👍") and hasAnyAncestor(hasTestTag("message_action_sheet"))).assertIsNotEnabled()
@@ -2572,7 +2574,7 @@ class ComposerSendClearUiTest {
             reactionChips = { listOf(ReactionChip("🦑", 1, mine = true, reactorDisplayNames = listOf("me"))) },
             onReact = { source, emoji -> picked += source to emoji },
             onDraftChanged = { error("reaction changed draft") },
-            onSubmit = { error("reaction submitted the composer") },
+            onSubmit = { _, _ -> error("reaction submitted the composer") },
         )
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_more_reactions").performClick()
@@ -2610,7 +2612,7 @@ class ComposerSendClearUiTest {
                 picked += emoji
             },
             onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
-            onSubmit = { submissions += it },
+            onSubmit = { text, _ -> submissions += text },
         )
         holdMessageBubble(parent)
         compose.onNodeWithTag("message_more_reactions").performClick()
@@ -2706,8 +2708,8 @@ class ComposerSendClearUiTest {
                         },
                     )
                 },
-                onSubmit = {
-                    sends += it
+                onSubmit = { text, _ ->
+                    sends += text
                     draft = draft.copy(text = "", revision = draft.revision + 1)
                     reply = null
                     runBlocking { store.saveDraft(buffer.id, "", null) }
@@ -2793,7 +2795,7 @@ class ComposerSendClearUiTest {
             aiEnabled = { true },
             aiState = { ai },
             onDraftChanged = { error("tools changed the original draft") },
-            onSubmit = { error("tools sent the original draft") },
+            onSubmit = { _, _ -> error("tools sent the original draft") },
             aiSheet = {
                 AiTextSheet(
                     ai,
@@ -2993,7 +2995,7 @@ class ComposerSendClearUiTest {
             onMarkRead = { read += it },
             onViewportRefreshAnchor = { viewportAnchors += it },
             onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
-            onSubmit = submitted::add,
+            onSubmit = { text, _ -> submitted += text },
         )
         val timeline = compose.onNodeWithTag("chat_timeline")
 
@@ -3088,7 +3090,7 @@ class ComposerSendClearUiTest {
                     fabColor = fab
                 }
             },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val root = compose.onNodeWithTag("chat_surface_root")
         val timeline = compose.onNodeWithTag("chat_timeline")
@@ -3356,7 +3358,7 @@ class ComposerSendClearUiTest {
             contentHeight = { contentHeight },
             memberNicks = listOf("alice", "alex"),
             onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val timeline = compose.onNodeWithTag("chat_timeline")
 
@@ -3485,7 +3487,7 @@ class ComposerSendClearUiTest {
             },
             onSenderClick = { senderClicks += it },
             nicknameTapAction = NicknameTapAction.USER_MENU,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.mainClock.autoAdvance = false
         val root = compose.onNodeWithTag("chat_surface_root")
@@ -3605,7 +3607,7 @@ class ComposerSendClearUiTest {
             nickColorsEnabled = false,
             onSenderClick = { profileClicks += it },
             nicknameTapAction = NicknameTapAction.USER_MENU,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val body = compose.onNodeWithText(row.text, useUnmergedTree = true)
         val layouts = mutableListOf<TextLayoutResult>()
@@ -3739,7 +3741,7 @@ class ComposerSendClearUiTest {
             // Keep the target until the test observes the completed placement, then consume it
             // together with Settled as the ViewModel does.
             onInitialPositionHandled = { positionsHandled++ },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_message_header-100", useUnmergedTree = true).assertIsDisplayed()
         compose.onNodeWithTag(CHAT_ENTRY_VEIL_TAG).assertExists()
@@ -3869,7 +3871,7 @@ class ComposerSendClearUiTest {
             draft = { ComposerDraftState(hydrated = true) },
             pages = flowOf(PagingData.from(headerHistory())),
             chatWallpaper = wallpaper,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val root = compose.onNodeWithTag("chat_surface_root")
         val rootBounds = root.fetchSemanticsNode().boundsInRoot
@@ -3936,7 +3938,7 @@ class ComposerSendClearUiTest {
             chatBuffer = { currentBuffer },
             onOpenSearch = { searches++ },
             onOpenConversationLinks = { linksOpened++ },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val search = compose.onNodeWithContentDescription(RuntimeEnvironment.getApplication().getString(R.string.chat_search))
         val overflow = compose.onNodeWithTag("chat_overflow")
@@ -3975,7 +3977,7 @@ class ComposerSendClearUiTest {
             pages = flowOf(PagingData.from(headerHistory())),
             collapseTitleBar = { collapse },
             memberCount = 42,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
         val expandedBounds = bar.getUnclippedBoundsInRoot()
@@ -4029,7 +4031,7 @@ class ComposerSendClearUiTest {
                 searches++
             },
             onInviteUser = { invites++ },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         val bar = compose.onNodeWithTag("chat_top_app_bar", useUnmergedTree = true)
 
@@ -4229,7 +4231,7 @@ class ComposerSendClearUiTest {
             chatBuffer = { buffer.copy(displayName = longTitle) },
             connectionState = IrcClientState.Failed("SASL authentication failed", fatal = true),
             fontScale = 2f,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_timeline").performScrollToIndex(50)
         compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertIsDisplayed()
@@ -4300,7 +4302,7 @@ class ComposerSendClearUiTest {
             showBack = false,
             onOpenConversationList = { conversationLists++ },
             historySyncStatus = HistorySyncStatus.Syncing,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_open_conversation_list").assertIsDisplayed()
         compose.onNodeWithTag("chat_timeline").performScrollToIndex(50)
@@ -4363,7 +4365,7 @@ class ComposerSendClearUiTest {
                 assertEquals(buffer.id, it)
                 details++
             },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_timeline").performScrollToIndex(50)
         val actions = compose.onNodeWithTag("chat_compact_actions")
@@ -4398,7 +4400,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
             onInviteUser = { invites++ },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         compose.onNodeWithTag("chat_overflow").performClick()
@@ -4411,7 +4413,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
             chatBuffer = { buffer.copy(name = "alice", displayName = "alice", type = BufferType.QUERY) },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         compose.onNodeWithTag("chat_overflow").performClick()
@@ -4423,7 +4425,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
             connectionState = IrcClientState.Disconnected,
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         compose.onNodeWithTag("chat_overflow").performClick()
@@ -4435,7 +4437,7 @@ class ComposerSendClearUiTest {
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
             chatBuffer = { buffer.copy(joined = false) },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         compose.onNodeWithTag("chat_overflow").performClick()
@@ -4455,7 +4457,7 @@ class ComposerSendClearUiTest {
                 changed += it
                 draft = draft.copy(text = it, revision = draft.revision + 1)
             },
-            onSubmit = { submitted += it },
+            onSubmit = { text, _ -> submitted += text },
         )
 
         compose
@@ -4512,7 +4514,7 @@ class ComposerSendClearUiTest {
             replyTo = { reply },
             ebooksHelperRoomId = { ebooksBuffer.id },
             onDraftChanged = { changed += it },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         compose.onNodeWithTag("chat_composer_field").assertTextEquals("unfinished")
@@ -4548,7 +4550,7 @@ class ComposerSendClearUiTest {
             draft = { ComposerDraftState() },
             chatBuffer = { ebooksBuffer },
             ebooksHelperRoomId = { buffer.id },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_ebooks_help").performClick()
         compose.onNodeWithText("@Searchook", substring = true).assertIsDisplayed()
@@ -4567,7 +4569,7 @@ class ComposerSendClearUiTest {
             parted = true,
             ebooksHelperRoomId = { buffer.id },
             onDraftChanged = { changed += it },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_ebooks_help").assertIsDisplayed().performClick()
         compose.onNodeWithTag("chat_ebooks_dialog").assertIsDisplayed()
@@ -4582,7 +4584,7 @@ class ComposerSendClearUiTest {
             chatBuffer = { ebooksBuffer },
             connectionState = IrcClientState.Disconnected,
             ebooksHelperRoomId = { buffer.id },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_ebooks_help").assertIsDisplayed().performClick()
         compose.onNodeWithTag("chat_ebooks_dialog").assertIsDisplayed()
@@ -4601,7 +4603,7 @@ class ComposerSendClearUiTest {
             chatBuffer = { room },
             ebooksHelperRoomId = { eligible },
             onDraftChanged = { changed += it },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_ebooks_help").assertDoesNotExist()
         compose.runOnIdle { eligible = buffer.id + 1 }
@@ -4643,7 +4645,7 @@ class ComposerSendClearUiTest {
                 onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
                 onAcceptDccTransfer = { id, uri, allowPrivate -> accepted += Triple(id, uri, allowPrivate) },
                 onSaveDccToDownloads = { exported += it },
-                onSubmit = { submitted += it },
+                onSubmit = { text, _ -> submitted += text },
             )
 
             compose.onNodeWithTag("chat_ebooks_dcc_offers").assertIsDisplayed()
@@ -4726,7 +4728,7 @@ class ComposerSendClearUiTest {
             activityResults = pickerOwner,
             draft = { ComposerDraftState(hydrated = true) },
             onAcceptDccTransfer = { id, uri, allowPrivate -> accepted += Triple(id, uri, allowPrivate) },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_ebooks_dcc_offers").performClick()
         compose.onNodeWithTag("chat_dcc_accept_7").assertDoesNotExist()
@@ -4783,7 +4785,7 @@ class ComposerSendClearUiTest {
                     changed += it
                     draft = draft.copy(text = it, revision = draft.revision + 1)
                 },
-                onSubmit = { submitted += it },
+                onSubmit = { text, _ -> submitted += text },
             )
             compose.onNodeWithTag("chat_composer_field").assertTextEquals("@Search ")
             chooseResults(file)
@@ -4825,7 +4827,7 @@ class ComposerSendClearUiTest {
                 ebooksHelperRoomId = { ebooksBuffer.id },
                 activityResults = pickerOwner,
                 onDraftChanged = { draft = draft.copy(text = it, revision = draft.revision + 1) },
-                onSubmit = { submitted += it },
+                onSubmit = { text, _ -> submitted += text },
             )
             chooseResults(file)
             compose.onNodeWithTag("chat_ebooks_request").performClick()
@@ -4865,7 +4867,7 @@ class ComposerSendClearUiTest {
                     changed += it
                     draft = draft.copy(text = it, revision = draft.revision + 1)
                 },
-                onSubmit = { submitted += it },
+                onSubmit = { text, _ -> submitted += text },
             )
             chooseResults(file)
             compose.onNodeWithTag("chat_ebooks_request").assertIsNotEnabled()
@@ -4913,7 +4915,7 @@ class ComposerSendClearUiTest {
                 chatBuffer = { ebooksBuffer },
                 ebooksHelperRoomId = { ebooksBuffer.id },
                 activityResults = pickerOwner,
-                onSubmit = {},
+                onSubmit = { _, _ -> },
             )
             chooseResults(file)
             compose.onNodeWithTag("chat_ebooks_results_error").assertIsDisplayed()
@@ -4934,7 +4936,7 @@ class ComposerSendClearUiTest {
                 ebooksHelperRoomId = { ebooksBuffer.id },
                 activityResults = pickerOwner,
                 connectionState = IrcClientState.Disconnected,
-                onSubmit = { submitted += it },
+                onSubmit = { text, _ -> submitted += text },
             )
             chooseResults(file)
             compose.onNodeWithTag("chat_ebooks_request").assertIsNotEnabled()
@@ -4992,7 +4994,7 @@ class ComposerSendClearUiTest {
             chatBuffer = { ebooksBuffer },
             ebooksHelperRoomId = { ebooksBuffer.id },
             pages = flowOf(PagingData.from(posts)),
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
 
         compose
@@ -5051,7 +5053,7 @@ class ComposerSendClearUiTest {
                     ),
                 ),
             onDraftChanged = { changed += it },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.onNodeWithTag("chat_ebooks_help").assertDoesNotExist()
         compose.onNodeWithTag("chat_ebooks_quiet_104").assertDoesNotExist()
@@ -5066,8 +5068,8 @@ class ComposerSendClearUiTest {
     fun send_emptiesTheFieldWithoutWaitingForTheSendToLand() {
         val submitted = mutableListOf<String>()
         // Nothing acknowledges the send: no accepted result, no cleared draft comes back.
-        setContent(draft = { ComposerDraftState("hello", hydrated = true, revision = 1) }) {
-            submitted += it
+        setContent(draft = { ComposerDraftState("hello", hydrated = true, revision = 1) }) { text, _ ->
+            submitted += text
         }
 
         compose.onNodeWithText("hello").assertIsDisplayed()
@@ -5080,7 +5082,7 @@ class ComposerSendClearUiTest {
 
     @Test
     fun backDismissesComposerToolsBeforeLeavingChat() {
-        setContent(draft = { ComposerDraftState("hello", hydrated = true, revision = 1) }) {}
+        setContent(draft = { ComposerDraftState("hello", hydrated = true, revision = 1) }) { _, _ -> }
 
         compose.onNodeWithTag("chat_composer_tools").performClick()
         compose.onNodeWithTag("chat_composer_format_toolbar").assertIsDisplayed()
@@ -5311,7 +5313,7 @@ class ComposerSendClearUiTest {
                 settled++
                 flight = null
             },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.waitForIdle()
         compose.mainClock.advanceTimeBy(2_000)
@@ -5351,7 +5353,7 @@ class ComposerSendClearUiTest {
                 deletes++
                 pages.value = PagingData.from(emptyList())
             },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
         )
         compose.waitForIdle()
         val sending = compose.onNodeWithContentDescription("Sending…")
@@ -5399,7 +5401,7 @@ class ComposerSendClearUiTest {
                 settledAt = compose.mainClock.currentTime
                 flight = null
             },
-            onSubmit = { text ->
+            onSubmit = { text, _ ->
                 startedAt = compose.mainClock.currentTime
                 flight = OutgoingFlight(token = 7, text = text, launchedAtMs = launchedAt)
                 pages.value =
@@ -5461,8 +5463,114 @@ class ComposerSendClearUiTest {
     }
 
     @Test
+    fun pendingHistoryJumpAtNewestIsPreservedOnSend() {
+        val history = headerHistory()
+        var jumpPending = false
+        val submissions = mutableListOf<Boolean>()
+        setContent(
+            draft = { ComposerDraftState("Sending", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(history)),
+            hasPendingJump = { jumpPending },
+            onSubmit = { _, followNewest -> submissions += followNewest },
+        )
+        compose.onNodeWithText(history.first().text).assertIsDisplayed()
+        compose.runOnIdle { jumpPending = true }
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.runOnIdle { assertEquals(listOf(false), submissions) }
+    }
+
+    @Test
+    fun slashCommandFromHistoryStillReturnsToNewest() {
+        val history = headerHistory()
+        val submissions = mutableListOf<Boolean>()
+        setContent(
+            draft = { ComposerDraftState("/whois Alice", hydrated = true, revision = 1) },
+            pages = flowOf(PagingData.from(history)),
+            onSubmit = { _, followNewest -> submissions += followNewest },
+        )
+        compose.onNodeWithTag("chat_timeline").performScrollToIndex(40)
+        compose.onNodeWithText(history.first().text).assertDoesNotExist()
+        compose.onNodeWithTag("chat_composer_send").performClick()
+        compose.onNodeWithText(history.first().text).assertIsDisplayed()
+        compose.runOnIdle { assertEquals(listOf(true), submissions) }
+    }
+
+    @Test
     @Config(sdk = [35])
-    fun sendingFromHistorySkipsFlightButStillReturnsToNewest() = assertSendHandsOffWhenViewportMoves(dismissIme = false, fromHistory = true)
+    fun sendingFromHistoryKeepsTheReadingPositionUntilJumpToNewest() = assertSendFromHistory(longDraft = false)
+
+    @Test
+    @Config(sdk = [35])
+    fun confirmingLongDraftFromHistoryKeepsTheReadingPositionWhenTheRowArrives() = assertSendFromHistory(longDraft = true)
+
+    private fun assertSendFromHistory(longDraft: Boolean) {
+        val history = headerHistory()
+        val text = if (longDraft) "One\nTwo\nThree\nFour" else "Sent from history"
+        val sent =
+            history.first().copy(
+                id = 101,
+                msgid = "sent",
+                dedupKey = "sent",
+                text = text,
+                isSelf = true,
+                sender = "me",
+                serverTime = 101_000,
+                timelineOrder = 101,
+            )
+        val pages = MutableStateFlow(PagingData.from(history))
+        var flight by mutableStateOf<OutgoingFlight?>(null)
+        val submissions = mutableListOf<Pair<String, Boolean>>()
+        val settled = mutableListOf<Long>()
+        setContent(
+            draft = { ComposerDraftState(text, hydrated = true, revision = 1) },
+            pages = pages,
+            collapseTitleBar = { false },
+            outgoingFlight = { flight },
+            onFlightSettled = {
+                settled += it
+                flight = null
+            },
+            onSubmit = { submitted, followNewest ->
+                submissions += submitted to followNewest
+                flight = OutgoingFlight(token = 7, text = submitted, launchedAtMs = sent.serverTime, eventIds = setOf(sent.id))
+                if (!longDraft) pages.value = PagingData.from(listOf(sent) + history)
+            },
+        )
+        compose.onNodeWithTag("chat_timeline").performScrollToIndex(40)
+        val anchor = compose.onNodeWithText(history[43].text)
+        val before = anchor.assertIsDisplayed().getUnclippedBoundsInRoot()
+        val host = compose.onNodeWithTag("chat_bottom_host")
+        val distanceBefore = host.getUnclippedBoundsInRoot().top - before.bottom
+        val send = compose.onNodeWithTag("chat_composer_send")
+        val submit =
+            if (longDraft) {
+                send.performClick()
+                compose.onNodeWithText("Send as messages").assertIsDisplayed()
+            } else {
+                send
+            }
+        compose.mainClock.autoAdvance = false
+        submit.performClick()
+        compose.mainClock.advanceTimeBy(128)
+        compose.runOnIdle {
+            assertEquals(listOf(text to false), submissions)
+            assertEquals("The offscreen flight must be dismissed", listOf(7L), settled)
+        }
+        compose.mainClock.autoAdvance = true
+        val afterSend = anchor.assertIsDisplayed().getUnclippedBoundsInRoot()
+        if (longDraft) {
+            val distanceAfter = host.getUnclippedBoundsInRoot().top - afterSend.bottom
+            assertEquals(distanceBefore.value, distanceAfter.value, 1f)
+            compose.runOnIdle { pages.value = PagingData.from(listOf(sent) + history) }
+            assertEquals(afterSend, anchor.assertIsDisplayed().getUnclippedBoundsInRoot())
+        } else {
+            assertEquals(before, afterSend)
+        }
+        val sentRow = compose.onNodeWithTag(timelineMessageTag(sent.msgid, sent.id), useUnmergedTree = true)
+        sentRow.assertDoesNotExist()
+        compose.onNodeWithTag("chat_scroll_to_bottom_fab").assertIsDisplayed().performClick()
+        sentRow.assertIsDisplayed()
+    }
 
     @Test
     @Config(sdk = [35])
@@ -5472,7 +5580,6 @@ class ComposerSendClearUiTest {
         dismissIme: Boolean,
         delayRow: Boolean = false,
         landDuringHandoff: Boolean = false,
-        fromHistory: Boolean = false,
         waitForTimeout: Boolean = false,
     ) {
         val history =
@@ -5505,7 +5612,7 @@ class ComposerSendClearUiTest {
                 settled += it
                 flight = null
             },
-            onSubmit = { text ->
+            onSubmit = { text, _ ->
                 submissions += text
                 flight = OutgoingFlight(token = 7, text = text, launchedAtMs = sent.serverTime, eventIds = setOf(sent.id))
                 if (!delayRow) pages.value = PagingData.from(listOf(sent) + history)
@@ -5529,7 +5636,7 @@ class ComposerSendClearUiTest {
             compose.waitForIdle()
         }
         if (dismissIme) setIme(240)
-        timeline.performScrollToIndex(if (fromHistory) 40 else 0)
+        timeline.performScrollToIndex(0)
         compose.waitForIdle()
 
         val root = compose.onNodeWithTag("chat_surface_root")
@@ -5551,15 +5658,6 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_composer_send").performClick()
         compose.mainClock.advanceTimeBy(128)
         compose.waitForIdle()
-        if (fromHistory) {
-            compose.runOnIdle {
-                assertEquals(listOf(sent.text), submissions)
-                assertEquals("A send from history must not start a flight toward an offscreen row", listOf(7L), settled)
-            }
-            compose.mainClock.advanceTimeBy(1_000)
-            compose.onNodeWithText(sent.text).assertIsDisplayed()
-            return
-        }
         compose.runOnIdle {
             assertEquals(listOf(sent.text), submissions)
             assertTrue("A stationary viewport should still be flying", settled.isEmpty())
@@ -5690,7 +5788,7 @@ class ComposerSendClearUiTest {
                 settled++
                 flight = null
             },
-            onSubmit = { text ->
+            onSubmit = { text, _ ->
                 assertEquals(pending.text, text)
                 flight = OutgoingFlight(token = 7, text = text, launchedAtMs = launchedAt)
             },
@@ -5758,7 +5856,7 @@ class ComposerSendClearUiTest {
         compose.mainClock.autoAdvance = false
         setContent(
             draft = { ComposerDraftState(hydrated = true) },
-            onSubmit = {},
+            onSubmit = { _, _ -> },
             pages = pages,
             outgoingFlight = { flight },
             onFlightSettled = { token ->
@@ -5806,7 +5904,7 @@ class ComposerSendClearUiTest {
     @Test
     fun republishedDraft_returnsTextTheSendNeverConsumed() {
         var draft by mutableStateOf(ComposerDraftState("hello", hydrated = true, revision = 1))
-        setContent(draft = { draft }) {}
+        setContent(draft = { draft }) { _, _ -> }
 
         compose.onNodeWithTag("chat_composer_send").performClick()
         compose.waitForIdle()
@@ -5850,7 +5948,7 @@ class ComposerSendClearUiTest {
                 collapseTitleBar = { false },
                 outgoingFlight = { owner.outgoingFlight.collectAsState().value },
                 onFlightSettled = owner::onFlightSettled,
-                onSubmit = { submission = owner.submit(it, onOpenBuffer = {}) },
+                onSubmit = { text, followNewest -> submission = owner.submit(text, onOpenBuffer = {}, followNewest = followNewest) },
             )
             compose.waitUntil(5_000) {
                 compose.waitForIdle()

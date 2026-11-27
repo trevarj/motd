@@ -6851,12 +6851,8 @@ class ChatViewModelTest {
     @Test
     fun `sending abandons the entry position and its post-catch-up correction`() =
         runTest {
-            // A send is an explicit trip to the live bottom (the screen scrolls there as part of the
-            // same gesture). The screen keeps its entire auto-follow machinery disarmed until entry
-            // settles, so a message sent while entry is still being placed echoed into a timeline that
-            // did not follow it: the viewport stayed keyed to the previous newest row. The send must
-            // therefore abandon the one-shot positioning exactly as the newest FAB does — and, on a
-            // room entered mid-catch-up, its armed correction with it.
+            // At the live end, a send abandons the one-shot positioning just as the newest FAB does,
+            // so the echoed row can follow immediately even when catch-up has not finished.
             val markerId =
                 db
                     .messageDao()
@@ -6899,6 +6895,45 @@ class ChatViewModelTest {
             manager.finishHistoryCatchUp(network.id)
             advanceUntilIdle()
             assertNull(vm.initialTarget.value)
+        }
+
+    @Test
+    fun `sending from history preserves the pending entry and its post-catch-up correction`() =
+        runTest {
+            val rows = seedFiveRows()
+            val enteredRoom = channel.copy(localReadAnchorTime = 100, localReadAnchorEventId = rows.first())
+            db.bufferDao().update(enteredRoom)
+            val buffers =
+                object : BufferRepository by FakeBufferRepository(enteredRoom) {
+                    override fun observeChatList(): Flow<List<ChatListRow>> = flow { awaitCancellation() }
+                }
+            val manager = FakeConnectionManager(network.id, client = testClient(), historyPending = setOf(network.id))
+            val messages = FakeMessageRepository(events = listOf(checkNotNull(db.messageDao().byCanonicalId(rows[1]))))
+            val vm = viewModel(enteredRoom, manager, messages = messages, buffers = buffers)
+            vm.state.first { it.buffer != null }
+            val target = checkNotNull(vm.initialTarget.first { it != null })
+            val intent = vm.entryPositionIntent.value
+            assertEquals(rows[1], target.expectedEventId)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+
+            vm.saveDraft("hello there")
+            vm.submit("hello there", {}, followNewest = false).join()
+
+            assertEquals(listOf(SentMessage(channel.id, "hello there", null)), manager.messages)
+            assertNull(vm.outgoingFlight.value)
+            assertEquals(EntryPositionState.Pending, vm.entryState.value)
+            assertEquals(target, vm.initialTarget.value)
+            assertEquals(intent, vm.entryPositionIntent.value)
+
+            val caughtUpId =
+                db
+                    .messageDao()
+                    .insertAll(
+                        listOf(message(channel.id, "caught up", "m101", "alice").copy(serverTime = 101)),
+                    ).single()
+            messages.resolvedById = checkNotNull(db.messageDao().byCanonicalId(caughtUpId))
+            manager.finishHistoryCatchUp(network.id)
+            vm.initialTarget.first { it?.expectedEventId == caughtUpId }
         }
 
     /** Five rows, oldest first, at serverTime 100..500. Index 0 is the newest. */

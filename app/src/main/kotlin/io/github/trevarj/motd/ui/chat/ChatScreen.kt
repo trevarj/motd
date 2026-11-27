@@ -224,6 +224,7 @@ import io.github.trevarj.motd.audio.ReadAloudVoices
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.formatAudioDuration
 import io.github.trevarj.motd.avatar.ConversationAvatarOutcome
+import io.github.trevarj.motd.bouncer.isBouncerConsole
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.DccDirection
@@ -780,7 +781,9 @@ fun ChatScreen(
         onStartWatch = viewModel::startWatch,
         onStopWatch = viewModel::stopWatch,
         nickNormalizer = nickNormalizer,
-        onSubmit = { raw -> viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList) },
+        onSubmit = { raw, followNewest ->
+            viewModel.submit(raw, onOpenBuffer = onOpenBuffer, onOpenChannelList = onOpenChannelList, followNewest = followNewest)
+        },
         onTyping = viewModel::sendTyping,
         onSetReply = { message ->
             viewModel.setReply(
@@ -877,6 +880,7 @@ fun ChatScreen(
         composerPrefill = composerPrefillRequest,
         nicknameTapAction = settings.nicknameTapAction,
         jumpTarget = jumpTarget,
+        hasPendingJump = { viewModel.hasPendingJump },
         initialTarget = initialTarget,
         entryState = entryState,
         timelineSeams = timelineSeams,
@@ -1340,7 +1344,7 @@ internal fun ChatContent(
     onOpenMedia: (url: String, isVideo: Boolean) -> Unit,
     onOpenPalette: (PaletteDocument, String) -> Unit,
     nickNormalizer: (String) -> String,
-    onSubmit: (String) -> Unit,
+    onSubmit: (String, Boolean) -> Unit,
     onTyping: (Boolean) -> Unit,
     onSetReply: (MessageEntity?) -> Unit,
     // React to a message. Takes the whole entity so a still-pending own message (msgid == null) can
@@ -1477,6 +1481,7 @@ internal fun ChatContent(
     composerPrefill: Pair<Long, List<ComposerPrefill>>? = null,
     nicknameTapAction: NicknameTapAction = NicknameTapAction.MENTION,
     jumpTarget: ChatPositionTarget? = null,
+    hasPendingJump: () -> Boolean = { false },
     initialTarget: ChatPositionTarget? = null,
     entryState: EntryPositionState = EntryPositionState.Pending,
     // Stored history gaps, rendered as in-row seams by MessageList. Independent of the active
@@ -3489,13 +3494,21 @@ internal fun ChatContent(
         val imeInsets = WindowInsets.ime
         val imeDensity = LocalDensity.current
 
-        fun sampleFlightViewport() =
+        fun sampleFlightViewport(followNewest: Boolean = true) =
             SendFlightViewport(
-                eligible = handoff == null && initialPositionSettled && atBottom && !listState.isScrollInProgress,
+                eligible = followNewest && handoff == null && initialPositionSettled && atBottom && !listState.isScrollInProgress,
                 imeBottom = imeInsets.getBottom(imeDensity),
             )
 
-        fun captureFlightLaunch() = flightAnchors.captureLaunch(sampleFlightViewport())
+        fun prepareComposerSend(text: String): Boolean {
+            val atLiveEnd = atTimelineLiveEnd.value && (items.itemCount > 0 || listState.firstVisibleItemIndex == 0)
+            val followNewest =
+                (atLiveEnd && !userScrolling && jumpTarget == null && !hasPendingJump()) ||
+                    (buffer?.type == BufferType.SERVER && !buffer.isBouncerConsole) || parseCommand(text) !is ChatCommand.Message
+            if (!followNewest) autoFollow.pauseFollow()
+            flightAnchors.captureLaunch(sampleFlightViewport(followNewest))
+            return followNewest
+        }
 
         val launchViewport =
             remember(flightToken, flightAnchors) {
@@ -4714,15 +4727,15 @@ internal fun ChatContent(
                                                     AutoFollowTrace.record("composer_submit", traceBufferId, traceSessionId) {
                                                         "long_draft=false"
                                                     }
-                                                    captureFlightLaunch()
+                                                    val followNewest = prepareComposerSend(text)
                                                     // Empty the field on the tap frame. The ViewModel still owns the
                                                     // durable draft and republishes it if the send never lands, so this
                                                     // is presentation only -- notifying onDraftChanged here would count
                                                     // as an edit and make the submission itself stale.
                                                     composerText = TextFieldValue("")
-                                                    onSubmit(text)
-                                                    scope.launch {
-                                                        scrollToNewest(animate = true, reason = "composer_send_action")
+                                                    onSubmit(text, followNewest)
+                                                    if (followNewest) {
+                                                        scope.launch { scrollToNewest(animate = true, reason = "composer_send_action") }
                                                     }
                                                 }
                                             }
@@ -5445,8 +5458,8 @@ internal fun ChatContent(
                                                 ebooksResults = null
                                                 pendingEbooksRequestRevision = composerDraft.revision + 1
                                                 onDraftChanged(result.request)
-                                                captureFlightLaunch()
-                                                onSubmit(result.request)
+                                                flightAnchors.captureLaunch(sampleFlightViewport())
+                                                onSubmit(result.request, true)
                                                 // Only the ViewModel clears the durable draft after acceptance;
                                                 // a rejected send republishes it to restore this optimistic clear.
                                                 composerText = TextFieldValue("")
@@ -5606,10 +5619,11 @@ internal fun ChatContent(
                         androidx.compose.material3.TextButton(colors = readableTextButtonColors(), onClick = {
                             AutoFollowTrace.record("long_draft_send_messages", traceBufferId, traceSessionId)
                             if (!isEbooksSearchOnly(composerText.text)) {
-                                captureFlightLaunch()
-                                onSubmit(composerText.text)
+                                val followNewest = prepareComposerSend(composerText.text)
+                                longDraftPrompt = false
+                                onSubmit(composerText.text, followNewest)
                                 composerText = TextFieldValue("")
-                                scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
+                                if (followNewest) scope.launch { scrollToNewest(animate = true, reason = "long_draft_send") }
                             }
                         }) { Text("Send as messages") }
                         androidx.compose.material3.TextButton(colors = readableTextButtonColors(), onClick = {

@@ -678,9 +678,13 @@ internal class AutoFollowTracker(
         following = atBottom
     }
 
-    /** Explicit send/FAB actions opt back into following the newest row. */
+    /** An explicit jump to newest opts back into following. */
     fun requestFollow() {
         following = true
+    }
+
+    fun pauseFollow() {
+        following = false
     }
 
     /**

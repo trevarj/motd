@@ -152,7 +152,7 @@ class ReadAloudPlayerUiTest {
                                 onOpenSearch = {},
                                 onOpenMedia = onOpenMedia,
                                 nickNormalizer = { it.lowercase() },
-                                onSubmit = {},
+                                onSubmit = { _, _ -> },
                                 onTyping = {},
                                 onSetReply = onSetReply,
                                 onReact = { _, _ -> },
