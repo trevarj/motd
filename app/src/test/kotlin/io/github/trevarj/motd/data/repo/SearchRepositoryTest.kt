@@ -1,9 +1,12 @@
 package io.github.trevarj.motd.data.repo
 
+import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.HistoryGapEntity
 import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkIdentityEntity
+import io.github.trevarj.motd.data.db.RoomAliasEntity
+import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.buffer
 import io.github.trevarj.motd.data.db.inMemoryDb
 import io.github.trevarj.motd.data.db.message
@@ -21,8 +24,12 @@ import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.ThemeMode
 import io.github.trevarj.motd.data.sync.BufferStore
 import io.github.trevarj.motd.service.DeliveryMode
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -31,6 +38,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import java.util.Locale
 
 // End-to-end: repository sanitizes raw input and drives the FTS DAO, honoring the kind filter
 // and buffer scoping.
@@ -47,7 +55,7 @@ class SearchRepositoryTest {
         runTest {
             db = inMemoryDb()
             settings = FakeSettingsRepository()
-            repo = SearchRepositoryImpl(db.bufferDao(), db.messageDao(), db.historyGapDao(), settings)
+            repo = SearchRepositoryImpl(db, settings)
             val nid = db.networkDao().insert(network())
             b1 = db.bufferDao().insert(buffer(nid, "#one"))
             b2 = db.bufferDao().insert(buffer(nid, "#two"))
@@ -102,6 +110,241 @@ class SearchRepositoryTest {
                     .first()
                     .hits.size,
             )
+        }
+
+    @Test
+    fun structuredFtsFiltersAreAppliedBeforeTheCap() =
+        runTest {
+            insertMatches(b1, "target", count = SearchRepositoryImpl.LOCAL_SEARCH_LIMIT + 1, sender = "not-alice")
+            db.messageDao().insertAll(
+                listOf(
+                    message(b1, "target older bob", sender = "Bob", serverTime = 4, dedupKey = "bob"),
+                    message(b1, "target older alice", sender = "Alice", serverTime = 5, dedupKey = "alice"),
+                    message(b2, "target wrong room", sender = "Alice", serverTime = 6, dedupKey = "wrong-room"),
+                    message(b1, "wrong text", sender = "Alice", serverTime = 7, dedupKey = "wrong-text"),
+                ),
+            )
+            val senders = List(40_000) { if (it % 2 == 0) "ALICE" else "bOb" }
+            val result = repo.search("target", null, LocalSearchFilters(room = "#ONE", network = "LIBERA", senders = senders)).first()
+
+            assertEquals(listOf("target older alice", "target older bob"), result.hits.map { it.message.text })
+            assertTrue(!result.truncated)
+            val operatorOnly = repo.search("***", null, LocalSearchFilters(room = "#one")).first()
+            assertTrue(operatorOnly.hits.isEmpty())
+        }
+
+    @Test
+    fun filterOnlyUsesPersistedIrcCasemapsButUnicodeNetworkLabels() =
+        runTest {
+            val cases = listOf(null, "RFC1459-STRICT", "ascii", "unknown")
+            for ((index, mapping) in cases.withIndex()) {
+                val networkId = db.networkDao().insert(network(if (index % 2 == 0) "Équipe Chat" else "éQUIPE CHAT"))
+                if (mapping != null) db.networkIdentityDao().upsert(NetworkIdentityEntity(networkId, caseMapping = mapping))
+                val roomId = db.bufferDao().insert(buffer(networkId, "#[ÉCHO]"))
+                db.messageDao().insertAll(
+                    listOf(
+                        message(roomId, "brackets-$index", sender = "[Nick]", serverTime = 10, dedupKey = "brackets"),
+                        message(roomId, "tilde-$index", sender = "Nick~", serverTime = 10, dedupKey = "tilde"),
+                        message(roomId, "unicode-$index", sender = "ÉNICK", serverTime = 10, dedupKey = "unicode"),
+                    ),
+                )
+            }
+            val network = LocalSearchFilters(network = "équipe chat")
+
+            suspend fun texts(filters: LocalSearchFilters): List<String> {
+                val result = repo.search("", null, filters).first()
+                return result.hits.map { it.message.text }
+            }
+
+            assertEquals(12, texts(network).size)
+            assertTrue(texts(network.copy(network = "équipe")).isEmpty())
+            assertEquals(
+                listOf("brackets-1", "brackets-0"),
+                texts(network.copy(room = "#{Écho}", senders = listOf("{NICK}"))),
+            )
+            assertEquals(listOf("tilde-0"), texts(network.copy(room = "#[Écho]", senders = listOf("NICK^"))))
+            assertEquals(listOf("brackets-3", "brackets-2", "brackets-1", "brackets-0"), texts(network.copy(senders = listOf("[NICK]"))))
+            assertEquals(
+                listOf("unicode-3", "unicode-2", "unicode-1", "unicode-0"),
+                texts(network.copy(room = "#[Écho]", senders = listOf("Énick"))),
+            )
+            assertTrue(texts(network.copy(room = "#[écho]")).isEmpty())
+            assertTrue(texts(network.copy(senders = listOf("énick"))).isEmpty())
+        }
+
+    @Test
+    fun uppercaseStrictCasemapAndAsciiIdentifiersMatchInTurkishLocale() =
+        runTest {
+            val previousLocale = Locale.getDefault()
+            try {
+                Locale.setDefault(Locale.forLanguageTag("tr-TR"))
+                val networkId = db.networkDao().insert(network("Turkish locale"))
+                db.networkIdentityDao().upsert(NetworkIdentityEntity(networkId, caseMapping = "RFC1459-STRICT"))
+                val roomId = db.bufferDao().insert(buffer(networkId, "#[INBOX]"))
+                db.messageDao().insertAll(
+                    listOf(message(roomId, "message", sender = "[NICK]", serverTime = 10, dedupKey = "turkish")),
+                )
+                val result = repo.search("", null, LocalSearchFilters(room = "#{INBOX}", senders = listOf("{NICK}"))).first()
+                assertEquals(listOf(roomId), result.hits.map { it.message.bufferId })
+            } finally {
+                Locale.setDefault(previousLocale)
+            }
+        }
+
+    @Test
+    fun redirectedScopeRemainsCanonicalWhenAFilterConflicts() =
+        runTest {
+            val networkId = db.networkDao().insert(network("Other Network"))
+            val other = db.bufferDao().insert(buffer(networkId, "#other"))
+            db.messageDao().insertAll(listOf(message(other, "hello other", serverTime = 9, dedupKey = "other")))
+            db.roomAliasDao().markRedirect(b2, b1)
+
+            val byCanonicalName = repo.search("hello", b2, LocalSearchFilters(room = "#one")).first()
+            val byRedirectedName = repo.search("", b2, LocalSearchFilters(room = "#two")).first()
+            val wrongRoom = repo.search("hello", b2, LocalSearchFilters(room = "#other")).first()
+            val wrongNetwork = repo.search("", b2, LocalSearchFilters(network = "other network")).first()
+
+            assertEquals(listOf("hello world"), byCanonicalName.hits.map { it.message.text })
+            assertEquals(listOf("hello world"), byRedirectedName.hits.map { it.message.text })
+            assertTrue(wrongRoom.hits.isEmpty())
+            assertTrue(wrongNetwork.hits.isEmpty())
+        }
+
+    @Test
+    fun roomQualifierUsesActiveVerifiedNickInsteadOfAnOldAccountWithTheSameNick() =
+        runTest {
+            val networkId = checkNotNull(db.bufferDao().rawById(b1)).networkId
+            val store = BufferStore(db)
+            val provisional = store.getOrCreate(networkId, "alice", "Alice", BufferType.QUERY)
+            val old = store.bindQueryIdentity(provisional.id, networkId, "alice", "Alice", "acct-a")
+            val active = store.bindQueryIdentity(old.id, networkId, "alice", "Alice", "acct-b")
+            db.messageDao().insertAll(
+                listOf(
+                    message(old.id, "hello old account", serverTime = 11, dedupKey = "old-account"),
+                    message(active.id, "hello active account", serverTime = 10, dedupKey = "active-account"),
+                ),
+            )
+            val filters = LocalSearchFilters(room = "ALICE")
+            val global = repo.search("hello", null, filters).first()
+            val activeScope = repo.search("", active.id, filters).first()
+            val oldScope = repo.search("", old.id, filters).first()
+            assertEquals(listOf(active.id), global.hits.map { it.message.bufferId })
+            assertEquals(listOf(active.id), activeScope.hits.map { it.message.bufferId })
+            assertTrue(oldScope.hits.isEmpty())
+        }
+
+    @Test
+    fun roomQualifierPrefersExactStoredAliasesAfterCasemapChange() =
+        runTest {
+            val networkId = checkNotNull(db.bufferDao().rawById(b1)).networkId
+            val identities = db.networkIdentityDao()
+            identities.upsert(NetworkIdentityEntity(networkId, caseMapping = "ascii"))
+            val store = BufferStore(db)
+            val provisional = store.getOrCreate(networkId, "[alice]", "[Alice]", BufferType.QUERY)
+            val oldNick = store.bindQueryIdentity(provisional.id, networkId, "[alice]", "[Alice]", "acct")
+            val activeNick = store.getOrCreate(networkId, "{alice}", "{Alice}", BufferType.QUERY)
+            val oldChannel = store.getOrCreate(networkId, "#[room]", "#[Room]", BufferType.CHANNEL)
+            val activeChannel = store.getOrCreate(networkId, "#{room}", "#{Room}", BufferType.CHANNEL)
+            db.messageDao().insertAll(
+                listOf(oldNick, activeNick, oldChannel, activeChannel).map { room ->
+                    message(room.id, "message", serverTime = 10, dedupKey = room.name)
+                },
+            )
+
+            suspend fun roomFor(qualifier: String): Long {
+                val result = repo.search("", null, LocalSearchFilters(room = qualifier)).first()
+                val hit = result.hits.single()
+                return hit.message.bufferId
+            }
+
+            assertEquals(oldNick.id, roomFor("[ALICE]"))
+            assertEquals(oldChannel.id, roomFor("#[ROOM]"))
+            identities.upsert(NetworkIdentityEntity(networkId, caseMapping = "rfc1459"))
+            assertEquals(activeNick.id, roomFor("[ALICE]"))
+            assertEquals(activeChannel.id, roomFor("#[ROOM]"))
+        }
+
+    @Test
+    fun timestampTiesUseTimelineOrderOnlyForAnExplicitBufferScope() =
+        runTest {
+            db.messageDao().insertAll(
+                listOf(
+                    message(b1, "tie earliest id", serverTime = 9, dedupKey = "tie-1").copy(timelineOrder = 10),
+                    message(b1, "tie lower order", serverTime = 9, dedupKey = "tie-2").copy(timelineOrder = 9),
+                    message(b1, "tie latest id", serverTime = 9, dedupKey = "tie-3").copy(timelineOrder = 10),
+                    message(b2, "tie other room", serverTime = 9, dedupKey = "tie-4").copy(timelineOrder = 1),
+                ),
+            )
+            val expected = listOf("tie latest id", "tie earliest id", "tie lower order")
+            val scopedFts = repo.search("tie", b1).first()
+            val scopedFilterOnly = repo.search("", b1, LocalSearchFilters(senders = listOf("alice"))).first()
+            assertEquals(expected, scopedFts.hits.map { it.message.text })
+            assertEquals(expected + "hello world", scopedFilterOnly.hits.map { it.message.text })
+            val globalOrder = listOf("tie other room", "tie latest id", "tie lower order", "tie earliest id")
+            val globalFts = repo.search("tie", null).first()
+            val globalFilteredFts = repo.search("tie", null, LocalSearchFilters(senders = listOf("alice"))).first()
+            assertEquals(globalOrder, globalFts.hits.map { it.message.text })
+            assertEquals(globalOrder, globalFilteredFts.hits.map { it.message.text })
+        }
+
+    @Test
+    fun filterOnlyAliasSearchObservesMessagesNamesAndCasemap() =
+        runTest {
+            val networkId = db.networkDao().insert(network("Équipe Chat"))
+            val roomId = db.bufferDao().insert(buffer(networkId, "original", BufferType.QUERY))
+            val filters = LocalSearchFilters(room = "{CURRENT}", network = "équipe chat")
+            val updates = Channel<List<String>>(Channel.UNLIMITED)
+            backgroundScope.launch {
+                repo
+                    .search("", null, filters)
+                    .map { result -> result.hits.map { it.message.text } }
+                    .distinctUntilChanged()
+                    .collect { updates.send(it) }
+            }
+            assertTrue(updates.receive().isEmpty())
+
+            val aliases = db.roomAliasDao()
+            aliases.insertIgnore(RoomAliasEntity(networkId = networkId, namespace = RoomAliasNamespace.ACCOUNT, value = "[Current]", roomId = roomId))
+            val messageId = db.messageDao().insertAll(listOf(message(roomId, "message", serverTime = 10, dedupKey = "message"))).single()
+            val accountOnly = repo.search("", null, filters).first()
+            assertTrue(accountOnly.hits.isEmpty())
+            aliases.insertIgnore(
+                RoomAliasEntity(networkId = networkId, namespace = RoomAliasNamespace.VERIFIED_NICK, value = "[Current]", roomId = roomId, verified = true),
+            )
+            assertEquals(listOf("message"), updates.receive())
+            db.networkIdentityDao().upsert(NetworkIdentityEntity(networkId, caseMapping = "ascii"))
+            assertTrue(updates.receive().isEmpty())
+            val room = checkNotNull(db.bufferDao().rawById(roomId))
+            db.bufferDao().update(room.copy(displayName = "{Current}"))
+            assertEquals(listOf("message"), updates.receive())
+            val network = checkNotNull(db.networkDao().byId(networkId))
+            db.networkDao().update(network.copy(name = "Other Chat"))
+            assertTrue(updates.receive().isEmpty())
+            db.networkDao().update(network)
+            assertEquals(listOf("message"), updates.receive())
+            db.messageDao().deleteById(messageId)
+            assertTrue(updates.receive().isEmpty())
+        }
+
+    @Test
+    fun caseOnlyNetworkRenameKeepsTheMatchingPage() =
+        runTest {
+            val networkId = db.networkDao().insert(network("Équipe Chat"))
+            val roomId = db.bufferDao().insert(buffer(networkId, "#hello"))
+            db.messageDao().insertAll(listOf(message(roomId, "message", serverTime = 10, dedupKey = "message")))
+            val updates = Channel<List<String>>(Channel.UNLIMITED)
+            backgroundScope.launch {
+                repo
+                    .search("", null, LocalSearchFilters(network = "équipe chat"))
+                    .map { result -> result.hits.map { it.networkName } }
+                    .distinctUntilChanged()
+                    .collect { updates.send(it) }
+            }
+            assertEquals(listOf("Équipe Chat"), updates.receive())
+
+            val network = checkNotNull(db.networkDao().byId(networkId))
+            db.networkDao().update(network.copy(name = "éQUIPE CHAT"))
+            assertEquals(listOf("éQUIPE CHAT"), updates.receive())
         }
 
     @Test

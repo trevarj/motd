@@ -16,6 +16,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.LocalSearchFilters
 import io.github.trevarj.motd.data.repo.LocalSearchResult
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.data.repo.SearchRepository
@@ -108,6 +109,7 @@ class SearchViewModelTest {
         override fun search(
             query: String,
             bufferId: Long?,
+            filters: LocalSearchFilters,
         ): Flow<LocalSearchResult> {
             calls.incrementAndGet()
             return flowOf(LocalSearchResult(result, truncated))
@@ -119,6 +121,7 @@ class SearchViewModelTest {
     private data class SearchRequest(
         val query: String,
         val bufferId: Long?,
+        val filters: LocalSearchFilters = LocalSearchFilters(),
     )
 
     /** A keyed, replaying source lets tests deliver results after its collector was cancelled. */
@@ -136,8 +139,9 @@ class SearchViewModelTest {
         override fun search(
             query: String,
             bufferId: Long?,
+            filters: LocalSearchFilters,
         ): Flow<LocalSearchResult> {
-            val request = SearchRequest(query, bufferId)
+            val request = SearchRequest(query, bufferId, filters)
             calls += request
             return flowFor(request)
         }
@@ -149,8 +153,9 @@ class SearchViewModelTest {
             bufferId: Long?,
             hits: List<SearchHit>,
             truncated: Boolean = false,
+            filters: LocalSearchFilters = LocalSearchFilters(),
         ) {
-            check(flowFor(SearchRequest(query, bufferId)).tryEmit(LocalSearchResult(hits, truncated)))
+            check(flowFor(SearchRequest(query, bufferId, filters)).tryEmit(LocalSearchResult(hits, truncated)))
         }
 
         private fun flowFor(request: SearchRequest) =
@@ -407,6 +412,38 @@ class SearchViewModelTest {
             assertEquals("coroutine builder", request.text)
             assertEquals("alice", request.from)
             assertEquals(SOJU_SEARCH_MAX_LIMIT, request.limit)
+        }
+
+    @Test
+    fun unsupportedServerFiltersSearchOnlyTheCurrentDeviceConversation() =
+        runTest {
+            val repo = ControlledSearchRepository()
+            val connections = FakeConnectionManager(available = true, result = listOf(serverHit("old remote result", 1_000L, "remote")))
+            val vm = viewModel(repo, FakeBufferRepository(buffer()), connections).also { it.init(BUFFER_ID) }
+
+            vm.state.test {
+                enterServerScope(vm)
+                vm.onServerSearchSubmit()
+                awaitStateWhere { it.server is ServerSearchState.Results }
+
+                val cases =
+                    listOf(
+                        "in:#other" to LocalSearchFilters(room = "#other"),
+                        "on:\"Work \\\"IRC\\\"\"" to LocalSearchFilters(network = "Work \"IRC\""),
+                        "from:alice from:bob" to LocalSearchFilters(senders = listOf("alice", "bob")),
+                    )
+                for ((query, filters) in cases) {
+                    repo.emit("", BUFFER_ID, emptyList(), filters = filters)
+                    vm.onQueryChange(query)
+                    vm.onServerSearchSubmit()
+                    val fallback = awaitStateWhere { it.rawQuery == query && it.coverage != null && !it.searching }
+                    assertEquals(SearchScope.SERVER, fallback.scope)
+                    assertEquals(ServerSearchState.Idle, fallback.server)
+                    assertEquals(SearchRequest("", BUFFER_ID, filters), repo.calls.last())
+                }
+                assertEquals(1, connections.requests.size)
+                cancelAndIgnoreRemainingEvents()
+            }
         }
 
     @Test
@@ -841,32 +878,69 @@ class SearchViewModelTest {
         }
 
     @Test
-    fun truncation_survives_the_client_side_from_filter() =
+    fun structuredSearchRoutesTextAndFiltersBeforeGroupingWithoutWideningScope() =
         runTest {
-            val repo =
-                FakeSearchRepository(
-                    listOf(hit(1, "coroutine builder", sender = "alice"), hit(2, "coroutines", sender = "bob")),
-                    truncated = true,
-                )
-            val vm = viewModel(repo)
+            val repo = ControlledSearchRepository()
+            val buffers = FakeBufferRepository(buffer(), listOf(chatListRow(8, "#release")))
+            val vm = viewModel(repo, buffers).also { it.init(BUFFER_ID) }
+            val query = "release in:#kotlin on:\"Work IRC\" from:alice from:bob"
+            val filters = LocalSearchFilters(room = "#kotlin", network = "Work IRC", senders = listOf("alice", "bob"))
+            val hits = listOf(hit(BUFFER_ID, "release", sender = "ALICE"), hit(BUFFER_ID, "new release", sender = "bob"))
+            repo.emit("release", BUFFER_ID, hits, truncated = true, filters = filters)
+            repo.emit("release", null, hits, truncated = true, filters = filters)
 
             vm.state.test {
-                vm.onQueryChange("coroutine from:bob")
-                runCurrent()
-                advanceTimeBy(300)
-                val results = awaitStateWhere { it.groups.isNotEmpty() }
-                assertEquals(
-                    "bob",
-                    results.groups
-                        .single()
-                        .hits
-                        .single()
-                        .message.sender,
-                )
-                assertTrue("filtering fewer rows does not un-truncate the page", results.truncated)
+                awaitStateWhere { it.scope == SearchScope.CURRENT }
+                vm.onQueryChange(query)
+                val current = awaitStateWhere { it.groups.isNotEmpty() }
+                assertEquals(SearchRequest("release", BUFFER_ID, filters), repo.calls.single())
+                assertEquals(hits, current.groups.single().hits)
+                assertTrue(current.truncated)
+
+                vm.onScopeChange(SearchScope.ALL)
+                val global = awaitStateWhere { it.scope == SearchScope.ALL && it.groups.isNotEmpty() }
+                assertEquals(SearchRequest("release", null, filters), repo.calls.last())
+                assertTrue(global.bufferMatches.isEmpty())
+                assertEquals(0, buffers.chatListCollections)
                 cancelAndIgnoreRemainingEvents()
             }
         }
+
+    @Test
+    fun parserSeparatesStructuredFiltersFromLiteralText() {
+        val parsed = parseSearchQuery(" release\tIN:\"#dev team\" ON:\"Work IRC\" from:Alice FROM:bob from:Alice #literal topic:keep ")
+        assertEquals("release #literal topic:keep", parsed.text)
+        assertEquals(LocalSearchFilters("#dev team", "Work IRC", listOf("Alice", "bob")), parsed.filters)
+        assertTrue(parseSearchQuery(" \t").isEmpty)
+        assertTrue(!parseSearchQuery("from:alice").isEmpty)
+    }
+
+    @Test
+    fun parserKeepsMalformedRepeatedAndUnknownTermsAsText() {
+        val raw = "in:#first in:#second on:Primary on:\"Other Network\" on:\"\" in: from: from:\"two nicks\" \"from:literal\" x:123 on:\"unfinished from:also-literal"
+        val parsed = parseSearchQuery(raw)
+        assertEquals(LocalSearchFilters("#first", "Primary"), parsed.filters)
+        assertEquals(
+            "in:#second on:\"Other Network\" on:\"\" in: from: from:\"two nicks\" \"from:literal\" x:123 on:\"unfinished from:also-literal",
+            parsed.text,
+        )
+    }
+
+    @Test
+    fun parserKeepsEmbeddedQuotesLiteralAndDecodesQuotedFilterEscapes() {
+        val literal = """size 6" in:#bad"suffix "from:literal" on:"Bad"suffix topic:"keep from:charlie literal" #literal"""
+        val parsed = parseSearchQuery("""$literal from:al\ice on:"Work \"IRC\" \\" in:"#dev\team" """)
+        assertEquals(literal, parsed.text)
+        assertEquals(LocalSearchFilters("#dev\\team", "Work \"IRC\" \\", listOf("al\\ice")), parsed.filters)
+    }
+
+    @Test
+    fun parserOnlyRecognizesAsciiCaseVariantsOfQualifiers() {
+        val literal = """ın:#ops İN:#ops İN:"from:charlie stays literal" #literal"""
+        val parsed = parseSearchQuery("$literal In:#team")
+        assertEquals(literal, parsed.text)
+        assertEquals(LocalSearchFilters(room = "#team"), parsed.filters)
+    }
 
     @Test
     fun clear_immediately_removes_results_and_ignores_late_results() =

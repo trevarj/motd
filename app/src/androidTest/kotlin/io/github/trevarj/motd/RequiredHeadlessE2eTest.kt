@@ -52,6 +52,7 @@ import io.github.trevarj.motd.attachment.AttachmentPrefsImpl
 import io.github.trevarj.motd.attachment.forBackend
 import io.github.trevarj.motd.audio.VoiceSendProgress
 import io.github.trevarj.motd.audio.VoiceSendRequest
+import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObfsMode
 import io.github.trevarj.motd.data.db.TimelineAnchor
@@ -1010,6 +1011,7 @@ class RequiredHeadlessE2eTest {
             awaitWhileComposing("baseline chat read through tail for buffer=$bufferId", probeTimeoutMs = 20_000) {
                 awaitMarkerAtLeast(bootstrap, bufferId, tail.anchor())
             }
+            exerciseStructuredSearch(bootstrap, network, keyword, word)
             requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
             chats.awaitTag("chatlist_row_$bufferId")
             val keywordRow = "activity_row_${keyword.id}"
@@ -1038,6 +1040,65 @@ class RequiredHeadlessE2eTest {
                 preferences.setKeywordHighlightRules(original.keywordHighlightRules)
                 preferences.setMentionsPlacement(original.mentionsPlacement)
                 preferences.setMentionsEnabled(original.mentionsEnabled)
+            }
+        }
+    }
+
+    private fun exerciseStructuredSearch(
+        bootstrap: E2eBootstrap,
+        network: BootstrappedNetwork,
+        message: MessageEntity,
+        term: String,
+    ) {
+        val resources = InstrumentationRegistry.getInstrumentation().targetContext.resources
+        val networks = bootstrap.seams.networks()
+        val networkName = "Hosted IRC search"
+        val otherText = "$term from a different fixture sender"
+        FixtureIrcClient.connect(bootstrap.args).use { peer ->
+            peer.sendMessage(bootstrap.args.channel, otherText)
+            peer.flushThroughServer("structured-search-peer")
+        }
+        val other =
+            runBlocking {
+                MessageLifecycleProbe(bootstrap.seams.search(), milestones).awaitCanonicalFromAnySender(otherText, message.bufferId)
+            }
+        assertTrue(message.sender != other.sender)
+        val originalName =
+            runBlocking {
+                val record = requireNotNull(networks.networkById(network.childId))
+                networks.updateNetwork(record.copy(name = networkName))
+                record.name
+            }
+        try {
+            val search = ChatRobot(compose)
+            val timeline = TimelineRobot(compose)
+            val result = "search_result_${message.msgid ?: message.id}"
+            compose.onNode(hasContentDescription(resources.getString(R.string.chat_search))).assertIsDisplayed().performClick()
+            search.awaitTag("search_field")
+            search.replace("search_field", "$term in:#elsewhere-$term")
+            compose.waitUntil("A conflicting room has no local matches", 10_000) {
+                runCatching {
+                    compose.onNodeWithText(resources.getString(R.string.search_empty_title)).assertIsDisplayed()
+                }.isSuccess
+            }
+            search.awaitTagGone(result)
+            val query = "$term in:${bootstrap.args.channel} on:\"$networkName\" from:${message.sender} from:${other.sender}"
+            search.replace("search_field", query)
+            search.awaitTag("search_result_${other.msgid ?: other.id}")
+            search.awaitTag(result)
+            search.click(result)
+            timeline.awaitTag("chat_timeline")
+            timeline.awaitEntryVeilLifted()
+            timeline.assertMessageVisible(message.tag())
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            search.awaitTag("search_field")
+            compose.onNode(hasContentDescription(resources.getString(R.string.onboarding_back))).assertIsDisplayed().performClick()
+            timeline.awaitTag("chat_timeline")
+            milestones.record("structured_search_origin_visible", "buffer=${message.bufferId} event=${message.id}")
+        } finally {
+            runBlocking {
+                val record = requireNotNull(networks.networkById(network.childId))
+                networks.updateNetwork(record.copy(name = originalName))
             }
         }
     }

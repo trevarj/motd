@@ -24,11 +24,14 @@ import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performImeAction
 import androidx.compose.ui.test.performKeyInput
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToIndex
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextClearance
@@ -294,6 +297,79 @@ class SearchScreenUiTest {
                 assertEquals(0, searchSubmissions)
             }
         }
+    }
+
+    @Test
+    fun filterHelpAndServerFallbackExposeTheExactLocalHit() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val query = "on:\"Work IRC\" from:alice from:bob"
+        val first = hit(71, null, "duplicate body")
+        val selected = hit(72, null, "duplicate body")
+        var state by mutableStateOf(SearchUiState(scope = SearchScope.SERVER, hasBufferScope = true, serverSearchAvailable = true))
+        val opened = mutableListOf<SearchHit>()
+        var serverSubmissions = 0
+        compose.setContent {
+            MotdTheme {
+                SearchContent(
+                    state,
+                    onQueryChange = { raw ->
+                        state = state.copy(rawQuery = raw, groups = if (raw == query) groupHits(listOf(first, selected)) else emptyList())
+                    },
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = { opened += it },
+                    onServerSearchSubmit = { serverSubmissions++ },
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(context.getString(R.string.search_filter_help)).assertIsDisplayed().performClick()
+        val examples = compose.onNodeWithText("on:\"Work IRC\"", substring = true).assertIsDisplayed()
+        examples.assertTextEquals(context.getString(R.string.search_filter_help_examples))
+        compose.onNodeWithText(context.getString(R.string.action_ok)).performClick()
+
+        val field = compose.onNodeWithTag("search_field")
+        field.performClick().performTextInput(query)
+        compose.onNodeWithTag("search_coverage_notice").assertTextEquals(context.getString(R.string.search_filters_local))
+        compose.onNodeWithText(context.getString(R.string.search_server_prompt_title)).assertDoesNotExist()
+        field.performImeAction()
+
+        compose.onNodeWithTag("search_result_72").assertIsDisplayed().performClick()
+        compose.runOnIdle {
+            assertEquals(0, serverSubmissions)
+            assertEquals(listOf(selected), opened)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "w320dp-h360dp", fontScale = 2f)
+    fun filterHelpScrollsAtLargeFontInAShortWindow() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        compose.setContent {
+            MotdTheme {
+                SearchContent(
+                    state = SearchUiState(),
+                    onQueryChange = {},
+                    onScopeChange = {},
+                    onBack = {},
+                    onOpenHit = {},
+                )
+            }
+        }
+
+        compose.onNodeWithContentDescription(context.getString(R.string.search_filter_help)).performClick()
+        val body = compose.onNodeWithTag("search_filter_help_body")
+        val scroll = body.fetchSemanticsNode().config[SemanticsProperties.VerticalScrollAxisRange]
+        assertTrue(scroll.maxValue() > 0f)
+        val before = scroll.value()
+        val usage = compose.onNodeWithText(context.getString(R.string.search_filter_help_usage))
+        usage.performScrollTo().assertIsDisplayed()
+        assertTrue(scroll.value() > before)
+        val layouts = mutableListOf<TextLayoutResult>()
+        usage.performSemanticsAction(SemanticsActions.GetTextLayoutResult) { it(layouts) }
+        val layout = layouts.single()
+        assertEquals(2f, layout.layoutInput.density.fontScale, 0f)
+        compose.onNodeWithText(context.getString(R.string.action_ok)).assertIsDisplayed().performClick()
     }
 
     @Test
@@ -695,7 +771,7 @@ class SearchScreenUiTest {
 
     private fun hit(
         id: Long,
-        msgid: String,
+        msgid: String?,
         text: String,
         sender: String = "alice",
         bufferDisplayName: String = "#kotlin",

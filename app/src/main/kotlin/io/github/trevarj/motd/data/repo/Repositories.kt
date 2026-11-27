@@ -391,7 +391,7 @@ fun interface ChatHistoryMediatorFactory {
 /** Local FTS results plus the honesty metadata the screen must disclose. */
 data class LocalSearchResult(
     val hits: List<SearchHit>,
-    /** True when the raw FTS page hit the DAO's 200-row cap, measured BEFORE visibility filtering. */
+    /** True when the SQL page hit its 200-row cap, measured before visibility filtering. */
     val truncated: Boolean,
 )
 
@@ -410,12 +410,22 @@ sealed interface SearchCoverage {
     ) : SearchCoverage
 }
 
+data class LocalSearchFilters(
+    val room: String? = null,
+    val network: String? = null,
+    val senders: List<String> = emptyList(),
+) {
+    val isEmpty: Boolean
+        get() = room == null && network == null && senders.isEmpty()
+}
+
 interface SearchRepository {
     val visibility: Flow<MessageVisibilitySpec>
 
     fun search(
         query: String,
         bufferId: Long?,
+        filters: LocalSearchFilters = LocalSearchFilters(),
     ): Flow<LocalSearchResult>
 
     /** Coverage for the given scope; null bufferId means the all-buffers scope. */

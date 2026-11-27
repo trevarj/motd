@@ -292,6 +292,8 @@ class PushInstanceCoordinatorTest {
 
         override suspend fun allNow(): List<NetworkEntity> = flow.value
 
+        override suspend fun names(): List<String> = flow.value.map(NetworkEntity::name).distinct()
+
         override suspend fun maxOrdering(): Int = flow.value.maxOfOrNull { it.ordering } ?: -1
 
         override suspend fun idsInOrder(): List<Long> = flow.value.map { it.id }

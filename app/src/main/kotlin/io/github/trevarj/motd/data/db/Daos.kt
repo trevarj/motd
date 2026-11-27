@@ -11,6 +11,7 @@ import androidx.room.RoomRawQuery
 import androidx.room.SkipQueryVerification
 import androidx.room.Transaction
 import androidx.room.Update
+import androidx.sqlite.db.SimpleSQLiteQuery
 import androidx.sqlite.db.SupportSQLiteQuery
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
@@ -18,6 +19,7 @@ import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.repo.SUPPRESS_NOTIFICATIONS
 import io.github.trevarj.motd.data.repo.SUPPRESS_UNREAD
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import kotlinx.coroutines.flow.Flow
 
 internal const val PENDING_CHAT_PLACEMENT_PREFIX = "pending-chat-placement:"
@@ -26,6 +28,158 @@ internal const val CHAT_WALLPAPER_EDIT_PREFIX = "chat-wallpaper-edit"
 
 private const val CHAT_WALLPAPER_ROWS =
     "type IN ('CHANNEL', 'QUERY') AND redirectToRoomId IS NULL AND wallpaperOverrideEncoded IS NOT NULL"
+
+internal const val LOCAL_MESSAGE_SEARCH_LIMIT = 200
+
+private const val SEARCH_PROJECTION =
+    """SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName,
+              b.type AS bufferType, b.networkId AS networkId, b.avatarOverrideModel AS avatarOverrideModel,
+              ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes
+       FROM messages m"""
+private const val SEARCH_FTS_JOIN = "JOIN messages_fts f ON m.id = f.rowid"
+private const val SEARCH_ROOMS =
+    """JOIN buffers b ON b.id = m.bufferId
+       JOIN networks n ON n.id = b.networkId
+       LEFT JOIN network_identity ni ON ni.networkId = b.networkId"""
+private const val SEARCH_CANONICAL_BUFFER = "(SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = "
+private const val SEARCH_KINDS = "m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')"
+private const val SEARCH_TIME_ORDER = "ORDER BY m.serverTime DESC"
+private const val SEARCH_ID_LIMIT = "m.id DESC LIMIT $LOCAL_MESSAGE_SEARCH_LIMIT"
+
+internal fun filteredMessageSearchQuery(
+    match: String,
+    bufferId: Long?,
+    room: String?,
+    networkNames: Set<String>?,
+    senders: List<String>,
+): SupportSQLiteQuery {
+    val args = ArrayList<Any>()
+
+    fun bind(value: Any): String {
+        args += value
+        return "?${args.size}"
+    }
+    val sql =
+        buildString {
+            appendLine(SEARCH_PROJECTION)
+            if (match.isNotEmpty()) appendLine(SEARCH_FTS_JOIN)
+            appendLine(SEARCH_ROOMS)
+            append("WHERE $SEARCH_KINDS")
+            if (match.isNotEmpty()) append(" AND f.messages_fts MATCH ${bind(match)}")
+            if (bufferId != null) {
+                val scope = bind(bufferId)
+                append(" AND m.bufferId = COALESCE($SEARCH_CANONICAL_BUFFER$scope), $scope)")
+            }
+            val networkKeys = networkNames?.let { bind(packSearchKeys(it)) }
+            if (networkKeys != null) append(" AND ${searchKeyIn(networkKeys, "n.name")}")
+            if (room != null) {
+                append(" AND m.bufferId IN (${searchRoomIds(bind(room), networkKeys)})")
+            }
+            if (senders.isNotEmpty()) {
+                val unique = senders.toCollection(HashSet())
+
+                fun packed(mapping: IrcCaseMapping): String = bind(packSearchKeys(unique.mapTo(HashSet(), mapping::normalize)))
+                val keys =
+                    "CASE $SEARCH_CASEMAPPING " +
+                        "WHEN 'rfc1459' THEN ${packed(IrcCaseMapping.Rfc1459)} " +
+                        "WHEN 'rfc1459-strict' THEN ${packed(IrcCaseMapping.Rfc1459Strict)} " +
+                        "ELSE ${packed(IrcCaseMapping.Ascii)} END"
+                append(" AND ${searchKeyIn(keys, searchIrcFold("m.sender"))}")
+            }
+            appendLine()
+            append("$SEARCH_TIME_ORDER, ")
+            if (bufferId != null) append("m.timelineOrder DESC, ")
+            append(SEARCH_ID_LIMIT)
+        }
+    return SimpleSQLiteQuery(sql, args.toTypedArray())
+}
+
+private const val SEARCH_CASEMAPPING = "COALESCE(ni.caseMapping, 'rfc1459') COLLATE NOCASE"
+
+/** Resolve the qualifier once per network, before reading any candidate messages. */
+private fun searchRoomIds(
+    room: String,
+    networkKeys: String?,
+): String {
+    val mapping = "COALESCE(ri.caseMapping, 'rfc1459') COLLATE NOCASE"
+    val key = searchIrcFold(room, mapping)
+    val name = searchIrcFold("requested.name", mapping)
+    val display = searchIrcFold("requested.displayName", mapping)
+    val alias = searchIrcFold("a.value", mapping)
+    val networks = if (networkKeys == null) "" else "WHERE ${searchKeyIn(networkKeys, "rn.name")}"
+    // Match BufferStore's exact normalized alias before considering historical refolded keys.
+    // For equally exact nick aliases, the active verified nick wins over a provisional nick.
+    // Without an alias, use the legacy room key (which may redirect) then canonical display.
+    return """
+        SELECT COALESCE(
+            (SELECT canonical.id
+             FROM room_aliases a
+             JOIN buffers requested ON requested.id = a.roomId
+             JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id)
+             LEFT JOIN network_identity ri ON ri.networkId = a.networkId
+             WHERE a.networkId = rn.id AND canonical.networkId = rn.id AND $alias = $key
+               AND ((canonical.type = 'CHANNEL' AND a.namespace = 'CHANNEL')
+                 OR (canonical.type = 'QUERY' AND a.namespace IN ('VERIFIED_NICK', 'PROVISIONAL_NICK'))
+                 OR (canonical.type = 'SERVER' AND a.namespace = 'LEGACY_NAME'))
+             ORDER BY (a.value = $key) DESC,
+                      CASE a.namespace WHEN 'CHANNEL' THEN 0 WHEN 'VERIFIED_NICK' THEN 1
+                                       WHEN 'PROVISIONAL_NICK' THEN 2 ELSE 3 END,
+                      a.id
+             LIMIT 1),
+            (SELECT canonical.id
+             FROM buffers requested
+             JOIN buffers canonical ON canonical.id = COALESCE(requested.redirectToRoomId, requested.id)
+             LEFT JOIN network_identity ri ON ri.networkId = requested.networkId
+             WHERE requested.networkId = rn.id AND canonical.networkId = rn.id
+               AND ((instr(requested.name, char(0)) = 0 AND $name = $key)
+                 OR (requested.redirectToRoomId IS NULL AND $display = $key))
+             ORDER BY CASE WHEN requested.name = $key THEN 0 WHEN $name = $key THEN 1 ELSE 2 END,
+                      canonical.id
+             LIMIT 1)
+        )
+        FROM networks rn
+        $networks
+        """
+}
+
+private fun searchIrcFold(
+    value: String,
+    mapping: String = SEARCH_CASEMAPPING,
+): String {
+    val brackets = """replace(replace(replace($value, '[', '{'), ']', '}'), '\', '|')"""
+    val mapped =
+        "CASE $mapping WHEN 'rfc1459' THEN replace($brackets, '~', '^') " +
+            "WHEN 'rfc1459-strict' THEN $brackets ELSE $value END"
+    // Android SQLite can use ICU lower(). Only use it on ASCII, pre-folding Turkish-sensitive I.
+    // For mixed identifiers replace ASCII letters explicitly without changing other code points.
+    return """
+        CASE
+            WHEN length($value) = length(CAST($value AS BLOB)) THEN lower(replace($mapped, 'I', 'i'))
+            WHEN $value NOT GLOB '*[A-Z]*' THEN $mapped
+            ELSE (
+                WITH RECURSIVE ascii_fold(letter, folded) AS (
+                    SELECT 65, $mapped
+                    UNION ALL
+                    SELECT letter + 1, replace(folded, char(letter), char(letter + 32))
+                    FROM ascii_fold WHERE letter <= 90
+                )
+                SELECT folded FROM ascii_fold WHERE letter = 91
+            )
+        END
+        """
+}
+
+// Hex has no commas, so membership is exact and each set uses one bind even for huge sender lists.
+// Avoid JSON1: not all supported Android SQLite versions include it.
+private fun packSearchKeys(keys: Set<String>): String =
+    keys.joinToString(separator = ",", prefix = ",", postfix = ",") {
+        it.encodeToByteArray().toHexString(HexFormat.UpperCase)
+    }
+
+private fun searchKeyIn(
+    packedKeys: String,
+    value: String,
+): String = "instr($packedKeys, ',' || hex($value) || ',') > 0"
 
 // Room is the authoritative boundary for fixed persistence queries. Prefer typed entity or
 // projection methods here; keep raw SQL at callers only when predicates are genuinely dynamic.
@@ -37,6 +191,9 @@ interface NetworkDao {
     // list is never at the mercy of SQLite's arbitrary resolution of an all-ties sort.
     @Query("SELECT * FROM networks ORDER BY ordering, id")
     fun observeAll(): Flow<List<NetworkEntity>>
+
+    @Query("SELECT DISTINCT name FROM networks")
+    suspend fun names(): List<String>
 
     @Query("SELECT * FROM networks WHERE id = :id")
     fun observeById(id: Long): Flow<NetworkEntity?>
@@ -1875,28 +2032,25 @@ interface MessageDao {
         after: Long,
     ): Long?
 
-    // FTS4 external-content search over (text, sender). :query is already sanitized (each token
-    // quoted + prefixed with *) by SearchRepository. Chat kinds only; optional buffer scope.
+    // FTS4 external-content search over (text, sender). The repository binds a sanitized prefix query.
     @Query(
         """
-        SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName,
-               b.type AS bufferType, b.networkId AS networkId, b.avatarOverrideModel AS avatarOverrideModel,
-               ni.caseMapping AS caseMapping, ni.chanTypes AS chanTypes
-        FROM messages m
-        JOIN messages_fts f ON m.id = f.rowid
-        JOIN buffers b ON b.id = m.bufferId
-        JOIN networks n ON n.id = b.networkId
-        LEFT JOIN network_identity ni ON ni.networkId = b.networkId
+        $SEARCH_PROJECTION
+        $SEARCH_FTS_JOIN
+        $SEARCH_ROOMS
         WHERE f.messages_fts MATCH :query
-          AND (:bufferId IS NULL OR m.bufferId = COALESCE(
-              (SELECT COALESCE(redirectToRoomId, id) FROM buffers WHERE id = :bufferId),
-              :bufferId
-          ))
-          AND m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-        ORDER BY m.serverTime DESC LIMIT 200
+          AND (:bufferId IS NULL OR m.bufferId = COALESCE($SEARCH_CANONICAL_BUFFER:bufferId), :bufferId))
+          AND $SEARCH_KINDS
+        $SEARCH_TIME_ORDER, CASE WHEN :bufferId IS NOT NULL THEN m.timelineOrder END DESC, $SEARCH_ID_LIMIT
         """,
     )
-    fun search(query: String, bufferId: Long?): Flow<List<SearchHit>> // @Query over messages_fts MATCH
+    fun search(
+        query: String,
+        bufferId: Long?,
+    ): Flow<List<SearchHit>>
+
+    @RawQuery
+    suspend fun searchFiltered(query: SupportSQLiteQuery): List<SearchHit>
 
     @Query(
         """SELECT m.sender, m.text, m.serverTime, m.isSelf

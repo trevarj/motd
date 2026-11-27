@@ -8,6 +8,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.ChatListRow
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.repo.BufferRepository
+import io.github.trevarj.motd.data.repo.LocalSearchFilters
 import io.github.trevarj.motd.data.repo.SearchCoverage
 import io.github.trevarj.motd.data.repo.SearchRepository
 import io.github.trevarj.motd.irc.client.IrcCommandException
@@ -119,32 +120,91 @@ data class SearchUiState(
             .MessageVisibilitySpec(),
 )
 
-/**
- * Parsed query: the FTS text and an optional client-side `from:nick` sender filter.
- * Pure so it is trivially testable and keeps the ViewModel thin.
- */
+/** Free text and exact structured filters, parsed before querying either corpus. */
 data class ParsedQuery(
     val text: String,
-    val fromNick: String?,
-)
+    val filters: LocalSearchFilters,
+) {
+    val isEmpty: Boolean get() = text.isBlank() && filters.isEmpty
 
-fun parseSearchQuery(raw: String): ParsedQuery {
-    val tokens = raw.trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
-    var fromNick: String? = null
-    val rest = mutableListOf<String>()
-    for (t in tokens) {
-        val lower = t.lowercase()
-        if (lower.startsWith("from:") && t.length > 5) {
-            fromNick = t.substring(5)
-        } else {
-            rest.add(t)
-        }
-    }
-    return ParsedQuery(text = rest.joinToString(" "), fromNick = fromNick)
+    // The wire targets only the current IRC conversation and supports at most one sender.
+    val requiresLocalSearch: Boolean
+        get() = filters.room != null || filters.network != null || filters.senders.size > 1
+
+    val matchesBufferNames: Boolean get() = filters.isEmpty && text.isNotBlank()
 }
 
-/** True when [raw] contains no FTS text or sender-only filter to resolve. */
-fun isEmptySearchQuery(raw: String): Boolean = parseSearchQuery(raw).let { it.text.isBlank() && it.fromNick == null }
+fun parseSearchQuery(raw: String): ParsedQuery {
+    var room: String? = null
+    var network: String? = null
+    val senders = mutableListOf<String>()
+    val text = StringBuilder()
+    var end = 0
+    while (end < raw.length) {
+        if (raw[end].isWhitespace()) {
+            end++
+            continue
+        }
+        val start = end
+        // Unknown qualifier-shaped prefixes still protect their quoted values as literal text.
+        while (end < raw.length && (raw[end].isLetterOrDigit() || raw[end] == '_' || raw[end] == '-')) end++
+        val hasPrefix = raw[start].isLetter() && raw.getOrNull(end) == ':'
+        val prefixLength = end - start
+        val qualifier =
+            when {
+                !hasPrefix || prefixLength !in 2..4 -> ""
+                (start until end).any { raw[it] !in 'A'..'Z' && raw[it] !in 'a'..'z' } -> ""
+                prefixLength == 2 && raw.regionMatches(start, "in", 0, 2, ignoreCase = true) -> "in"
+                prefixLength == 2 && raw.regionMatches(start, "on", 0, 2, ignoreCase = true) -> "on"
+                prefixLength == 4 && raw.regionMatches(start, "from", 0, 4, ignoreCase = true) -> "from"
+                else -> ""
+            }
+        val valueStart = if (hasPrefix) end + 1 else start
+        if (hasPrefix) end = valueStart
+        val quoted = raw.getOrNull(valueStart) == '"'
+        var argument: String? = null
+        if (quoted) {
+            val value = if (qualifier == "in" || qualifier == "on") StringBuilder() else null
+            end = valueStart + 1
+            while (end < raw.length && raw[end] != '"') {
+                // Only quotes and backslashes are escapable; other backslashes are literal.
+                if (raw[end] == '\\' && (raw.getOrNull(end + 1) == '"' || raw.getOrNull(end + 1) == '\\')) end++
+                value?.append(raw[end])
+                end++
+            }
+            if (end < raw.length) {
+                end++
+                // A closing quote must end the token, or the whole token remains literal.
+                if (end == raw.length || raw[end].isWhitespace()) argument = value?.toString()
+            }
+        }
+        while (end < raw.length && !raw[end].isWhitespace()) end++
+        if (!quoted && qualifier.isNotEmpty()) {
+            argument = raw.substring(valueStart, end).takeUnless { '"' in it }
+        }
+        if (!argument.isNullOrBlank()) {
+            when {
+                qualifier == "in" && room == null -> {
+                    room = argument
+                    continue
+                }
+
+                qualifier == "on" && network == null -> {
+                    network = argument
+                    continue
+                }
+
+                qualifier == "from" -> {
+                    if (argument !in senders) senders += argument
+                    continue
+                }
+            }
+        }
+        if (text.isNotEmpty()) text.append(' ')
+        text.append(raw, start, end)
+    }
+    return ParsedQuery(text.toString(), LocalSearchFilters(room, network, senders))
+}
 
 /** One logical result request. Results from an older key must never render under a newer one. */
 private data class SearchKey(
@@ -152,6 +212,10 @@ private data class SearchKey(
     val scope: SearchScope = SearchScope.ALL,
     val bufferId: Long? = null,
 ) {
+    val parsed = parseSearchQuery(rawQuery)
+    val usesServer: Boolean get() = scope == SearchScope.SERVER && !parsed.requiresLocalSearch
+    val localBufferId: Long? get() = bufferId.takeUnless { scope == SearchScope.ALL }
+
     fun emptyState() =
         SearchUiState(
             rawQuery = rawQuery,
@@ -164,8 +228,7 @@ private data class SearchKey(
 
 private fun SearchKey.pendingState(): SearchUiState =
     when {
-        scope == SearchScope.SERVER -> emptyState()
-        isEmptySearchQuery(rawQuery) -> emptyState()
+        usesServer || parsed.isEmpty -> emptyState()
         else -> loadingState()
     }
 
@@ -188,6 +251,7 @@ private data class KeyedBufferMatches(
 /** Availability plus the transient server-search result, kept outside the keyed local pipeline. */
 private data class ServerSection(
     val available: Boolean = false,
+    val key: SearchKey? = null,
     val state: ServerSearchState = ServerSearchState.Idle,
 )
 
@@ -250,21 +314,20 @@ class SearchViewModel
 
         fun onServerSearchSubmit() {
             val key = searchInput.value.key
-            if (key.scope != SearchScope.SERVER) return
+            if (!key.usesServer) return
             val buffer =
                 serverBuffer ?: run {
-                    serverSection.update { it.copy(state = ServerSearchState.Failed(ServerSearchError.UNAVAILABLE)) }
+                    serverSection.update { it.copy(key = key, state = ServerSearchState.Failed(ServerSearchError.UNAVAILABLE)) }
                     return
                 }
-            val parsed = parseSearchQuery(key.rawQuery)
-            val text = parsed.text.takeIf { it.isNotBlank() }
-            if (text == null && parsed.fromNick == null) {
+            val text = key.parsed.text.takeIf { it.isNotBlank() }
+            if (key.parsed.isEmpty) {
                 cancelServerSearch()
                 return
             }
             cancelServerSearch()
             val generation = ++serverGeneration
-            serverSection.update { it.copy(state = ServerSearchState.Searching) }
+            serverSection.update { it.copy(key = key, state = ServerSearchState.Searching) }
             serverJob =
                 viewModelScope.launch {
                     val outcome =
@@ -275,7 +338,9 @@ class SearchViewModel
                                     SearchRequest(
                                         target = buffer.name,
                                         text = text,
-                                        from = parsed.fromNick,
+                                        from =
+                                            key.parsed.filters.senders
+                                                .singleOrNull(),
                                         limit = SOJU_SEARCH_MAX_LIMIT,
                                     ),
                                 )?.let { raw -> raw.toResults(buffer, generation) }
@@ -328,7 +393,7 @@ class SearchViewModel
             serverGeneration++
             serverJob?.cancel()
             serverJob = null
-            serverSection.update { it.copy(state = ServerSearchState.Idle) }
+            serverSection.update { it.copy(key = null, state = ServerSearchState.Idle) }
         }
 
         @OptIn(ExperimentalCoroutinesApi::class)
@@ -337,14 +402,13 @@ class SearchViewModel
                 .flatMapLatest { key ->
                     val states =
                         when {
-                            key.scope == SearchScope.SERVER -> {
+                            key.usesServer -> {
                                 flowOf(key.emptyState())
                             }
 
-                            isEmptySearchQuery(key.rawQuery) -> {
-                                val scopeId = if (key.scope == SearchScope.CURRENT) key.bufferId else null
+                            key.parsed.isEmpty -> {
                                 searchRepository
-                                    .coverage(scopeId)
+                                    .coverage(key.localBufferId)
                                     .map { coverage -> key.emptyState().copy(coverage = coverage) }
                             }
 
@@ -357,22 +421,18 @@ class SearchViewModel
 
         private fun keywordState(key: SearchKey): Flow<SearchUiState> =
             flow {
-                val parsed = parseSearchQuery(key.rawQuery)
-                val scopeId = if (key.scope == SearchScope.CURRENT) key.bufferId else null
+                val parsed = key.parsed
+                val scopeId = key.localBufferId
                 emit(key.loadingState())
                 delay(QUERY_DEBOUNCE_MS)
                 combine(
-                    searchRepository.search(parsed.text, scopeId),
+                    searchRepository.search(parsed.text, scopeId, parsed.filters),
                     searchRepository.coverage(scopeId),
                 ) { result, coverage -> result to coverage }.collect { (result, coverage) ->
                     if (searchInput.value.key == key) {
-                        val filtered =
-                            parsed.fromNick?.let { nick ->
-                                result.hits.filter { it.message.sender.equals(nick, ignoreCase = true) }
-                            } ?: result.hits
                         emit(
                             key.emptyState().copy(
-                                groups = groupHits(filtered),
+                                groups = groupHits(result.hits),
                                 coverage = coverage,
                                 truncated = result.truncated,
                             ),
@@ -384,8 +444,8 @@ class SearchViewModel
         @OptIn(ExperimentalCoroutinesApi::class)
         private val bufferMatches: Flow<KeyedBufferMatches> =
             searchKeys.flatMapLatest { key ->
-                val query = parseSearchQuery(key.rawQuery).text
-                if (key.scope != SearchScope.ALL || query.isBlank()) {
+                val query = key.parsed.text
+                if (key.scope != SearchScope.ALL || !key.parsed.matchesBufferNames) {
                     flowOf(KeyedBufferMatches(key))
                 } else {
                     combine(
@@ -417,7 +477,7 @@ class SearchViewModel
                     bufferMatchesExpanded = match.key == current && match.expanded && input.bufferMatchesExpanded,
                     visibility = visibility,
                     serverSearchAvailable = server.available,
-                    server = if (local.scope == SearchScope.SERVER) server.state else ServerSearchState.Idle,
+                    server = if (current.usesServer && server.key == current) server.state else ServerSearchState.Idle,
                 )
             }.stateIn(
                 scope = viewModelScope,
@@ -428,7 +488,7 @@ class SearchViewModel
         fun setBufferMatchesExpanded(expanded: Boolean) {
             searchInput.update { input ->
                 if (input.bufferMatchesExpanded == expanded) return@update input
-                if (!expanded || (input.key.scope == SearchScope.ALL && parseSearchQuery(input.key.rawQuery).text.isNotBlank())) {
+                if (!expanded || (input.key.scope == SearchScope.ALL && input.key.parsed.matchesBufferNames)) {
                     input.copy(bufferMatchesExpanded = expanded)
                 } else {
                     input
@@ -449,6 +509,7 @@ class SearchViewModel
         }
 
         fun onScopeChange(scope: SearchScope) {
+            if (scope != SearchScope.ALL && searchInput.value.key.bufferId == null) return
             updateSearchKey { it.copy(scope = scope) }
             cancelServerSearch()
         }

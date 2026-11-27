@@ -38,6 +38,8 @@ class NetworkDedupTest {
             return rows.values.toList()
         }
 
+        override suspend fun names(): List<String> = rows.values.map(NetworkEntity::name).distinct()
+
         override suspend fun byId(id: Long): NetworkEntity? = rows[id]
 
         override fun observeById(id: Long): Flow<NetworkEntity?> = flowOf(rows[id])

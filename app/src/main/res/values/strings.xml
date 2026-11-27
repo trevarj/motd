@@ -698,6 +698,10 @@
     <!-- Search (WP8) -->
     <string name="search_hint">Search messages</string>
     <string name="search_clear">Clear search</string>
+    <string name="search_filter_help">Search filter help</string>
+    <string name="search_filter_help_examples">in:#kotlin — match a room.\non:\"Work IRC\" — match a network. Quote names with spaces. Inside quotes, use \\\" for a quote and \\\\ for a backslash.\nfrom:alice from:bob — match messages from either sender.</string>
+    <string name="search_filter_help_usage">Use filters on their own or add words from the message: release in:#kotlin from:alice.</string>
+    <string name="search_filters_local">The server can’t apply these filters. Searching only messages saved on this device for this conversation.</string>
     <string name="search_chip_all">All buffers</string>
     <string name="search_chip_current">This buffer</string>
     <string name="search_empty_title">No matches on this device</string>
@@ -719,7 +723,7 @@
     <string name="search_server_retry">Retry</string>
     <string name="search_server_truncated">The server limits results to 100 matches. Narrow the query to see the rest.</string>
     <string name="search_prompt_title">Search your history</string>
-    <string name="search_prompt_message">Type to search. Use from:nick to filter by sender.</string>
+    <string name="search_prompt_message">Type to search or open Search filter help for examples.</string>
     <string name="search_section_buffers">Channels &amp; DMs</string>
     <string name="search_buffer_matches_see_all">See all matching chats</string>
     <string name="search_buffer_matches_title">Matching chats</string>

@@ -29,12 +29,15 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.SearchOff
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -256,6 +259,7 @@ fun SearchContent(
     val keyboard = LocalSoftwareKeyboardController.current
     val setMatchesExpanded by rememberUpdatedState(onBufferMatchesExpandedChange)
     var matchesSheetOpen by remember(state.rawQuery, state.scope) { mutableStateOf(false) }
+    var filterHelpOpen by rememberSaveable { mutableStateOf(false) }
 
     fun closeMatchesSheet() {
         if (!matchesSheetOpen) return
@@ -270,6 +274,9 @@ fun SearchContent(
 
     // The ViewModel publishes a new key immediately, but Compose may render this local edit one
     // frame before the collected state advances. Never let that frame show old rows or highlights.
+    val parsed = remember(text.text) { parseSearchQuery(text.text) }
+    val serverLocalFallback = state.scope == SearchScope.SERVER && parsed.requiresLocalSearch
+    val showsServer = state.scope == SearchScope.SERVER && !serverLocalFallback
     val visibleState =
         if (text.text == state.rawQuery) {
             state
@@ -280,7 +287,8 @@ fun SearchContent(
                 bufferMatchesExpanded = false,
                 groups = emptyList(),
                 truncated = false,
-                searching = !isEmptySearchQuery(text.text),
+                searching = !parsed.isEmpty,
+                server = ServerSearchState.Idle,
             )
         }
 
@@ -294,6 +302,16 @@ fun SearchContent(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.onboarding_back))
+                    }
+                },
+                actions = {
+                    IconButton(
+                        onClick = {
+                            keyboard?.hide()
+                            filterHelpOpen = true
+                        },
+                    ) {
+                        Icon(Icons.Outlined.Info, contentDescription = stringResource(R.string.search_filter_help))
                     }
                 },
                 title = {
@@ -338,7 +356,7 @@ fun SearchContent(
                         keyboardActions =
                             KeyboardActions(
                                 onSearch = {
-                                    if (visibleState.scope == SearchScope.SERVER) onServerSearchSubmit()
+                                    if (showsServer) onServerSearchSubmit()
                                 },
                             ),
                         colors =
@@ -390,7 +408,8 @@ fun SearchContent(
                 }
             }
 
-            coverageNotice(visibleState)?.let { notice ->
+            val notice = if (serverLocalFallback) R.string.search_filters_local else coverageNotice(visibleState)
+            if (notice != null) {
                 Text(
                     text = stringResource(notice),
                     style = MaterialTheme.typography.labelSmall,
@@ -405,21 +424,23 @@ fun SearchContent(
             // Keyed on the pane's identity, never on the query or its rows, so debounce cycles
             // fade between panes while within-pane updates recompose in place without re-fading.
             Crossfade(
-                targetState = searchPane(visibleState),
+                targetState = searchPane(visibleState, showsServer),
                 animationSpec = MotdMotion.microFadeIn,
                 label = "search_pane",
                 modifier = Modifier.fillMaxSize(),
             ) { pane ->
                 when (pane) {
                     SearchPane.SERVER -> {
-                        ServerSearchSection(
-                            server = visibleState.server,
-                            visibility = visibleState.visibility,
-                            query = parseSearchQuery(visibleState.rawQuery).text,
-                            onRetry = onServerSearchSubmit,
-                            onOpenHit = onOpenServerHit,
-                            onTranslateHit = onTranslateServerHit,
-                        )
+                        if (showsServer) {
+                            ServerSearchSection(
+                                server = visibleState.server,
+                                visibility = visibleState.visibility,
+                                query = parsed.text,
+                                onRetry = onServerSearchSubmit,
+                                onOpenHit = onOpenServerHit,
+                                onTranslateHit = onTranslateServerHit,
+                            )
+                        }
                     }
 
                     SearchPane.PROMPT -> {
@@ -453,7 +474,7 @@ fun SearchContent(
                             bufferMatches = visibleState.bufferMatches,
                             visibility = visibleState.visibility,
                             groups = visibleState.groups,
-                            query = parseSearchQuery(visibleState.rawQuery).text,
+                            query = parsed.text,
                             truncated = visibleState.truncated,
                             onOpenHit = onOpenHit,
                             onOpenBufferMatch = onOpenBufferMatch,
@@ -475,6 +496,27 @@ fun SearchContent(
                 }
             }
         }
+    }
+
+    if (filterHelpOpen) {
+        AlertDialog(
+            onDismissRequest = { filterHelpOpen = false },
+            title = { Text(stringResource(R.string.search_filter_help)) },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()).testTag("search_filter_help_body"),
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                ) {
+                    Text(stringResource(R.string.search_filter_help_examples))
+                    Text(stringResource(R.string.search_filter_help_usage))
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { filterHelpOpen = false }, colors = readableTextButtonColors()) {
+                    Text(stringResource(R.string.action_ok))
+                }
+            },
+        )
     }
 
     if (matchesSheetOpen && text.text == state.rawQuery && state.scope == SearchScope.ALL) {
@@ -507,9 +549,12 @@ private enum class SearchPane {
 }
 
 /** Same precedence as the pane branches themselves; the crossfade keys on this. */
-private fun searchPane(state: SearchUiState): SearchPane =
+private fun searchPane(
+    state: SearchUiState,
+    showsServer: Boolean,
+): SearchPane =
     when {
-        state.scope == SearchScope.SERVER -> SearchPane.SERVER
+        showsServer -> SearchPane.SERVER
         state.rawQuery.isBlank() -> SearchPane.PROMPT
         state.searching -> SearchPane.SEARCHING
         state.groups.isEmpty() && state.bufferMatches.isEmpty() -> SearchPane.NO_RESULTS
