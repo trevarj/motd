@@ -92,7 +92,7 @@ class MessageNotificationIdCollisionTest {
             shadowOf(context as android.app.Application)
                 .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
             repo = DataStoreSettingsRepository(context)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
         }
 
     @After
@@ -384,7 +384,7 @@ class MessageNotificationIdCollisionTest {
                 object : SettingsRepository by repo {
                     override val notificationPreview = flowOf(NotificationPreview.FULL)
                 }
-            val current = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings)
+            val current = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, unusedConnections)
             current.onIncoming(networkId, bufferId, BufferType.QUERY, false, chat("current message"))
             current.onReplyFailed(bufferId, "current retry", SendRejectionReason.CONNECTION_UNAVAILABLE)
             current.onReplyDeliveryUncertain(17, "review only")
@@ -421,7 +421,7 @@ class MessageNotificationIdCollisionTest {
             postOld(transfer, MotdNotifications.CHANNEL_TRANSFERS)
             postOld(watchEnded, MotdNotifications.CHANNEL_MESSAGES)
 
-            MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, applicationScope = backgroundScope)
+            MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, unusedConnections, applicationScope = backgroundScope)
             testScheduler.runCurrent()
             assertEquals(keep + setOf(null to invite, null to transfer, null to watchEnded), shadowManager.activeNotifications.map { it.tag to it.id }.toSet())
         }
@@ -441,7 +441,7 @@ class MessageNotificationIdCollisionTest {
             post(5, MotdNotifications.CHANNEL_MENTIONS, "legacy-tag")
             db.appStateDao().insert(AppStateEntity("v10_notification_reset"))
 
-            MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, applicationScope = backgroundScope)
+            MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections, applicationScope = backgroundScope)
             db.invalidationTracker.createFlow("app_state").first { db.appStateDao().contains("v10_notification_reset") == 0 }
 
             assertEquals(

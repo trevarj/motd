@@ -1,7 +1,6 @@
 package io.github.trevarj.motd.ui.chat
 
 import android.app.DatePickerDialog
-import android.text.format.DateFormat
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,15 +46,9 @@ import androidx.compose.material3.SnackbarVisuals
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimeInput
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.TimePickerDialog
-import androidx.compose.material3.TimePickerDialogDefaults
-import androidx.compose.material3.TimePickerDisplayMode
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.material3.rememberModalBottomSheetState
-import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -73,8 +66,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -96,6 +87,7 @@ import io.github.trevarj.motd.data.db.ScheduledMessageState
 import io.github.trevarj.motd.data.db.isSchedulableMessage
 import io.github.trevarj.motd.irc.format.plainIrcText
 import io.github.trevarj.motd.ui.components.EffectModalBottomSheet
+import io.github.trevarj.motd.ui.components.LocalTimeDialog
 import io.github.trevarj.motd.ui.components.mircFormattedText
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
@@ -208,7 +200,7 @@ internal fun ScheduleMessageSheet(
         }
 
         SchedulePicker.Time -> {
-            ScheduledTimeDialog(time, onDismiss = { picker = null }, onConfirm = { hour, minute ->
+            LocalTimeDialog(time, "scheduled_time", onDismiss = { picker = null }, onConfirm = { hour, minute ->
                 minuteOfDay = hour * 60 + minute
                 picker = null
                 error = null
@@ -341,55 +333,6 @@ internal fun ScheduleMessageSheet(
                     colors = readableTextButtonColors(),
                 ) { Text(stringResource(R.string.scheduled_title)) }
             }
-        }
-    }
-}
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun ScheduledTimeDialog(
-    initial: LocalTime,
-    onDismiss: () -> Unit,
-    onConfirm: (Int, Int) -> Unit,
-) {
-    val state = rememberTimePickerState(initial.hour, initial.minute, DateFormat.is24HourFormat(LocalContext.current))
-    val heightPx = LocalWindowInfo.current.containerSize.height
-    val windowHeight = with(LocalDensity.current) { heightPx.toDp() }
-    val canShowDial = windowHeight >= TimePickerDialogDefaults.MinHeightForTimePicker
-    var typeTime by rememberSaveable { mutableStateOf(false) }
-    val typed = typeTime || !canShowDial
-    val mode = if (typed) TimePickerDisplayMode.Input else TimePickerDisplayMode.Picker
-    TimePickerDialog(
-        onDismissRequest = onDismiss,
-        modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("scheduled_time_dialog"),
-        title = { TimePickerDialogDefaults.Title(mode) },
-        modeToggleButton =
-            if (canShowDial) {
-                {
-                    TimePickerDialogDefaults.DisplayModeToggle(
-                        onDisplayModeChange = { typeTime = !typeTime },
-                        displayMode = mode,
-                        modifier = Modifier.testTag("scheduled_time_mode"),
-                    )
-                }
-            } else {
-                null
-            },
-        dismissButton = {
-            TextButton(onClick = onDismiss, colors = readableTextButtonColors()) { Text(stringResource(R.string.action_cancel)) }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = { onConfirm(state.hour, state.minute) },
-                colors = readableTextButtonColors(),
-                modifier = Modifier.testTag("scheduled_time_ok"),
-            ) { Text(stringResource(R.string.action_ok)) }
-        },
-    ) {
-        if (typed) {
-            TimeInput(state, Modifier.testTag("scheduled_time_input"))
-        } else {
-            TimePicker(state, Modifier.testTag("scheduled_time_dial"))
         }
     }
 }

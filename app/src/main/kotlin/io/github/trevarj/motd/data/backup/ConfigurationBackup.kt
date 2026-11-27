@@ -807,7 +807,10 @@ class ConfigurationBackupRepositoryImpl
 
         private fun validatePayloadFields(payload: BackupPayload) {
             require(payload.version == FORMAT_VERSION) { "Unsupported payload version ${payload.version}." }
-            payload.settings.general?.let { validateKeywordHighlightRules(it.keywordHighlightRules) }
+            payload.settings.general?.let {
+                validateKeywordHighlightRules(it.keywordHighlightRules)
+                require(it.quietHoursStartMinute in 0..1439 && it.quietHoursEndMinute in 0..1439) { "Invalid quiet hours." }
+            }
             payload.settings.appearance?.let { appearance ->
                 require(normalizeEmojiSetId(appearance.emojiSetId) == appearance.emojiSetId) { "Backup contains an invalid emoji set id." }
                 validateInstalledPalettes(appearance.customPalettes)
@@ -982,6 +985,10 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setThemeMode(it.themeMode)
                 settingsRepository.setDynamicColor(it.dynamicColor)
                 settingsRepository.setDeliveryMode(it.deliveryMode)
+                settingsRepository.setQuietHoursStartMinute(it.quietHoursStartMinute)
+                settingsRepository.setQuietHoursEndMinute(it.quietHoursEndMinute)
+                settingsRepository.setQuietHoursEnabled(it.quietHoursEnabled)
+                settingsRepository.setSuppressAlertsWhileAway(it.suppressAlertsWhileAway)
                 settingsRepository.setLayoutDensity(it.layoutDensity)
                 settingsRepository.setCompactNickBrackets(it.compactNickBrackets)
                 settingsRepository.setShowChannelPrefixes(it.showChannelPrefixes)

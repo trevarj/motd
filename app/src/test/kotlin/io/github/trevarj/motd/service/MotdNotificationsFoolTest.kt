@@ -100,7 +100,7 @@ class MotdNotificationsFoolTest {
             shadowOf(context as android.app.Application)
                 .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
             repo = DataStoreSettingsRepository(context)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
         }
 
     @After
@@ -203,6 +203,7 @@ class MotdNotificationsFoolTest {
                     db,
                     ForegroundBufferTrackerImpl(),
                     repo,
+                    unusedConnections,
                     dickordLabsPrefs =
                         object : DickordLabsPrefs(context) {
                             override val enabled = flowOf(true)
@@ -414,7 +415,7 @@ class MotdNotificationsFoolTest {
                     )
                 val tracker = ForegroundBufferTrackerImpl()
                 if (guard == "foreground") tracker.set(channelId)
-                notifications = MotdNotifications(context, db, tracker, repo)
+                notifications = MotdNotifications(context, db, tracker, repo, unusedConnections)
                 repo.setFoolPreferences("troll", FoolPreferences(visibility = FoolsMode.HIDE, notifyMentions = guard != "category-off"))
                 val settings = NotificationSettingsImpl(backgroundScope, AppClock { 0L }, onExpired = {})
                 settings.setServer(networkId, if (guard == "off") NotificationMode.OFF else NotificationMode.MENTIONS)
@@ -453,7 +454,7 @@ class MotdNotificationsFoolTest {
                         if (component == "notifications" && event == "message_evaluated") evaluatedFields = fields()
                     }
                 }
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, diagnostics = diagnostics)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections, diagnostics = diagnostics)
             val row =
                 MessageEntity(
                     bufferId = channelId,
@@ -606,7 +607,7 @@ class MotdNotificationsFoolTest {
                     ).single()
             db.canonicalTimelineDao().upsertEventRedirect(EventRedirectEntity(loserId, winnerId))
             db.messageDao().deleteById(loserId)
-            val recreated = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            val recreated = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
 
             recreated.onRead(
                 bufferId,
@@ -1045,7 +1046,7 @@ class MotdNotificationsFoolTest {
             )
             val manager = shadowOf(context.getSystemService(android.app.NotificationManager::class.java))
             assertEquals(5, manager.activeNotifications.size)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
 
             BufferStore(db, notifications).mergeRooms(winnerId, loserId)
 

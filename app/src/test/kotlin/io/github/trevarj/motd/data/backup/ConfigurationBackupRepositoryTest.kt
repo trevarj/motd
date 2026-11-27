@@ -529,6 +529,65 @@ class ConfigurationBackupRepositoryTest {
         }
 
     @Test
+    fun quietHoursAndAwayAlertsRoundTripAndLegacySettingsResetThem() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val original = settings.settings.first()
+            val db = inMemoryDb()
+            try {
+                val backup = repository(db)
+                settings.setQuietHoursEnabled(false)
+                settings.setQuietHoursStartMinute(1439)
+                settings.setQuietHoursEndMinute(0)
+                settings.setSuppressAlertsWhileAway(true)
+                val stored = context.settingsDataStore.data.first()
+                assertEquals(false, stored[PrefKeys.QUIET_HOURS_ENABLED])
+                assertEquals(true, stored[PrefKeys.SUPPRESS_ALERTS_WHILE_AWAY])
+                val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+
+                fun editGeneral(transform: (JsonObject) -> JsonObject): String =
+                    editBackupPayload(raw) { payload ->
+                        val portable = payload.getValue("settings").jsonObject
+                        val general = transform(portable.getValue("general").jsonObject)
+                        JsonObject(payload + ("settings" to JsonObject(portable + ("general" to general))))
+                    }
+
+                val fields = setOf("quietHoursEnabled", "quietHoursStartMinute", "quietHoursEndMinute", "suppressAlertsWhileAway")
+                val legacy = editGeneral { JsonObject(it - fields) }
+                settings.setQuietHoursEnabled(true)
+                backup.import(legacy, importMode = BackupImportMode.MERGE)
+                val defaults = settings.settings.first()
+                assertFalse(defaults.quietHoursEnabled)
+                assertEquals(22 * 60, defaults.quietHoursStartMinute)
+                assertEquals(7 * 60, defaults.quietHoursEndMinute)
+                assertFalse(defaults.suppressAlertsWhileAway)
+
+                for ((key, invalidMinute) in listOf("quietHoursStartMinute" to -1, "quietHoursEndMinute" to 1440)) {
+                    val invalid = editGeneral { JsonObject(it + (key to JsonPrimitive(invalidMinute))) }
+                    val failure = runCatching { backup.import(invalid, importMode = BackupImportMode.REPLACE) }.exceptionOrNull()
+                    assertTrue(failure is BackupFormatException)
+                    assertEquals(defaults, settings.settings.first())
+                }
+
+                settings.setQuietHoursEnabled(true)
+                settings.setSuppressAlertsWhileAway(false)
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                val restored = settings.settings.first()
+                assertFalse(restored.quietHoursEnabled)
+                assertEquals(1439, restored.quietHoursStartMinute)
+                assertEquals(0, restored.quietHoursEndMinute)
+                assertTrue(restored.suppressAlertsWhileAway)
+            } finally {
+                settings.setQuietHoursEnabled(original.quietHoursEnabled)
+                settings.setQuietHoursStartMinute(original.quietHoursStartMinute)
+                settings.setQuietHoursEndMinute(original.quietHoursEndMinute)
+                settings.setSuppressAlertsWhileAway(original.suppressAlertsWhileAway)
+                db.close()
+            }
+        }
+
+    @Test
     fun channelPrefixesRoundTripAndOldSettingsDefaultToFalse() =
         runTest {
             val settings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext<Context>())

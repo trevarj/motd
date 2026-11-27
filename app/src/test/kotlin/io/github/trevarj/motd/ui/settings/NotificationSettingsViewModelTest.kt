@@ -106,6 +106,25 @@ class NotificationSettingsViewModelTest {
     }
 
     @Test
+    fun disablingQuietHoursPreservesTheScheduleAndAwayPreference() =
+        runTest {
+            val model = model(owner())
+            model.setSuppressAlertsWhileAway(true)
+            model.setQuietHoursEnabled(true)
+            model.setQuietHoursStartMinute(11 * 60)
+            model.setQuietHoursEndMinute(16 * 60)
+            runCurrent()
+            assertTrue(model.state.value.quietHoursEnabled)
+            model.setQuietHoursEnabled(false)
+            runCurrent()
+            val persisted = preferences.state.value
+            assertFalse(persisted.quietHoursEnabled)
+            assertTrue(persisted.suppressAlertsWhileAway)
+            assertEquals(11 * 60, persisted.quietHoursStartMinute)
+            assertEquals(16 * 60, persisted.quietHoursEndMinute)
+        }
+
+    @Test
     fun groupsStoredChannelsInSourceOrderWithExactNetworkInheritanceAndCounts() =
         runTest {
             networks.rows.value =

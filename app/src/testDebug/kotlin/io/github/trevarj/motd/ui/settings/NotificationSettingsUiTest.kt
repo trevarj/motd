@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.provider.Settings
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -7,8 +8,11 @@ import androidx.compose.ui.test.SemanticsNodeInteraction
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.assertIsOff
+import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextContains
+import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.junit4.v2.createComposeRule
@@ -18,6 +22,7 @@ import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
+import androidx.compose.ui.test.performTextReplacement
 import androidx.datastore.preferences.core.preferencesOf
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.lifecycle.ViewModelStore
@@ -52,6 +57,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 import java.io.IOException
@@ -86,6 +92,97 @@ class NotificationSettingsUiTest {
         compose.onNodeWithTag("notification_preview_generic").performClick()
         row("notification_preview").assertTextContains("Generic notification").performClick()
         compose.onNodeWithTag("notification_preview_generic").assertIsSelected()
+    }
+
+    @Test
+    @Config(qualifiers = "en-rUS-w411dp-h891dp")
+    fun quietHoursFormatsAndEditsOnlyTheConfirmedEndpoint() {
+        val resolver = RuntimeEnvironment.getApplication().contentResolver
+        val original = Settings.System.getString(resolver, Settings.System.TIME_12_24)
+        try {
+            Settings.System.putString(resolver, Settings.System.TIME_12_24, "24")
+            openScreen(target = SettingsTarget.NOTIFICATION_QUIET_HOURS)
+            compose.onNodeWithTag("settings_target_highlight_NOTIFICATION_QUIET_HOURS").assertIsDisplayed()
+            row("notification_quiet_start").assertTextContains("22:00").assertIsNotEnabled()
+            row("notification_quiet_end").assertTextContains("07:00").assertIsNotEnabled()
+            row("notification_quiet_hours").assertIsOff().performClick()
+
+            fun editTime(
+                tag: String,
+                hour: String,
+                minute: String,
+                confirm: Boolean,
+            ) {
+                row(tag).performClick()
+                compose.onNodeWithTag("notification_time_mode").performClick()
+                compose.onNodeWithTag("notification_time_input").assertIsDisplayed()
+                val fields = compose.onAllNodes(hasSetTextAction())
+                fields[0].performTextReplacement(hour)
+                fields[1].performTextReplacement(minute)
+                compose.onNodeWithTag(if (confirm) "notification_time_ok" else "notification_time_cancel").performClick()
+            }
+
+            editTime("notification_quiet_start", "09", "12", confirm = true)
+            row("notification_quiet_start").assertTextContains("09:12")
+            row("notification_quiet_end").assertTextContains("07:00")
+            editTime("notification_quiet_end", "18", "35", confirm = false)
+            row("notification_quiet_end").assertTextContains("07:00")
+            editTime("notification_quiet_end", "18", "35", confirm = true)
+            row("notification_quiet_end").assertTextContains("18:35")
+            row("notification_quiet_start").assertTextContains("09:12")
+        } finally {
+            Settings.System.putString(resolver, Settings.System.TIME_12_24, original)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "en-rUS-w640dp-h280dp-land") // Below Material's 300 dp dial threshold.
+    fun shortScreenUsesTimeInputAndShowsThePhonesDayPeriod() {
+        val resolver = RuntimeEnvironment.getApplication().contentResolver
+        val original = Settings.System.getString(resolver, Settings.System.TIME_12_24)
+        try {
+            Settings.System.putString(resolver, Settings.System.TIME_12_24, "12")
+            openScreen()
+            row("notification_quiet_hours").performClick()
+            row("notification_quiet_end").assertTextContains("AM", substring = true)
+            row("notification_quiet_start").assertTextContains("PM", substring = true).performClick()
+            compose.onNodeWithTag("notification_time_input").assertIsDisplayed()
+            compose.onNodeWithTag("notification_time_mode").assertDoesNotExist()
+            compose.onAllNodes(hasSetTextAction())[1].performClick().performTextReplacement("15")
+            compose.onNodeWithTag("notification_time_ok").assertIsDisplayed().performClick()
+            row("notification_quiet_start").assertTextContains("10:15", substring = true).performClick()
+            compose.onAllNodes(hasSetTextAction())[1].performClick().performTextReplacement("30")
+            compose.onNodeWithTag("notification_time_cancel").assertIsDisplayed().performClick()
+            row("notification_quiet_start").assertTextContains("10:15", substring = true)
+        } finally {
+            Settings.System.putString(resolver, Settings.System.TIME_12_24, original)
+        }
+    }
+
+    @Test
+    @Config(qualifiers = "ar-rEG-w411dp-h891dp")
+    fun localTimeSummariesUseThePhonesNumerals() {
+        openScreen()
+        row("notification_quiet_start").assertTextContains("٠٠", substring = true)
+        row("notification_quiet_end").assertTextContains("٧", substring = true)
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land")
+    fun awaySwitchIsIndependentOfQuietHours() {
+        loadGate = CompletableDeferred()
+        openScreen(target = SettingsTarget.NOTIFICATION_MUTE_WHILE_AWAY)
+        compose.runOnIdle { loadGate?.complete(Unit) }
+        compose.onNodeWithTag("settings_target_highlight_NOTIFICATION_MUTE_WHILE_AWAY").assertIsDisplayed()
+        compose
+            .onNodeWithTag("notification_mute_while_away")
+            .assertIsDisplayed()
+            .assertIsOff()
+            .performClick()
+        row("notification_quiet_start").assertIsNotEnabled()
+        row("notification_quiet_hours").assertIsOff().performClick()
+        row("notification_mute_while_away").assertIsOn().performClick()
+        row("notification_quiet_hours").assertIsOn()
     }
 
     @Test

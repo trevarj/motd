@@ -1,17 +1,22 @@
 package io.github.trevarj.motd.ui.settings
 
+import android.text.format.DateFormat
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.NotificationsOff
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.SnackbarDuration
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.runtime.Composable
@@ -21,7 +26,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
@@ -36,10 +44,14 @@ import io.github.trevarj.motd.service.DeliveryMode
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationPreview
 import io.github.trevarj.motd.ui.components.ChannelNotificationSheet
+import io.github.trevarj.motd.ui.components.LocalTimeDialog
 import io.github.trevarj.motd.ui.components.label
 import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.nav.SettingsTarget
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DecimalStyle
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
 @Composable
@@ -54,6 +66,10 @@ fun NotificationSettingsScreen(
         onBack = onBack,
         onGlobal = viewModel::setGlobal,
         onPreview = viewModel::setPreview,
+        onQuietHours = viewModel::setQuietHoursEnabled,
+        onQuietStart = viewModel::setQuietHoursStartMinute,
+        onQuietEnd = viewModel::setQuietHoursEndMinute,
+        onMuteWhileAway = viewModel::setSuppressAlertsWhileAway,
         onServer = viewModel::setServer,
         onChannel = viewModel::setChannel,
         onStartWatch = { bufferId, duration -> viewModel.startWatch(bufferId, duration.millis) },
@@ -70,6 +86,10 @@ fun NotificationSettingsContent(
     onBack: () -> Unit,
     onGlobal: (NotificationMode) -> Unit,
     onPreview: (NotificationPreview) -> Unit,
+    onQuietHours: (Boolean) -> Unit,
+    onQuietStart: (Int) -> Unit,
+    onQuietEnd: (Int) -> Unit,
+    onMuteWhileAway: (Boolean) -> Unit,
     onServer: (Long, NotificationMode?) -> Unit,
     onChannel: (Long, NotificationMode?) -> Unit,
     onStartWatch: (Long, ChannelWatchDuration) -> Unit,
@@ -81,9 +101,20 @@ fun NotificationSettingsContent(
     var expandedNetwork by rememberSaveable { mutableStateOf<Long?>(null) }
     var globalPicker by remember { mutableStateOf(false) }
     var previewPicker by rememberSaveable { mutableStateOf(false) }
+    var editingStart by rememberSaveable { mutableStateOf<Boolean?>(null) }
     var serverPicker by remember { mutableStateOf<Long?>(null) }
     var channelPicker by remember { mutableStateOf<Long?>(null) }
     val available = !state.loading && !state.unavailable
+    val listState = rememberLazyListState()
+    LaunchedEffect(target, available) {
+        if (!available) return@LaunchedEffect
+        // With loading/error notices gone, the preview and global rows precede the two quiet policy items.
+        when (target) {
+            SettingsTarget.NOTIFICATION_QUIET_HOURS -> listState.scrollToItem(2)
+            SettingsTarget.NOTIFICATION_MUTE_WHILE_AWAY -> listState.scrollToItem(3)
+            else -> Unit
+        }
+    }
     val snackbarHostState = remember { SnackbarHostState() }
     val saveFailure = stringResource(R.string.notification_settings_save_failed)
     LaunchedEffect(state.saveError, saveFailure) {
@@ -101,6 +132,7 @@ fun NotificationSettingsContent(
     ) {
         LazyColumn(
             modifier = Modifier.fillMaxSize().testTag("notification_settings_list"),
+            state = listState,
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             if (state.loading) {
@@ -144,6 +176,64 @@ fun NotificationSettingsContent(
                             modifier = Modifier.testTag("notification_global"),
                             onClick = { globalPicker = true },
                         )
+                    }
+                }
+            }
+            item(key = "quiet_policy") {
+                val locale = LocalConfiguration.current.locales[0]
+                val is24Hour = DateFormat.is24HourFormat(LocalContext.current)
+                val formatter =
+                    remember(locale, is24Hour) {
+                        DateTimeFormatter
+                            .ofPattern(DateFormat.getBestDateTimePattern(locale, if (is24Hour) "Hm" else "hm"), locale)
+                            .withDecimalStyle(DecimalStyle.of(locale))
+                    }
+                SettingsGroup {
+                    Row(Modifier.padding(start = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Outlined.History, contentDescription = null)
+                        SectionHeader(stringResource(R.string.notification_quiet_group))
+                    }
+                    SettingsTarget(target?.name, SettingsTarget.NOTIFICATION_QUIET_HOURS.name) { targetModifier ->
+                        Box(targetModifier) {
+                            SwitchRow(
+                                title = stringResource(R.string.notification_quiet_hours),
+                                subtitle = stringResource(R.string.notification_quiet_hours_summary),
+                                checked = state.quietHoursEnabled,
+                                onCheckedChange = onQuietHours,
+                                enabled = available,
+                                modifier = Modifier.testTag("notification_quiet_hours"),
+                            )
+                        }
+                    }
+                    SettingsNavigationRow(
+                        title = stringResource(R.string.notification_quiet_start),
+                        summary = formatter.format(state.quietHoursStartMinute.asLocalTime()),
+                        enabled = available && state.quietHoursEnabled,
+                        modifier = Modifier.testTag("notification_quiet_start"),
+                        onClick = { editingStart = true },
+                    )
+                    SettingsNavigationRow(
+                        title = stringResource(R.string.notification_quiet_end),
+                        summary = formatter.format(state.quietHoursEndMinute.asLocalTime()),
+                        enabled = available && state.quietHoursEnabled,
+                        modifier = Modifier.testTag("notification_quiet_end"),
+                        onClick = { editingStart = false },
+                    )
+                }
+            }
+            item(key = "away_policy") {
+                SettingsGroup {
+                    SettingsTarget(target?.name, SettingsTarget.NOTIFICATION_MUTE_WHILE_AWAY.name) { targetModifier ->
+                        Box(targetModifier) {
+                            SwitchRow(
+                                title = stringResource(R.string.notification_mute_while_away),
+                                subtitle = stringResource(R.string.notification_mute_while_away_summary),
+                                checked = state.suppressAlertsWhileAway,
+                                onCheckedChange = onMuteWhileAway,
+                                enabled = available,
+                                modifier = Modifier.testTag("notification_mute_while_away"),
+                            )
+                        }
                     }
                 }
             }
@@ -201,6 +291,19 @@ fun NotificationSettingsContent(
             }
         }
     }
+    if (available && state.quietHoursEnabled) {
+        editingStart?.let { start ->
+            LocalTimeDialog(
+                initial = (if (start) state.quietHoursStartMinute else state.quietHoursEndMinute).asLocalTime(),
+                tagPrefix = "notification_time",
+                onDismiss = { editingStart = null },
+                onConfirm = { hour, minute ->
+                    if (start) onQuietStart(hour * 60 + minute) else onQuietEnd(hour * 60 + minute)
+                    editingStart = null
+                },
+            )
+        }
+    }
     if (available && previewPicker) {
         SingleChoiceSheet(
             title = stringResource(R.string.notification_preview_title),
@@ -250,6 +353,8 @@ fun NotificationSettingsContent(
         )
     }
 }
+
+private fun Int.asLocalTime(): LocalTime = LocalTime.of(this / 60, this % 60)
 
 @Composable
 private fun NotificationPreview.label(): String =

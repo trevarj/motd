@@ -556,6 +556,24 @@ internal class FakeSettings(
         state.value = state.value.copy(notificationPreview = preview)
     }
 
+    override suspend fun setQuietHoursEnabled(enabled: Boolean) {
+        state.value = state.value.copy(quietHoursEnabled = enabled)
+    }
+
+    override suspend fun setQuietHoursStartMinute(minute: Int) {
+        require(minute in 0..1439)
+        state.value = state.value.copy(quietHoursStartMinute = minute)
+    }
+
+    override suspend fun setQuietHoursEndMinute(minute: Int) {
+        require(minute in 0..1439)
+        state.value = state.value.copy(quietHoursEndMinute = minute)
+    }
+
+    override suspend fun setSuppressAlertsWhileAway(enabled: Boolean) {
+        state.value = state.value.copy(suppressAlertsWhileAway = enabled)
+    }
+
     override suspend fun setLayoutDensity(d: LayoutDensity) = Unit
 
     override suspend fun setCompactNickBrackets(value: io.github.trevarj.motd.data.prefs.CompactNickBrackets) {

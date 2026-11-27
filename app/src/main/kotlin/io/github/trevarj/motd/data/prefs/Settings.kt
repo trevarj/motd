@@ -316,6 +316,9 @@ internal object NickColorOverride {
     private fun isExact(value: Int): Boolean = value ushr 24 == EXACT_TAG ushr 24
 }
 
+internal const val DEFAULT_QUIET_HOURS_START_MINUTE = 22 * 60
+internal const val DEFAULT_QUIET_HOURS_END_MINUTE = 7 * 60
+
 @Serializable
 data class Settings(
     val themeMode: ThemeMode = ThemeMode.SYSTEM,
@@ -399,6 +402,10 @@ data class Settings(
     val keywordHighlightRules: List<KeywordHighlightRule> = emptyList(),
     @Transient val notificationPreview: NotificationPreview = NotificationPreview.FULL,
     @Transient val hideRecentsPreviews: Boolean = false,
+    val quietHoursEnabled: Boolean = false,
+    val quietHoursStartMinute: Int = DEFAULT_QUIET_HOURS_START_MINUTE,
+    val quietHoursEndMinute: Int = DEFAULT_QUIET_HOURS_END_MINUTE,
+    val suppressAlertsWhileAway: Boolean = false,
 )
 
 /** Canonical key for friends/fools/override lookups: trimmed + lowercased.
@@ -431,6 +438,14 @@ interface SettingsRepository {
     suspend fun setDeliveryMode(m: DeliveryMode)
 
     suspend fun setNotificationPreview(preview: NotificationPreview)
+
+    suspend fun setQuietHoursEnabled(enabled: Boolean) {}
+
+    suspend fun setQuietHoursStartMinute(minute: Int) {}
+
+    suspend fun setQuietHoursEndMinute(minute: Int) {}
+
+    suspend fun setSuppressAlertsWhileAway(enabled: Boolean) {}
 
     // Round 4
     suspend fun setLayoutDensity(d: LayoutDensity)

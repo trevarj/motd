@@ -57,6 +57,7 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
 import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
+import io.github.trevarj.motd.testing.NoopConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -91,10 +92,15 @@ import org.robolectric.annotation.Implements
 import org.robolectric.shadows.ShadowShortcutManager
 import org.robolectric.shadows.ShadowSystemClock
 import java.time.Duration
+import java.time.LocalDate
+import java.time.ZoneId
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executor
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import io.github.trevarj.motd.data.prefs.Settings as AppSettings
+
+internal val unusedConnections = dagger.Lazy<ConnectionManager> { error("Away suppression is disabled in this fixture") }
 
 /**
  * Pins the channel-governed alerting contract for message/mention notifications:
@@ -187,7 +193,7 @@ class MotdNotificationsAlertingTest {
         shadowOf(context as android.app.Application)
             .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
         repo = DataStoreSettingsRepository(context)
-        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
     }
 
     @After
@@ -226,6 +232,7 @@ class MotdNotificationsAlertingTest {
                 object : SettingsRepository by repo {
                     override val settings = flowOf(snapshot)
                 },
+                unusedConnections,
                 object : DickordLabsPrefs() {
                     override val enabled = flowOf(false)
                 },
@@ -407,7 +414,7 @@ class MotdNotificationsAlertingTest {
     fun previewChangesRetireOldRowsAndProjectRestoredAndIncomingMessages() =
         runTest {
             val preview = MutableStateFlow(NotificationPreview.FULL)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview), applicationScope = backgroundScope)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview), unusedConnections, applicationScope = backgroundScope)
             val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(networkId, chat("alert-peer", "private history", "projection-history"))
@@ -482,6 +489,7 @@ class MotdNotificationsAlertingTest {
                     db,
                     ForegroundBufferTrackerImpl(),
                     withPreview(MutableStateFlow(NotificationPreview.GENERIC)),
+                    unusedConnections,
                     applicationScope = backgroundScope,
                 )
             testScheduler.runCurrent()
@@ -517,7 +525,7 @@ class MotdNotificationsAlertingTest {
                             emitAll(values)
                         }
                 }
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, applicationScope = backgroundScope)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), settings, unusedConnections, applicationScope = backgroundScope)
             testScheduler.runCurrent()
             val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
             processor.onRegistered(networkId, "me", emptyMap())
@@ -538,6 +546,11 @@ class MotdNotificationsAlertingTest {
             assertTrue(postedNotifications().isEmpty())
         }
 
+    private fun withSettings(values: MutableStateFlow<AppSettings>): SettingsRepository =
+        object : SettingsRepository by repo {
+            override val settings = values
+        }
+
     private fun withPreview(preview: MutableStateFlow<NotificationPreview>): SettingsRepository =
         object : SettingsRepository by repo {
             override val notificationPreview = preview
@@ -548,7 +561,7 @@ class MotdNotificationsAlertingTest {
         runBlocking {
             resetImmediateFixture()
             val preview = MutableStateFlow(NotificationPreview.FULL)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview))
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview), unusedConnections)
             val incoming = chat("alert-peer", "private staged body", "projection-race")
             val recorder = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
             recorder.onRegistered(networkId, "me", emptyMap())
@@ -653,7 +666,7 @@ class MotdNotificationsAlertingTest {
                 repo.setFool("disabled-mention-sender", true)
                 repo.setFoolPreferences("disabled-mention-sender", FoolPreferences(notifyMentions = false))
 
-                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
                 BufferStore(db, notifier = notifications).mergeRooms(winnerId, loserId)
 
                 assertSame(ordinary, lane(null))
@@ -689,7 +702,7 @@ class MotdNotificationsAlertingTest {
 
                 val ordinary = card(channelId)
                 assertEquals(MotdNotifications.CHANNEL_MENTIONS, card(dmBufferId).extras.getString("motd.messageChannel"))
-                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
                 BufferStore(db, notifier = notifications).mergeRooms(dmBufferId, otherQuery)
 
                 assertSame(ordinary, card(channelId))
@@ -800,7 +813,7 @@ class MotdNotificationsAlertingTest {
             assertEquals(listOf(original.text), bodies(lane(null)))
             val mention = lane("channel_mentions")
 
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             val recreated = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             recreated.onRegistered(networkId, "me", emptyMap())
             recreated.process(
@@ -821,7 +834,7 @@ class MotdNotificationsAlertingTest {
     fun offersAndInvitationsAlertLiveAndRecoverSilentlyWithPrivatePreviews() =
         runTest {
             val preview = MutableStateFlow(NotificationPreview.GENERIC)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview))
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withPreview(preview), unusedConnections)
             val live = EventProcessor(db, TypingTrackerImpl(), notifications)
             live.onRegistered(networkId, "me", emptyMap())
             val ctx = chat("alert-peer", "").ctx
@@ -943,6 +956,88 @@ class MotdNotificationsAlertingTest {
         }
 
     @Test
+    fun localQuietHoursRespectBoundariesWithoutUpdatingTheCardOrCooldown() =
+        runTest {
+            val values = MutableStateFlow(repo.settings.first().copy(quietHoursEnabled = true, quietHoursStartMinute = 22 * 60, quietHoursEndMinute = 7 * 60))
+            var now = 0L
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withSettings(values), unusedConnections, clock = AppClock { now })
+
+            suspend fun arrival(
+                hour: Int,
+                minute: Int,
+                text: String,
+            ) {
+                now =
+                    LocalDate
+                        .of(2025, 1, 15)
+                        .atTime(hour, minute)
+                        .atZone(ZoneId.systemDefault())
+                        .toInstant()
+                        .toEpochMilli()
+                notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", text))
+            }
+
+            arrival(21, 59, "before")
+            val before = lane(null)
+            assertAlerting(before)
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(20))
+            arrival(22, 0, "start")
+            arrival(0, 0, "midnight")
+            arrival(6, 59, "last minute")
+            assertSame(before, lane(null))
+            ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
+            arrival(7, 0, "end")
+            val end = lane(null)
+            assertEquals("end", bodies(end).last())
+            assertAlerting(end)
+
+            values.value = values.value.copy(quietHoursStartMinute = 7 * 60, quietHoursEndMinute = 8 * 60)
+            arrival(7, 0, "daytime start")
+            assertSame(end, lane(null))
+            arrival(8, 0, "daytime end")
+            assertEquals("daytime end", bodies(lane(null)).last())
+            values.value = values.value.copy(quietHoursStartMinute = 8 * 60)
+            arrival(8, 0, "equal endpoints")
+            assertEquals("equal endpoints", bodies(lane(null)).last())
+        }
+
+    @Test
+    fun confirmedAwaySuppressesWatchedPushAndClaimedRecoveryOnlyForItsNetwork() =
+        runTest {
+            val channelId = mutedChannel()
+            val watch = allSettings()
+            watch.startWatch(channelId, null)
+            val connections =
+                object : NoopConnectionManager() {
+                    override val selfAwayStates = MutableStateFlow(mapOf<Long, String?>(networkId to null))
+                }
+            val values = MutableStateFlow(repo.settings.first().copy(suppressAlertsWhileAway = true))
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withSettings(values), { connections })
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = watch)
+            live.onRegistered(networkId, "me", emptyMap())
+            val push = chat("alert-peer", "me: watched", "away-push").copy(target = "#chan")
+            live.processPush(networkId, push)
+            val stored = requireNotNull(db.messageDao().byMsgid(channelId, "away-push"))
+            assertTrue(stored.notificationHandled && stored.notificationEligible && stored.notificationWatched && stored.alertsAsMention)
+            assertTrue(postedNotifications().isEmpty())
+
+            val interrupted = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier)
+            interrupted.onRegistered(networkId, "me", emptyMap())
+            interrupted.process(networkId, chat("alert-peer", "missed", "away-recovery"))
+            val claimed = requireNotNull(db.messageDao().byMsgid(dmBufferId, "away-recovery"))
+            assertTrue(claimed.notificationEligible && !claimed.notificationHandled)
+            notifications.recoverCanonicalNotifications()
+            assertEquals(true, db.messageDao().byId(claimed.id)?.notificationHandled)
+            assertTrue(postedNotifications().isEmpty())
+
+            connections.selfAwayStates.value = mapOf(networkId + 1 to "away elsewhere")
+            notifications.recoverCanonicalNotifications()
+            assertTrue(postedNotifications().isEmpty())
+            live.process(networkId, chat("alert-peer", "me: back", "back-live", 2_000).copy(target = "#chan"))
+            assertAlerting(lane("channel_mentions"))
+        }
+
+    @Test
     fun duplicateRecoveryAndFilteredBodies_doNotExtendQuietWindow() =
         runTest {
             val processor = EventProcessor(db, TypingTrackerImpl(), notifications)
@@ -1002,13 +1097,13 @@ class MotdNotificationsAlertingTest {
             processor.process(networkId, chat("alert-peer", "after read", "lifecycle-read", 1_500))
             assertSilent(lane(null))
             context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications)
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(networkId, chat("alert-peer", "after restart", "lifecycle-next", 2_000))
             assertSilent(lane(null))
             Settings.Global.putInt(context.contentResolver, Settings.Global.BOOT_COUNT, 11)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "after reboot", "lifecycle-reboot", 3_000))
             assertAlerting(lane(null))
         }
@@ -1024,7 +1119,7 @@ class MotdNotificationsAlertingTest {
             ShadowSystemClock.advanceBy(Duration.ofSeconds(20))
             notifications.onIncoming(networkId, loserId, BufferType.QUERY, false, chat("loser", "latest"))
             notifications.onRoomsMerged(dmBufferId, loserId)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             ShadowSystemClock.advanceBy(Duration.ofSeconds(10))
             notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "merged"))
             assertSilent(postedNotifications().single { it.id == MotdNotifications.messageNotificationId(dmBufferId) }.notification)
@@ -1037,7 +1132,7 @@ class MotdNotificationsAlertingTest {
         runTest {
             notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "persisted"))
             Settings.Global.putString(context.contentResolver, Settings.Global.BOOT_COUNT, null)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "without boot"))
             assertAlerting(lane(null))
             notifications.onIncoming(networkId, dmBufferId, BufferType.QUERY, false, chat("alert-peer", "in memory"))
@@ -1121,7 +1216,7 @@ class MotdNotificationsAlertingTest {
                 chat("alert-peer", "me: interrupted mention", "watch-mention", 4_000).copy(target = "#chan"),
             )
             watch.stopWatch(channelId)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
 
             notifications.recoverCanonicalNotifications()
 
@@ -1220,7 +1315,7 @@ class MotdNotificationsAlertingTest {
             val plainPush = chat("plain", "me: recovered project", "plain-push", 4_000).copy(target = "#chan")
             interrupted.processPush(networkId, plainPush)
             watch.stopWatch(channelId)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             notifications.recoverCanonicalNotifications()
             val recovered = lane("channel_mentions")
             assertSilent(recovered)
@@ -1328,7 +1423,7 @@ class MotdNotificationsAlertingTest {
             interrupted.process(networkId, chat("alert-peer", "interrupted all", "all-interrupted", 3_000).copy(target = "#all"))
             interrupted.process(networkId, chat("alert-peer", "muted interrupted", "all-muted", 3_000).copy(target = "#muted"))
             settings.setServer(networkId, NotificationMode.OFF)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
 
             notifications.recoverCanonicalNotifications()
 
@@ -1683,7 +1778,7 @@ class MotdNotificationsAlertingTest {
             repeat(30) { index ->
                 processor.process(networkId, chat("alert-peer", "ordinary $index", "ordinary-$index", 2_000L + index).copy(target = "#chan"))
             }
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             val recreated = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             recreated.onRegistered(networkId, "me", emptyMap())
             recreated.process(networkId, chat("alert-peer", "me: newest", "newest", 4_000).copy(target = "#chan"))
@@ -1716,7 +1811,7 @@ class MotdNotificationsAlertingTest {
         assertEquals(listOf(historical.text, "later ordinary"), bodies(lane(null)))
         assertEquals(false, db.messageDao().byMsgid(channelId, "historical")?.notificationHandled)
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -1763,7 +1858,7 @@ class MotdNotificationsAlertingTest {
         val later = db.messageDao().historyRowsForMerge(channelId).single { it.text == "me: later" }
         val capturedMentionRead = lane("channel_mentions").actions.single { it.title.toString() == "Mark read" }.actionIntent
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -1806,7 +1901,7 @@ class MotdNotificationsAlertingTest {
             context.getSystemService(android.app.NotificationManager::class.java).cancel(MotdNotifications.messageNotificationId(channelId))
             processor.process(networkId, incoming.copy(replyToMsgid = "self-parent"))
             assertEquals(0, postedNotifications().size)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(incoming.copy(replyToMsgid = "self-parent", ctx = incoming.ctx.copy(account = "extra")))))
@@ -1818,16 +1913,23 @@ class MotdNotificationsAlertingTest {
         runTest {
             val channelId = channel()
             val settings = allSettings()
+            val values = MutableStateFlow(repo.settings.first())
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), withSettings(values), unusedConnections)
             val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
             processor.process(networkId, chat("me", "parent", "self-parent", 500).copy(target = "#chan", isSelf = true))
             val incoming = chat("alert-peer", "only ordinary", "only", 1_000).copy(target = "#chan")
             processor.process(networkId, incoming)
+            // Active-card refresh and read cleanup must not consult the new-arrival away gate.
+            values.value = values.value.copy(suppressAlertsWhileAway = true)
             processor.process(networkId, incoming.copy(replyToMsgid = "self-parent"))
             assertEquals(listOf("channel_mentions"), postedNotifications().map { it.tag })
             assertEquals(listOf(incoming.text), bodies(lane("channel_mentions")))
             assertSilent(lane("channel_mentions"))
-            assertLaneAnchor(lane("channel_mentions"), requireNotNull(db.messageDao().byMsgid(channelId, "only")))
+            val promoted = requireNotNull(db.messageDao().byMsgid(channelId, "only"))
+            assertLaneAnchor(lane("channel_mentions"), promoted)
+            notifications.onRead(channelId, TimelineAnchor(promoted.serverTime, promoted.id, promoted.timelineOrder))
+            assertTrue(postedNotifications().isEmpty())
         }
 
     @Test
@@ -1860,7 +1962,7 @@ class MotdNotificationsAlertingTest {
         val existing = requireNotNull(db.messageDao().byMsgid(channelId, "existing"))
         db.messageDao().deleteById(requireNotNull(db.messageDao().byMsgid(channelId, "remaining")).id)
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings, diagnostics = diagnostics)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -1905,7 +2007,7 @@ class MotdNotificationsAlertingTest {
         val mentions = lane("channel_mentions")
         val promoted = requireNotNull(db.messageDao().byMsgid(channelId, "promote"))
         val existing = requireNotNull(db.messageDao().byMsgid(channelId, "existing"))
-        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+        notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
         processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings, diagnostics = diagnostics)
         processor.onRegistered(networkId, "me", emptyMap())
         var restoringMentions = false
@@ -1990,7 +2092,7 @@ class MotdNotificationsAlertingTest {
                 val channelId = channel("#$suppression")
                 val settings = allSettings()
                 val tracker = ForegroundBufferTrackerImpl()
-                notifications = MotdNotifications(context, db, tracker, repo)
+                notifications = MotdNotifications(context, db, tracker, repo, unusedConnections)
                 val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
                 processor.onRegistered(networkId, "me", emptyMap())
                 val incoming = chat("suppressed-peer", "ordinary $suppression", suppression, 1_000).copy(target = "#$suppression")
@@ -2072,7 +2174,7 @@ class MotdNotificationsAlertingTest {
         repo.setFool("earlier-fool", true)
         repo.setFoolPreferences("earlier-fool", FoolPreferences(notifyMentions = true))
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -2107,7 +2209,7 @@ class MotdNotificationsAlertingTest {
         processor.process(networkId, first)
         assertSame(firstPosted, lane("channel_mentions"))
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -2117,7 +2219,7 @@ class MotdNotificationsAlertingTest {
         repo.setFoolPreferences("alert-fool", FoolPreferences())
         assertSame(beforeEdit, lane("channel_mentions"))
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -2147,7 +2249,7 @@ class MotdNotificationsAlertingTest {
         val first = chat("alert-peer", "old identity", "identity-first").copy(ctx = chat("alert-peer", "", "identity-first").ctx.copy(account = "stable-account"))
         processor.process(networkId, first)
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -2159,7 +2261,7 @@ class MotdNotificationsAlertingTest {
         repo.setFoolPreferences("stable-account", FoolPreferences(notifyMentions = true))
         assertSame(beforeEdit, lane(null))
         if (recreate) {
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             processor = EventProcessor(db, TypingTrackerImpl(), notifications)
             processor.onRegistered(networkId, "me", emptyMap())
         }
@@ -2231,7 +2333,7 @@ class MotdNotificationsAlertingTest {
             assertEquals(mention.id, savedRead.getLongExtra(NotificationActionService.EXTRA_UP_TO_EVENT_ID, -1))
             assertEquals(mention.serverTime, savedRead.getLongExtra(NotificationActionService.EXTRA_UP_TO_TIME, -1))
             assertLaneAnchor(lane(null), after)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
             val buffer = requireNotNull(db.bufferDao().observeById(channelId))
             db.bufferDao().update(buffer.copy(localReadAnchorTime = mention.serverTime, localReadAnchorEventId = mention.id))
 
@@ -2258,7 +2360,7 @@ class MotdNotificationsAlertingTest {
             for (defaultLane in listOf("absent", "fallback", "deleted")) {
                 context.getSystemService(android.app.NotificationManager::class.java).cancelAll()
                 val channelId = channel("#$defaultLane")
-                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
                 val settings = allSettings()
                 val processor = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings)
                 processor.onRegistered(networkId, "me", emptyMap())

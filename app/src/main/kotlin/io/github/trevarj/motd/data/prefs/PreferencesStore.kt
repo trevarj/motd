@@ -5,6 +5,7 @@ import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -39,6 +40,10 @@ internal object PrefKeys {
     val DYNAMIC_COLOR = stringPreferencesKey("dynamic_color")
     val DELIVERY_MODE = stringPreferencesKey("delivery_mode")
     val NOTIFICATION_PREVIEW = stringPreferencesKey("notification_preview")
+    val QUIET_HOURS_ENABLED = booleanPreferencesKey("quiet_hours_enabled")
+    val QUIET_HOURS_START_MINUTE = intPreferencesKey("quiet_hours_start_minute")
+    val QUIET_HOURS_END_MINUTE = intPreferencesKey("quiet_hours_end_minute")
+    val SUPPRESS_ALERTS_WHILE_AWAY = booleanPreferencesKey("suppress_alerts_while_away")
     val HIDE_RECENTS_PREVIEWS = booleanPreferencesKey("hide_recents_previews")
     val PUSH_ENDPOINTS = stringPreferencesKey("push_endpoints")
     val PUSH_KEYS = stringPreferencesKey("push_keys")
@@ -210,6 +215,10 @@ class DataStoreSettingsRepository
                         prefs[PrefKeys.DELIVERY_MODE]?.let { runCatching { DeliveryMode.valueOf(it) }.getOrNull() }
                             ?: DeliveryMode.PERSISTENT_SOCKET,
                     notificationPreview = notificationPreviewFromPreference(prefs[PrefKeys.NOTIFICATION_PREVIEW]),
+                    quietHoursEnabled = prefs[PrefKeys.QUIET_HOURS_ENABLED] ?: false,
+                    quietHoursStartMinute = prefs[PrefKeys.QUIET_HOURS_START_MINUTE]?.takeIf { it in 0..1439 } ?: DEFAULT_QUIET_HOURS_START_MINUTE,
+                    quietHoursEndMinute = prefs[PrefKeys.QUIET_HOURS_END_MINUTE]?.takeIf { it in 0..1439 } ?: DEFAULT_QUIET_HOURS_END_MINUTE,
+                    suppressAlertsWhileAway = prefs[PrefKeys.SUPPRESS_ALERTS_WHILE_AWAY] ?: false,
                     hideRecentsPreviews = prefs[PrefKeys.HIDE_RECENTS_PREVIEWS] ?: false,
                     // Round 4: invalid enum strings fall back to defaults.
                     layoutDensity =
@@ -291,6 +300,24 @@ class DataStoreSettingsRepository
 
         override suspend fun setNotificationPreview(preview: NotificationPreview) {
             store.edit { it[PrefKeys.NOTIFICATION_PREVIEW] = preview.name }
+        }
+
+        override suspend fun setQuietHoursEnabled(enabled: Boolean) {
+            store.edit { it[PrefKeys.QUIET_HOURS_ENABLED] = enabled }
+        }
+
+        override suspend fun setQuietHoursStartMinute(minute: Int) {
+            require(minute in 0..1439)
+            store.edit { it[PrefKeys.QUIET_HOURS_START_MINUTE] = minute }
+        }
+
+        override suspend fun setQuietHoursEndMinute(minute: Int) {
+            require(minute in 0..1439)
+            store.edit { it[PrefKeys.QUIET_HOURS_END_MINUTE] = minute }
+        }
+
+        override suspend fun setSuppressAlertsWhileAway(enabled: Boolean) {
+            store.edit { it[PrefKeys.SUPPRESS_ALERTS_WHILE_AWAY] = enabled }
         }
 
         internal suspend fun setHideRecentsPreviews(hide: Boolean) {

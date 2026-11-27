@@ -25,6 +25,7 @@ import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import androidx.room.withTransaction
+import dagger.Lazy
 import dagger.hilt.android.qualifiers.ApplicationContext
 import io.github.trevarj.motd.MainActivity
 import io.github.trevarj.motd.R
@@ -50,6 +51,7 @@ import io.github.trevarj.motd.data.sync.ROOM_MERGE_PRESENTATION_PREFIX
 import io.github.trevarj.motd.data.sync.parseRoomMergePresentationKey
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
+import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.di.ApplicationScope
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
@@ -71,12 +73,14 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import java.time.Instant
+import java.time.ZoneId
 import javax.inject.Inject
 import javax.inject.Singleton
 import android.provider.Settings as AndroidSettings
 
 /**
- * Final notification suppression decision. Pure and unit-tested.
+ * Buffer and sender suppression decision. Quiet hours and away state apply only to new cards.
  *
  * Precedence (highest first): already-read and foreground buffers suppress everything; an explicit
  * buffer mute wins unless the message qualified under a watch; sender category permission is required.
@@ -90,6 +94,17 @@ fun shouldPostNotification(
     alreadyRead: Boolean = false,
     watched: Boolean = false,
 ): Boolean = !alreadyRead && !foreground && !(muted && !watched) && senderAllowsNotification
+
+private fun Settings.inQuietHours(clock: AppClock): Boolean {
+    if (!quietHoursEnabled || quietHoursStartMinute == quietHoursEndMinute) return false
+    val local = Instant.ofEpochMilli(clock.nowMillis()).atZone(ZoneId.systemDefault())
+    val minute = local.hour * 60 + local.minute
+    return if (quietHoursStartMinute < quietHoursEndMinute) {
+        minute in quietHoursStartMinute until quietHoursEndMinute
+    } else {
+        minute >= quietHoursStartMinute || minute < quietHoursEndMinute
+    }
+}
 
 internal enum class TestAlertCategory(
     val channelId: String,
@@ -113,11 +128,18 @@ class MotdNotifications
         private val db: MotdDatabase,
         private val foregroundBufferTracker: ForegroundBufferTracker,
         private val settingsRepository: SettingsRepository,
+        private val connections: Lazy<ConnectionManager>,
         private val dickordLabsPrefs: DickordLabsPrefs = DickordLabsPrefs(context),
         private val diagnostics: DiagnosticLogger = DiagnosticLogger.Noop,
         @param:ApplicationScope private val applicationScope: CoroutineScope? = null,
+        private val clock: AppClock = AppClock(System::currentTimeMillis),
     ) : MessageNotifier {
         private val manager = NotificationManagerCompat.from(context)
+
+        private fun suppressesNewAlerts(
+            settings: Settings,
+            networkId: Long,
+        ): Boolean = settings.inQuietHours(clock) || (settings.suppressAlertsWhileAway && networkId in connections.get().selfAwayStates.value)
 
         private data class NotificationThreadKey(
             val bufferId: Long,
@@ -616,7 +638,8 @@ class MotdNotifications
                 val effectiveReadAnchor = buffer?.let { effectiveLocalReadAnchor(it) }
                 val alreadyRead = effectiveReadAnchor?.let { incomingAnchor <= it } == true
                 val decision =
-                    shouldPostNotification(foreground, muted, senderAllowsNotification, alreadyRead, watched = bypassesMute)
+                    shouldPostNotification(foreground, muted, senderAllowsNotification, alreadyRead, watched = bypassesMute) &&
+                        (refreshOnly || !suppressesNewAlerts(settings, networkId))
                 diagnostics.record("notifications", "message_evaluated") {
                     mapOf(
                         "network_id" to networkId,

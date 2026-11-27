@@ -4,6 +4,8 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
 import io.github.trevarj.motd.data.db.NotificationChannelRow
+import io.github.trevarj.motd.data.prefs.DEFAULT_QUIET_HOURS_END_MINUTE
+import io.github.trevarj.motd.data.prefs.DEFAULT_QUIET_HOURS_START_MINUTE
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.BufferRepository
 import io.github.trevarj.motd.data.repo.NetworkRepository
@@ -21,9 +23,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
-import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.flow
-import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -36,6 +36,10 @@ data class NotificationSettingsUiState(
     val networks: List<NetworkNotificationUi> = emptyList(),
     val deliveryMode: DeliveryMode = DeliveryMode.PERSISTENT_SOCKET,
     val preview: NotificationPreview = NotificationPreview.FULL,
+    val quietHoursEnabled: Boolean = false,
+    val quietHoursStartMinute: Int = DEFAULT_QUIET_HOURS_START_MINUTE,
+    val quietHoursEndMinute: Int = DEFAULT_QUIET_HOURS_END_MINUTE,
+    val suppressAlertsWhileAway: Boolean = false,
     /** The screen presents "Could not save notification settings." until dismissed. */
     val saveError: Boolean = false,
 )
@@ -84,16 +88,14 @@ class NotificationSettingsViewModel
                     notificationSettings.state,
                     networkRepository.observeNetworks(),
                     bufferRepository.observeNotificationChannels(),
-                    settingsRepository.settings.map { it.deliveryMode }.distinctUntilChanged(),
                     ticks,
-                ) { settings, networks, channels, deliveryMode, _ ->
+                ) { settings, networks, channels, _ ->
                     val config = (settings as? NotificationSettingsState.Ready)?.config
                     if (config == null) {
                         NotificationSettingsUiState(
                             loading = settings == NotificationSettingsState.Loading,
                             unavailable = settings == NotificationSettingsState.Unavailable,
                             global = NotificationMode.OFF,
-                            deliveryMode = deliveryMode,
                         )
                     } else {
                         val now = clock.nowMillis()
@@ -133,20 +135,38 @@ class NotificationSettingsViewModel
                                         channels = channelRows,
                                     )
                                 },
-                            deliveryMode = deliveryMode,
                         )
                     }
                 },
-                settingsRepository.notificationPreview,
+                settingsRepository.settings,
                 saveError,
-            ) { base, preview, error -> base.copy(preview = preview, saveError = error) }
-                .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotificationSettingsUiState())
+            ) { base, prefs, error ->
+                base.copy(
+                    deliveryMode = prefs.deliveryMode,
+                    preview = prefs.notificationPreview,
+                    quietHoursEnabled = prefs.quietHoursEnabled,
+                    quietHoursStartMinute = prefs.quietHoursStartMinute,
+                    quietHoursEndMinute = prefs.quietHoursEndMinute,
+                    suppressAlertsWhileAway = prefs.suppressAlertsWhileAway,
+                    saveError = error,
+                )
+            }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), NotificationSettingsUiState())
 
         fun setGlobal(mode: NotificationMode) = save { notificationSettings.setGlobal(mode) }
 
-        fun setPreview(preview: NotificationPreview) =
+        fun setPreview(preview: NotificationPreview) = savePreference { settingsRepository.setNotificationPreview(preview) }
+
+        fun setQuietHoursEnabled(enabled: Boolean) = savePreference { settingsRepository.setQuietHoursEnabled(enabled) }
+
+        fun setQuietHoursStartMinute(minute: Int) = savePreference { settingsRepository.setQuietHoursStartMinute(minute) }
+
+        fun setQuietHoursEndMinute(minute: Int) = savePreference { settingsRepository.setQuietHoursEndMinute(minute) }
+
+        fun setSuppressAlertsWhileAway(enabled: Boolean) = savePreference { settingsRepository.setSuppressAlertsWhileAway(enabled) }
+
+        private fun savePreference(operation: suspend () -> Unit) =
             save {
-                settingsRepository.setNotificationPreview(preview)
+                operation()
                 true
             }
 

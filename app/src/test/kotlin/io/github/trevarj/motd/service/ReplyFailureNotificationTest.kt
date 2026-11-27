@@ -87,7 +87,7 @@ class ReplyFailureNotificationTest {
             shadowOf(context as android.app.Application)
                 .grantPermissions(android.Manifest.permission.POST_NOTIFICATIONS)
             repo = DataStoreSettingsRepository(context)
-            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+            notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo, unusedConnections)
         }
 
     @After
@@ -135,6 +135,7 @@ class ReplyFailureNotificationTest {
                     object : SettingsRepository by repo {
                         override val notificationPreview = flow<NotificationPreview> { error("preview unavailable") }
                     },
+                    unusedConnections,
                 )
             generic.onReplyFailed(bufferId, "lost private text", SendRejectionReason.NOT_IN_CHANNEL)
 

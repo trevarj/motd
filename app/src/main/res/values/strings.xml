@@ -286,6 +286,13 @@
     <string name="settings_notifications">Notifications</string>
     <string name="settings_notifications_summary">Alerts, watches, and message previews</string>
     <string name="notification_global_default">Global notifications</string>
+    <string name="notification_quiet_group">When to mute alerts</string>
+    <string name="notification_quiet_hours">Quiet hours</string>
+    <string name="notification_quiet_hours_summary">Mute message and mention alerts between these local times every day. Matching times mean no quiet period.</string>
+    <string name="notification_quiet_start">Start time</string>
+    <string name="notification_quiet_end">End time</string>
+    <string name="notification_mute_while_away">Mute alerts while away</string>
+    <string name="notification_mute_while_away_summary">Mute message and mention alerts from a network while its server confirms you are away.</string>
     <string name="notification_server_default">Server notifications</string>
     <string name="notification_mode_all">All messages</string>
     <string name="notification_mode_mentions">Mentions and direct messages</string>

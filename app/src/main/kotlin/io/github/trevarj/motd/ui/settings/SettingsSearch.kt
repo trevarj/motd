@@ -141,6 +141,8 @@ private val STATIC_SEARCH_SPECS =
         spec(R.string.settings_security, R.string.settings_security_summary, "privacy remote content transfers typing media avatars encryption", SettingsSearchPage.SECURITY, SettingsTarget.SECURITY),
         spec(R.string.settings_delivery, R.string.settings_delivery_summary, "notifications push background", SettingsSearchPage.DELIVERY, SettingsTarget.DELIVERY),
         spec(R.string.settings_notifications, R.string.settings_notifications_summary, "notifications alerts mentions mute watch all messages privacy previews lock screen Android Auto", SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATIONS),
+        spec(R.string.notification_quiet_hours, R.string.notification_quiet_hours_summary, "quiet hours overnight schedule silence bedtime", SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATION_QUIET_HOURS),
+        spec(R.string.notification_mute_while_away, R.string.notification_mute_while_away_summary, "mute alerts while away IRC status", SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATION_MUTE_WHILE_AWAY),
         spec(R.string.settings_history, R.string.settings_history_summary, "messages storage database prune size", SettingsSearchPage.HISTORY, SettingsTarget.HISTORY),
         spec(R.string.settings_uploads, R.string.settings_uploads_summary, "attachments paste files", SettingsSearchPage.UPLOADS, SettingsTarget.UPLOADS),
         spec(R.string.settings_backup_restore, R.string.settings_backup_restore_summary, "data export import", SettingsSearchPage.BACKUP, SettingsTarget.BACKUP),

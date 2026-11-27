@@ -201,6 +201,8 @@ class SettingsSearchTest {
             assertTrue("notification scope must be searchable by $query", searchSettings(query, entries).any { it.destination == destination })
         }
         assertEquals(listOf(destination), searchSettings("watch all messages", entries).map { it.destination })
+        assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATION_QUIET_HOURS), searchSettings("overnight", entries).first().destination)
+        assertEquals(SettingsSearchDestination.Page(SettingsSearchPage.NOTIFICATIONS, SettingsTarget.NOTIFICATION_MUTE_WHILE_AWAY), searchSettings("while away", entries).first().destination)
     }
 
     @Test
