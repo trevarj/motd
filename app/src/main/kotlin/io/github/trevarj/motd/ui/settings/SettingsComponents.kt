@@ -180,8 +180,12 @@ internal fun SettingsNavigationRow(
     onClick: () -> Unit,
 ) {
     val row: @Composable (Modifier) -> Unit = { targetModifier ->
+        val colors = ListItemDefaults.colors(containerColor = Color.Transparent)
         ListItem(
-            leadingContent = icon?.let { image -> ({ Icon(image, contentDescription = null, tint = iconTint) }) },
+            leadingContent =
+                icon?.let { image ->
+                    { Icon(image, contentDescription = null, tint = if (enabled) iconTint else colors.disabledLeadingIconColor) }
+                },
             headlineContent = { Text(title, fontWeight = FontWeight.Medium) },
             supportingContent =
                 if (summary != null || value != null) {
@@ -195,7 +199,15 @@ internal fun SettingsNavigationRow(
                     null
                 },
             trailingContent = { Icon(Icons.Outlined.ChevronRight, contentDescription = null) },
-            colors = ListItemDefaults.colors(containerColor = Color.Transparent),
+            colors =
+                if (enabled) {
+                    colors
+                } else {
+                    colors.copy(
+                        headlineColor = colors.disabledHeadlineColor,
+                        trailingIconColor = colors.disabledTrailingIconColor,
+                    )
+                },
             modifier =
                 modifier
                     .then(targetModifier)

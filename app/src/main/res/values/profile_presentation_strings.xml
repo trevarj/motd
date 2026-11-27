@@ -2,9 +2,6 @@
 <resources>
     <string name="settings_profile_display_name_first">Display names first</string>
     <string name="settings_profile_display_name_first_summary">Put IRC profile display names before nicks and channel names. Both names stay visible.</string>
-    <string name="profile_bot_software">Bot software: %1$s</string>
-    <string name="profile_user_pronouns">Pronouns: %1$s</string>
-    <string name="profile_user_status">Status: %1$s</string>
-    <string name="profile_user_color">Profile color: %1$s</string>
-    <string name="profile_user_homepage">Homepage: %1$s</string>
+    <string name="nick_profile_heading">Profile</string>
+    <string name="nick_profile_irc_details">IRC details</string>
 </resources>

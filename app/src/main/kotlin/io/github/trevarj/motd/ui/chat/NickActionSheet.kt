@@ -8,14 +8,19 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Message
+import androidx.compose.material.icons.automirrored.outlined.OpenInNew
 import androidx.compose.material.icons.filled.Block
+import androidx.compose.material.icons.filled.ExpandLess
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Gavel
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Shield
@@ -31,13 +36,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.LocalTextStyle
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -47,10 +55,14 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.trevarj.motd.R
 import io.github.trevarj.motd.dickord.dickordNickLabel
 import io.github.trevarj.motd.dickord.isDickordRelayNick
@@ -65,7 +77,6 @@ import io.github.trevarj.motd.ui.components.botDisplayName
 import io.github.trevarj.motd.ui.components.openChatLinkInBrowser
 import io.github.trevarj.motd.ui.profile.LocalIrcProfileRepository
 import io.github.trevarj.motd.ui.profile.ircIdentityLabels
-import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.profile.safeProfileHomepage
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.readableForeground
@@ -121,14 +132,26 @@ internal fun NickActionSheet(
     val canEditAvatar = canEditConversationAvatar && !relayIdentity
     val profileNetworkId = networkId.takeUnless { relayIdentity || isDickordRelayNick(nick) }
     val repository = LocalIrcProfileRepository.current
-    if (profileNetworkId != null && repository != null) {
-        LaunchedEffect(repository, profileNetworkId, nick) { repository.refreshUser(profileNetworkId, nick) }
-    }
-    val profile = rememberIrcProfile(profileNetworkId, nick)
+    val profile =
+        if (profileNetworkId != null && repository != null) {
+            key(repository, profileNetworkId, nick) {
+                val values = remember { repository.observeUserProfile(profileNetworkId, nick) }
+                values.collectAsStateWithLifecycle(initialValue = null).value.orEmpty()
+            }
+        } else {
+            emptyMap()
+        }
     val (primaryName, secondaryName) = ircIdentityLabels(dickordNickLabel(nick, relayIdentity), profile[ProfileKey.DISPLAY_NAME])
     val isBot = whois?.isBot == true || ProfileKey.BOT in profile
     val colorValue = profile[ProfileKey.COLOR]
     val profileColor = remember(colorValue) { colorValue?.let(::parseColorHex)?.let { Color(it) } }
+    val homepage = profile[ProfileKey.HOMEPAGE]
+    val link = remember(homepage) { homepage?.let(::safeProfileHomepage) }
+    val hasProfileDetails =
+        profileColor != null || link != null ||
+            !profile[ProfileKey.STATUS].isNullOrBlank() || !profile[ProfileKey.PRONOUNS].isNullOrBlank() ||
+            !profile[ProfileKey.BOT].isNullOrBlank()
+    val prominentIdentity = hasProfileDetails || secondaryName != null
 
     // Root tag disambiguates from MessageActionSheet when both could be open.
     ModalBottomSheet(
@@ -141,15 +164,19 @@ internal fun NickActionSheet(
         Column(modifier = Modifier.verticalScroll(rememberScrollState()).padding(bottom = 24.dp)) {
             // Avatar, both names if supplied, and profile/WHOIS details.
             ListItem(
-                headlineContent = { Text(botDisplayName(primaryName, isBot)) },
+                headlineContent = {
+                    Text(
+                        botDisplayName(primaryName, isBot),
+                        style = if (prominentIdentity) MaterialTheme.typography.titleLarge else LocalTextStyle.current,
+                    )
+                },
                 supportingContent = {
                     if (relayIdentity) {
                         Text(stringResource(R.string.dickord_relay_identity))
                     } else {
                         Column {
                             secondaryName?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
-                            NickProfileSummary(profile, profileColor)
-                            WhoisSummary(whois, presence)
+                            if (!hasProfileDetails) WhoisSummary(whois, presence)
                         }
                     }
                 },
@@ -160,7 +187,7 @@ internal fun NickActionSheet(
                         {
                             Avatar(
                                 name = nick,
-                                size = 40.dp,
+                                size = if (prominentIdentity) 56.dp else 40.dp,
                                 networkId = networkId,
                                 conversationModel = conversationModel,
                                 profileColor = profileColor,
@@ -174,6 +201,11 @@ internal fun NickActionSheet(
                         }
                     },
             )
+            if (hasProfileDetails) {
+                key(profileNetworkId, nick) {
+                    NickProfileDetails(profile, profileColor, link, whois, presence)
+                }
+            }
             if (canEditAvatar) {
                 NickAction(
                     Icons.Outlined.Edit,
@@ -349,49 +381,129 @@ internal fun NickKickDialog(
 }
 
 @Composable
+internal fun NickProfileDetails(
+    profile: Map<ProfileKey, String>,
+    profileColor: Color?,
+    homepage: String?,
+    whois: WhoisInfo?,
+    presence: PresenceState?,
+) {
+    var expanded by rememberSaveable { mutableStateOf(false) }
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            Text(
+                stringResource(R.string.nick_profile_heading),
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.semantics { heading() },
+            )
+            NickProfileSummary(profile, profileColor, homepage)
+        }
+    }
+    val expansionState = stringResource(if (expanded) R.string.new_sheet_expanded else R.string.new_sheet_collapsed)
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .testTag("nick_profile_irc_details")
+                .semantics { stateDescription = expansionState }
+                .clickable(role = Role.Button) { expanded = !expanded }
+                .heightIn(min = 48.dp)
+                .padding(horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            stringResource(R.string.nick_profile_irc_details),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.weight(1f),
+        )
+        Icon(if (expanded) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null)
+    }
+    if (expanded) {
+        Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, bottom = 12.dp)) {
+            WhoisSummary(whois, presence)
+        }
+    }
+}
+
+@Composable
 private fun NickProfileSummary(
     profile: Map<ProfileKey, String>,
     profileColor: Color?,
+    link: String?,
 ) {
-    val style = MaterialTheme.typography.bodySmall
-    profile[ProfileKey.BOT]?.takeIf { it.isNotBlank() }?.let {
-        Text(stringResource(R.string.profile_bot_software, it), modifier = Modifier.testTag("nick_profile_bot"), style = style)
+    profile[ProfileKey.STATUS]?.takeIf { it.isNotBlank() }?.let {
+        NickProfileField(R.string.profile_editor_status, it, "nick_profile_status")
     }
     profile[ProfileKey.PRONOUNS]?.takeIf { it.isNotBlank() }?.let {
-        Text(stringResource(R.string.profile_user_pronouns, it), modifier = Modifier.testTag("nick_profile_pronouns"), style = style)
+        NickProfileField(R.string.profile_editor_pronouns, it, "nick_profile_pronouns")
     }
-    profile[ProfileKey.STATUS]?.takeIf { it.isNotBlank() }?.let {
-        Text(stringResource(R.string.profile_user_status, it), modifier = Modifier.testTag("nick_profile_status"), style = style)
+    profile[ProfileKey.BOT]?.takeIf { it.isNotBlank() }?.let {
+        NickProfileField(R.string.profile_editor_bot, it, "nick_profile_bot")
     }
     if (profileColor != null) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Box(
-                Modifier
-                    .size(12.dp)
-                    .background(profileColor, CircleShape)
-                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
-            )
-            Text(
-                stringResource(R.string.profile_user_color, profile[ProfileKey.COLOR].orEmpty()),
-                modifier = Modifier.testTag("nick_profile_color"),
-                style = style,
-            )
-        }
+        NickProfileField(R.string.profile_editor_color, profile[ProfileKey.COLOR].orEmpty(), "nick_profile_color", swatch = profileColor)
     }
-    val homepage = profile[ProfileKey.HOMEPAGE]
-    val link = remember(homepage) { homepage?.let(::safeProfileHomepage) }
     if (link != null) {
         val context = LocalContext.current
+        NickProfileField(R.string.profile_editor_homepage, link, "nick_profile_homepage") { context.openChatLinkInBrowser(link) }
+    }
+}
+
+@Composable
+private fun NickProfileField(
+    label: Int,
+    value: String,
+    tag: String,
+    swatch: Color? = null,
+    onOpen: (() -> Unit)? = null,
+) {
+    val scheme = MaterialTheme.colorScheme
+    val fill = scheme.surfaceContainerHighest
+    val action =
+        if (onOpen == null) {
+            Modifier.semantics(mergeDescendants = true) {}
+        } else {
+            Modifier
+                .clickable(onClickLabel = stringResource(R.string.chat_link_open_browser), role = Role.Button, onClick = onOpen)
+                .heightIn(min = 48.dp)
+                .padding(vertical = 12.dp)
+        }
+    val valueColor = if (onOpen == null) Color.Unspecified else scheme.readableForeground(scheme.primary, fill)
+    Row(
+        modifier = Modifier.fillMaxWidth().testTag(tag).then(action),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
         Text(
-            stringResource(R.string.profile_user_homepage, link),
-            modifier =
-                Modifier
-                    .testTag("nick_profile_homepage")
-                    .clickable(onClickLabel = stringResource(R.string.chat_link_open_browser)) { context.openChatLinkInBrowser(link) }
-                    .padding(vertical = 4.dp),
-            color = MaterialTheme.colorScheme.primary,
-            style = style,
+            stringResource(label),
+            color = scheme.readableForeground(scheme.onSurfaceVariant, fill),
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.weight(1f).alignByBaseline(),
         )
+        Row(
+            modifier = Modifier.weight(2f).alignByBaseline(),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (swatch != null) {
+                Box(
+                    Modifier
+                        .size(12.dp)
+                        .background(swatch, CircleShape)
+                        .border(1.dp, scheme.outline, CircleShape),
+                )
+            }
+            Text(value, color = valueColor, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+            if (onOpen != null) {
+                Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, modifier = Modifier.size(14.dp), tint = valueColor)
+            }
+        }
     }
 }
 

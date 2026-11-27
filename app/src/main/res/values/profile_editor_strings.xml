@@ -3,6 +3,7 @@
     <string name="profile_user_title">User profile</string>
     <string name="profile_channel_title">Channel profile</string>
     <string name="profile_network_entry_summary">View and publish your IRCv3 profile on this network</string>
+    <string name="profile_entry_unavailable">Requires a connection with IRCv3 profile metadata support</string>
     <string name="profile_editor_loading">Loading profile…</string>
     <string name="profile_editor_identity">IRC identity: %1$s</string>
     <string name="profile_editor_network">Network: %1$s</string>

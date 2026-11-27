@@ -14,6 +14,16 @@ internal val LocalIrcProfileRepository = staticCompositionLocalOf<IrcProfileRepo
 internal val LocalProfileDisplayNameFirst = compositionLocalOf { false }
 
 @Composable
+internal fun rememberProfileMetadataSupported(networkId: Long?): Boolean {
+    if (networkId == null) return false
+    val repository = LocalIrcProfileRepository.current ?: return false
+    return key(repository, networkId) {
+        val supported = remember { repository.supportsMetadata(networkId) }
+        supported.collectAsStateWithLifecycle(initialValue = false).value
+    }
+}
+
+@Composable
 internal fun rememberIrcProfile(
     networkId: Long?,
     target: String,

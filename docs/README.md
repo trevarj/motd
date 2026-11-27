@@ -168,6 +168,11 @@ Mentions insert at the cursor or replace the selection. The `: ` suffix is used
 only at whole-message start, never merely because text wraps or follows an
 earlier nonblank line.
 
+Use `/whois nick` or open a nick's user menu to view their profile. When the
+network has negotiated IRCv3 metadata, the profile shows the fields the server
+returns. If there are extra profile details, WHOIS moves under **IRC details**.
+Without them, the usual WHOIS details remain visible directly.
+
 On a server that supports IRCv3 metadata, open **User profile** from a channel's
 overflow menu or from Network Settings. Publish or remove each field separately:
 avatar, display name, bot software, color, homepage, pronouns, and status. These
@@ -176,6 +181,7 @@ doesn't set IRC Away.
 
 **Channel info → Channel profile** shows the shared avatar and display name.
 Channel operators and higher ranks can edit them when the server permits it.
+Both profile settings are disabled until the network negotiates IRCv3 metadata.
 The chat avatar editor still sets a device-only override. **Settings → Chat**
 lets you choose whether the real IRC name or the display name is shown first.
 Mentions and commands always use the real IRC identity.

@@ -106,6 +106,7 @@ import io.github.trevarj.motd.ui.components.notificationIcon
 import io.github.trevarj.motd.ui.components.summary
 import io.github.trevarj.motd.ui.profile.ircIdentityLabels
 import io.github.trevarj.motd.ui.profile.rememberIrcProfile
+import io.github.trevarj.motd.ui.profile.rememberProfileMetadataSupported
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
 import io.github.trevarj.motd.ui.settings.foolEditorPreferences
 import io.github.trevarj.motd.ui.theme.LocalAdjustPaletteReadability
@@ -554,15 +555,27 @@ fun ChannelInfoContent(
                     (!dickordEnabled || !isDickordPortalConversation(buffer.type, buffer.displayName))
                 ) {
                     item(key = "channel-profile") {
+                        val profileEnabled = rememberProfileMetadataSupported(buffer.networkId)
+                        val colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)
                         ListItem(
-                            colors = ListItemDefaults.colors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                            colors =
+                                if (profileEnabled) {
+                                    colors
+                                } else {
+                                    colors.copy(
+                                        headlineColor = colors.disabledHeadlineColor,
+                                        leadingIconColor = colors.disabledLeadingIconColor,
+                                    )
+                                },
                             headlineContent = { Text(stringResource(R.string.profile_channel_title)) },
+                            supportingContent =
+                                if (profileEnabled) null else ({ Text(stringResource(R.string.profile_entry_unavailable)) }),
                             leadingContent = { Icon(Icons.Outlined.Forum, contentDescription = null) },
                             modifier =
                                 Modifier
                                     .semantics { testTagsAsResourceId = true }
                                     .testTag("channel_profile")
-                                    .clickable(role = Role.Button) { onOpenChannelProfile(buffer.id) },
+                                    .clickable(enabled = profileEnabled, role = Role.Button) { onOpenChannelProfile(buffer.id) },
                         )
                     }
                 }

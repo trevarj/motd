@@ -42,6 +42,7 @@ data class ProfileEditorState(
     val networkName: String? = null,
     val sojuFileHostUrl: String? = null,
     val readable: Boolean = access == ProfileAccess.READ_ONLY || access == ProfileAccess.WRITABLE,
+    internal val normalizedIdentity: String = identity,
 )
 
 enum class ProfileWriteResult { CONFIRMED, UNCONFIRMED, REJECTED, INVALID, READ_ONLY, OFFLINE, UNSUPPORTED }

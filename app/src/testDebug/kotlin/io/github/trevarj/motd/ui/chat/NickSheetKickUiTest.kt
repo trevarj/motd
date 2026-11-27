@@ -10,9 +10,11 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.SemanticsMatcher
+import androidx.compose.ui.test.assertHasClickAction
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.compose.ui.test.assertIsSelected
+import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.isEnabled
@@ -42,6 +44,7 @@ import io.github.trevarj.motd.data.repo.NetworkIgnoreRepository
 import io.github.trevarj.motd.data.repo.NetworkIgnoreRepositoryImpl
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
+import io.github.trevarj.motd.profile.ProfileKey
 import io.github.trevarj.motd.ui.components.ReasonPresetChips
 import io.github.trevarj.motd.ui.settings.FoolPreferencesEditor
 import io.github.trevarj.motd.ui.settings.FoolSettingsSheet
@@ -71,6 +74,37 @@ class NickSheetKickUiTest {
     val uiDispatcher = UiDispatcherResetRule()
 
     @get:Rule val compose = createComposeRule()
+
+    @Test
+    fun profileStatusStaysVisibleWhileIrcDetailsExpandAndCollapse() {
+        compose.setContent {
+            MotdTheme(dynamicColor = false) {
+                NickProfileDetails(
+                    profile =
+                        mapOf(
+                            ProfileKey.STATUS to "Back after coffee",
+                            ProfileKey.PRONOUNS to "they/them",
+                        ),
+                    profileColor = null,
+                    homepage = "https://example.org/",
+                    whois = WhoisInfo(nick = "fixture", account = "registered-fixture"),
+                    presence = null,
+                )
+            }
+        }
+
+        val whoisAccount = compose.onNodeWithText("Account: registered-fixture")
+        val disclosure = compose.onNodeWithTag("nick_profile_irc_details")
+        whoisAccount.assertDoesNotExist()
+        compose.onNodeWithTag("nick_profile_status").assertTextEquals("Status", "Back after coffee")
+        compose.onNodeWithTag("nick_profile_pronouns").assertTextEquals("Pronouns", "they/them")
+        compose.onNodeWithTag("nick_profile_homepage").assertTextEquals("Homepage", "https://example.org/").assertHasClickAction()
+        disclosure.performClick()
+        whoisAccount.assertExists()
+        disclosure.performClick()
+        whoisAccount.assertDoesNotExist()
+        compose.onNodeWithTag("nick_profile_status").assertExists()
+    }
 
     @Test
     fun existing_fool_profile_opens_shared_persisted_editor_with_network_identity_rules() {

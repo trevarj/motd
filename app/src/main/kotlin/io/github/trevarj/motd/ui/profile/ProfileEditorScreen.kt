@@ -54,6 +54,12 @@ import io.github.trevarj.motd.ui.components.EmojiText as Text
 private val selfFields = listOf(ProfileKey.AVATAR, ProfileKey.BOT, ProfileKey.COLOR, ProfileKey.DISPLAY_NAME, ProfileKey.HOMEPAGE, ProfileKey.PRONOUNS, ProfileKey.STATUS)
 private val channelFields = listOf(ProfileKey.AVATAR, ProfileKey.DISPLAY_NAME)
 
+private val ProfileAccess.metadataAvailable: Boolean
+    get() = this == ProfileAccess.WRITABLE || this == ProfileAccess.READ_ONLY
+
+private val ProfileEditorState.metadataReadable: Boolean
+    get() = readable && access.metadataAvailable
+
 @Composable
 internal fun ProfileEditorScreen(
     target: ProfileTarget,
@@ -61,22 +67,26 @@ internal fun ProfileEditorScreen(
     onOpenNetworkSettings: (Long) -> Unit,
     viewModel: ProfileEditorViewModel = hiltViewModel(),
 ) {
-    val editor = remember(viewModel, target) { viewModel.editor(target) }
-    val state by editor.collectAsStateWithLifecycle(initialValue = null)
+    val currentState =
+        key(viewModel, target) {
+            val editor = remember { viewModel.editor(target) }
+            editor.collectAsStateWithLifecycle(initialValue = null).value
+        }
     val writeState by viewModel.writeState.collectAsStateWithLifecycle()
-    val identity = state?.identity
-    val readable = state?.readable == true
+    val identity = currentState?.identity
+    val readable = currentState?.metadataReadable == true
     LaunchedEffect(viewModel, target, identity, readable) {
         if (readable) viewModel.refresh(target)
     }
     ProfileEditorContent(
         target = target,
-        state = state,
+        state = currentState,
         writeState = writeState,
         onBack = onBack,
         onOpenNetworkSettings = onOpenNetworkSettings,
         onClearResult = viewModel::clearResult,
-        onWrite = { field, value -> viewModel.write(target, field, value) },
+        onWrite = { field, value -> currentState?.let { viewModel.write(target, it, field, value) } },
+        avatarUpload = viewModel.avatarUpload,
     )
 }
 
@@ -89,85 +99,100 @@ internal fun ProfileEditorContent(
     onOpenNetworkSettings: (Long) -> Unit,
     onClearResult: () -> Unit,
     onWrite: (ProfileKey, String?) -> Unit,
-) {
-    val isChannel = target is ProfileTarget.Channel
-    val fields = if (isChannel) channelFields else selfFields
-    var fieldName by rememberSaveable(target) { mutableStateOf<String?>(null) }
-    val field = fields.find { it.name == fieldName }
-    var draft by rememberSaveable(target, fieldName) { mutableStateOf<String?>(null) }
-    var uploadOpen by rememberSaveable(target, fieldName) { mutableStateOf(false) }
-    LaunchedEffect(writeState.result) {
-        if (writeState.result == ProfileWriteResult.CONFIRMED) draft = null
-    }
-    val requestBack = {
-        if (field == null) {
-            onBack()
-        } else if (!writeState.pending) {
-            fieldName = null
+    avatarUpload: ProfileEditorAvatarUpload? = null,
+): Unit =
+    key(target, state?.networkId, state?.normalizedIdentity) {
+        val result = writeState.result?.takeIf { writeState.binding == state?.binding(target) }
+        val isChannel = target is ProfileTarget.Channel
+        val fields = if (isChannel) channelFields else selfFields
+        var fieldName by rememberSaveable { mutableStateOf<String?>(null) }
+        val field = fields.find { it.name == fieldName }
+        var draft by rememberSaveable(fieldName) { mutableStateOf<String?>(null) }
+        val upload = avatarUpload?.request?.collectAsStateWithLifecycle()?.value
+        val canUpload =
+            field == ProfileKey.AVATAR && state?.metadataReadable == true &&
+                state.access == ProfileAccess.WRITABLE && state.networkId != null && !writeState.pending
+        LaunchedEffect(avatarUpload, target, upload?.id) {
+            if (upload != null && upload.binding.target != target) avatarUpload?.clear(upload)
+        }
+        LaunchedEffect(result) {
+            if (result == ProfileWriteResult.CONFIRMED) draft = null
+        }
+        val requestBack = {
+            if (field == null) {
+                onBack()
+            } else if (!writeState.pending) {
+                if (upload != null) avatarUpload?.clear(upload)
+                fieldName = null
+                onClearResult()
+            }
+        }
+        BackHandler(enabled = field != null, onBack = requestBack)
+        val title = field?.label ?: if (isChannel) R.string.profile_channel_title else R.string.profile_user_title
+        val valueChanged: (String) -> Unit = {
+            draft = it
             onClearResult()
         }
-    }
-    BackHandler(enabled = field != null, onBack = requestBack)
-    val title = field?.label ?: if (isChannel) R.string.profile_channel_title else R.string.profile_user_title
-    val valueChanged: (String) -> Unit = {
-        draft = it
-        onClearResult()
-    }
 
-    key(field) {
-        SettingsScaffold(
-            title = stringResource(title),
-            onBack = requestBack,
-            modifier = Modifier.testTag(if (isChannel) "screen_channel_profile" else "screen_user_profile"),
-        ) {
-            if (state == null) {
-                Text(stringResource(R.string.profile_editor_loading))
-            } else {
-                ProfileScope(state, isChannel)
-                if (field == null) {
-                    SettingsGroup {
-                        fields.forEach { key ->
-                            SettingsNavigationRow(
-                                title = stringResource(key.label),
-                                summary = serverValue(state, key),
-                                modifier = Modifier.testTag("profile_field_${key.wireName}"),
-                                onClick = { fieldName = key.name },
-                            )
-                        }
-                    }
+        key(field) {
+            SettingsScaffold(
+                title = stringResource(title),
+                onBack = requestBack,
+                modifier = Modifier.testTag(if (isChannel) "screen_channel_profile" else "screen_user_profile"),
+            ) {
+                if (state == null) {
+                    Text(stringResource(R.string.profile_editor_loading))
                 } else {
-                    ProfileFieldEditor(
-                        state = state,
-                        field = field,
-                        isChannel = isChannel,
-                        draft = draft,
-                        writeState = writeState,
-                        onDraftChange = valueChanged,
-                        onOpenUpload = { uploadOpen = true },
-                        onWrite = { onWrite(field, it) },
-                    )
+                    ProfileScope(state, isChannel)
+                    if (field == null) {
+                        SettingsGroup {
+                            fields.forEach { key ->
+                                SettingsNavigationRow(
+                                    title = stringResource(key.label),
+                                    summary = serverValue(state, key),
+                                    modifier = Modifier.testTag("profile_field_${key.wireName}"),
+                                    enabled = state.metadataReadable,
+                                    onClick = { fieldName = key.name },
+                                )
+                            }
+                        }
+                    } else {
+                        ProfileFieldEditor(
+                            state = state,
+                            field = field,
+                            isChannel = isChannel,
+                            draft = draft,
+                            pending = writeState.pending,
+                            result = result,
+                            onDraftChange = valueChanged,
+                            onOpenUpload = { avatarUpload?.open(target, state) },
+                            onWrite = { onWrite(field, it) },
+                        )
+                    }
                 }
             }
         }
-    }
-    if (uploadOpen && field == ProfileKey.AVATAR && state != null) {
-        val onUrl: (String) -> Unit = {
-            valueChanged(it)
-            uploadOpen = false
+        if (avatarUpload != null && upload != null && state != null && canUpload && upload.binding == state.binding(target)) {
+            if (upload.url != null) {
+                LaunchedEffect(avatarUpload, upload) {
+                    avatarUpload.take(upload)?.let(valueChanged)
+                }
+            } else {
+                val onUrl: (String) -> Unit = { avatarUpload.complete(upload, it) }
+                AttachmentSheets(
+                    open = true,
+                    currentDraft = "",
+                    networkId = state.networkId,
+                    sojuFileHostUrl = state.sojuFileHostUrl,
+                    imageOnly = true,
+                    onDismiss = { avatarUpload.dismiss(upload) },
+                    onInsertUrl = onUrl,
+                    onReplaceDraft = onUrl,
+                    onOpenNetworkSettings = onOpenNetworkSettings,
+                )
+            }
         }
-        AttachmentSheets(
-            open = true,
-            currentDraft = "",
-            networkId = state.networkId,
-            sojuFileHostUrl = state.sojuFileHostUrl,
-            imageOnly = true,
-            onDismiss = { uploadOpen = false },
-            onInsertUrl = onUrl,
-            onReplaceDraft = onUrl,
-            onOpenNetworkSettings = onOpenNetworkSettings,
-        )
     }
-}
 
 @Composable
 private fun ProfileScope(
@@ -196,14 +221,15 @@ private fun ProfileFieldEditor(
     field: ProfileKey,
     isChannel: Boolean,
     draft: String?,
-    writeState: ProfileWriteState,
+    pending: Boolean,
+    result: ProfileWriteResult?,
     onDraftChange: (String) -> Unit,
     onOpenUpload: () -> Unit,
     onWrite: (String?) -> Unit,
 ) {
-    val value = draft ?: state.values[field].orEmpty()
-    val writable = state.access == ProfileAccess.WRITABLE
-    val enabled = writable && !writeState.pending
+    val value = draft ?: state.values[field].takeIf { state.metadataReadable }.orEmpty()
+    val writable = state.metadataReadable && state.access == ProfileAccess.WRITABLE
+    val enabled = writable && !pending
     val focus = LocalFocusManager.current
     SettingsGroup {
         SettingsValueRow(
@@ -221,7 +247,7 @@ private fun ProfileFieldEditor(
             onValueChange = onDraftChange,
             enabled = enabled,
             singleLine = true,
-            isError = writeState.result == ProfileWriteResult.INVALID,
+            isError = result == ProfileWriteResult.INVALID,
             colors = readableOutlinedTextFieldColors(),
             label = { Text(stringResource(if (field == ProfileKey.AVATAR) R.string.network_settings_avatar_url else field.label)) },
             supportingText = hint?.let { { Text(stringResource(it)) } },
@@ -236,17 +262,16 @@ private fun ProfileFieldEditor(
         )
     }
     if (field == ProfileKey.AVATAR) {
-        if (value.isNotBlank()) {
+        if (state.metadataReadable && value.isNotBlank()) {
             ExplicitAvatarUrlPreview(value, state.networkId, state.identity, isChannel)
         }
-        if (writable && state.networkId != null) {
+        if (state.access != ProfileAccess.READ_ONLY && state.networkId != null) {
             OutlinedButton(onClick = onOpenUpload, enabled = enabled) { Text(stringResource(R.string.avatar_upload)) }
             Text(stringResource(R.string.profile_editor_upload_help), style = MaterialTheme.typography.bodySmall)
         }
         if (!isChannel) Text(stringResource(R.string.profile_editor_managed_avatar_help), style = MaterialTheme.typography.bodySmall)
     }
-    val result = writeState.result
-    val message = if (writeState.pending) R.string.profile_editor_sending else result?.message
+    val message = if (pending) R.string.profile_editor_sending else result?.message
     message?.let {
         Text(
             stringResource(it),
@@ -254,7 +279,7 @@ private fun ProfileFieldEditor(
             modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite },
         )
     }
-    if (writable) {
+    if (state.access != ProfileAccess.READ_ONLY) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(
                 onClick = {
@@ -282,13 +307,11 @@ private fun serverValue(
     state: ProfileEditorState,
     field: ProfileKey,
 ): String =
-    state.values[field] ?: stringResource(
-        if (state.access == ProfileAccess.OFFLINE || state.access == ProfileAccess.UNSUPPORTED) {
-            R.string.profile_editor_unavailable_value
-        } else {
-            R.string.profile_editor_not_set
-        },
-    )
+    if (state.metadataReadable) {
+        state.values[field] ?: stringResource(R.string.profile_editor_not_set)
+    } else {
+        stringResource(R.string.profile_editor_unavailable_value)
+    }
 
 private val ProfileKey.label: Int
     @StringRes get() =

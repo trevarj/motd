@@ -35,6 +35,7 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.consumeAsFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
@@ -670,13 +671,13 @@ class AvatarCoordinatorConversationTest {
             val rewritten = "https://example.com/rewritten.png"
             assertEquals(ConversationAvatarOutcome.LocalOnly, coordinator.setConversationAvatar(roomId, local))
             assertFalse(transport.sent.any { " SET avatar" in it })
-            assertEquals(ProfileWriteResult.READ_ONLY, profile.write(target, ProfileKey.AVATAR, submitted))
+            assertEquals(ProfileWriteResult.READ_ONLY, profile.write(target, networkId, "#chat", ProfileKey.AVATAR, submitted))
 
             transport.feed(":srv MODE #chat +q me")
             runCurrent()
             val writes = Channel<String>(Channel.UNLIMITED)
             transport.onMetadataWrite = { if (" SET " in it) writes.trySend(it).getOrThrow() }
-            val publish = async { profile.write(target, ProfileKey.AVATAR, submitted) }
+            val publish = async { profile.write(target, networkId, "#CHAT", ProfileKey.AVATAR, submitted) }
             val set = writes.receive()
             assertTrue(set.startsWith("@label=") && set.endsWith("METADATA #chat SET avatar $submitted"))
             transport.feed("${set.substringBefore(' ')} :srv 761 * #chat avatar * :$rewritten")
@@ -685,7 +686,7 @@ class AvatarCoordinatorConversationTest {
             assertEquals(local, db.bufferDao().observeById(roomId)?.avatarOverrideModel)
             assertEquals(listOf(StoredAvatar(networkId, "#chat", null, rewritten)), store.upserts)
 
-            val remove = async { profile.write(target, ProfileKey.AVATAR, null) }
+            val remove = async { profile.write(target, networkId, "#chat", ProfileKey.AVATAR, null) }
             val clear = writes.receive()
             transport.feed("${clear.substringBefore(' ')} :srv 766 me #chat avatar :Key not set")
             assertEquals(ProfileWriteResult.CONFIRMED, remove.await())
@@ -693,7 +694,7 @@ class AvatarCoordinatorConversationTest {
             assertEquals(local, db.bufferDao().observeById(roomId)?.avatarOverrideModel)
             assertEquals(listOf(RemovedAvatar(networkId, "#chat", null)), store.removals)
 
-            val refused = async { profile.write(target, ProfileKey.DISPLAY_NAME, "Not allowed by server") }
+            val refused = async { profile.write(target, networkId, "#chat", ProfileKey.DISPLAY_NAME, "Not allowed by server") }
             val refusedSet = writes.receive()
             transport.feed("${refusedSet.substringBefore(' ')} :srv FAIL METADATA KEY_NO_PERMISSION #chat display-name :Permission denied")
             assertEquals(ProfileWriteResult.REJECTED, refused.await())
@@ -703,7 +704,7 @@ class AvatarCoordinatorConversationTest {
                 if (" SET " in it) writes.trySend(it).getOrThrow()
                 if (" GET " in it) reads.trySend(it).getOrThrow()
             }
-            val hidden = async { profile.write(target, ProfileKey.DISPLAY_NAME, null) }
+            val hidden = async { profile.write(target, networkId, "#chat", ProfileKey.DISPLAY_NAME, null) }
             transport.feed("${writes.receive().substringBefore(' ')} :srv ACK")
             val getLabel = reads.receive().substringBefore(' ')
             transport.feed("$getLabel :srv BATCH +hidden metadata #chat")
@@ -714,7 +715,54 @@ class AvatarCoordinatorConversationTest {
 
             transport.feed(":srv MODE #chat -q me")
             runCurrent()
-            assertEquals(ProfileWriteResult.READ_ONLY, profile.write(target, ProfileKey.DISPLAY_NAME, "Not an operator"))
+            assertEquals(ProfileWriteResult.READ_ONLY, profile.write(target, networkId, "#chat", ProfileKey.DISPLAY_NAME, "Not an operator"))
+        }
+
+    @Test fun profile_write_does_not_retarget_a_draft_after_channel_rename() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val roomId = db.bufferDao().insert(BufferEntity(networkId = networkId, name = "#old", displayName = "#old", type = BufferType.CHANNEL))
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, FakeStore(), connections = connections)
+            val profile = IrcProfileRepository(db, Lazy { connections }, coordinator)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch labeled-response $METADATA_V3_CAP")
+            connections.clients[networkId] = client
+            profile.onReady(networkId, client)
+            collectAvatarEvents(networkId, coordinator, client, profile = profile)
+            transport.feed(":srv 005 me PREFIX=(ov)@+ :supported")
+            for (name in listOf("#old", "#new")) {
+                transport.feed(":me!u@h JOIN $name")
+                transport.feed(":srv 353 me = $name :@me")
+                transport.feed(":srv 366 me $name :End of NAMES")
+            }
+            runCurrent()
+            val target = ProfileTarget.Channel(roomId)
+            val writes = Channel<String>(Channel.UNLIMITED)
+            transport.onMetadataWrite = { if (" SET " in it) writes.trySend(it).getOrThrow() }
+            val first = async { profile.write(target, networkId, "#old", ProfileKey.DISPLAY_NAME, "first") }
+            val firstSet = writes.receive()
+            val queued = async { profile.write(target, networkId, "#old", ProfileKey.DISPLAY_NAME, "stale") }
+            runCurrent()
+            assertFalse(queued.isCompleted)
+
+            val room = checkNotNull(db.bufferDao().observeById(roomId))
+            db.bufferDao().update(room.copy(name = "#new", displayName = "#new"))
+            assertEquals(
+                ProfileWriteResult.READ_ONLY,
+                profile.write(target, networkId, "#old", ProfileKey.DISPLAY_NAME, "stale"),
+            )
+            transport.feed("${firstSet.substringBefore(' ')} :srv 761 me #old display-name * :first")
+            assertEquals(ProfileWriteResult.CONFIRMED, first.await())
+            assertEquals(ProfileWriteResult.READ_ONLY, queued.await())
+            assertTrue(writes.tryReceive().isFailure)
+
+            val current = async { profile.write(target, networkId, "#NEW", ProfileKey.DISPLAY_NAME, "current") }
+            val currentSet = writes.receive()
+            assertTrue(currentSet.endsWith("METADATA #new SET display-name current"))
+            transport.feed("${currentSet.substringBefore(' ')} :srv 761 me #new display-name * :current")
+            assertEquals(ProfileWriteResult.CONFIRMED, current.await())
         }
 
     @Test fun v2_unlabeled_write_requires_exact_target_scoped_readback() =
@@ -732,7 +780,7 @@ class AvatarCoordinatorConversationTest {
             val reads = Channel<IrcMessage>(Channel.UNLIMITED)
             transport.onMetadataWrite = { if (" GET " in it) reads.trySend(IrcMessage.parse(it)).getOrThrow() }
             val value = "  she/her (妳/她)  "
-            val write = async { profile.write(ProfileTarget.Self(networkId), ProfileKey.PRONOUNS, value) }
+            val write = async { profile.write(ProfileTarget.Self(networkId), networkId, "me", ProfileKey.PRONOUNS, value) }
             val read = reads.receive()
             assertTrue(transport.sent.contains("METADATA * SET pronouns :$value"))
             transport.feed(":srv 761 me me pronouns * :$value")
@@ -758,7 +806,7 @@ class AvatarCoordinatorConversationTest {
             assertEquals(ProfileWriteResult.CONFIRMED, write.await())
             assertEquals(value, profile.observe(networkId, "me").first()[ProfileKey.PRONOUNS])
 
-            val clear = async { profile.write(ProfileTarget.Self(networkId), ProfileKey.PRONOUNS, null) }
+            val clear = async { profile.write(ProfileTarget.Self(networkId), networkId, "me", ProfileKey.PRONOUNS, null) }
             reads.receive()
             reply("hidden", "me", pronouns = null)
             assertEquals(ProfileWriteResult.UNCONFIRMED, clear.await())
@@ -767,7 +815,7 @@ class AvatarCoordinatorConversationTest {
             val cancelled = async { profile.refresh(ProfileTarget.Self(networkId)) }
             reads.receive()
             cancelled.cancel()
-            val after = async { profile.write(ProfileTarget.Self(networkId), ProfileKey.PRONOUNS, value) }
+            val after = async { profile.write(ProfileTarget.Self(networkId), networkId, "me", ProfileKey.PRONOUNS, value) }
             runCurrent()
             assertTrue(reads.tryReceive().isFailure)
             reply("drained", "me")
@@ -776,6 +824,14 @@ class AvatarCoordinatorConversationTest {
             reply("new-read", "me")
             assertEquals(ProfileWriteResult.CONFIRMED, after.await())
             cancelled.join()
+
+            transport.feed(":me!u@h NICK :renamed")
+            runCurrent()
+            assertEquals(
+                ProfileWriteResult.READ_ONLY,
+                profile.write(ProfileTarget.Self(networkId), networkId, "me", ProfileKey.PRONOUNS, "stale"),
+            )
+            assertFalse(transport.sent.contains("METADATA * SET pronouns stale"))
         }
 
     @Test fun labeled_profile_get_cannot_overwrite_a_newer_live_value_in_either_cache() =
@@ -809,6 +865,61 @@ class AvatarCoordinatorConversationTest {
 
             assertEquals(live, profile.observe(networkId, "me").first()[ProfileKey.AVATAR])
             assertEquals(listOf(StoredAvatar(networkId, "me", null, live)), store.upserts)
+        }
+
+    @Test fun user_profile_requests_metadata_after_live_ack_and_clears_it_on_cap_del() =
+        runTest {
+            useTestSchedulerForRoom()
+            val networkId = insertNetwork()
+            val connections = FakeConnections()
+            val coordinator = coordinator(this, FakeStore(), connections = connections)
+            val profile = IrcProfileRepository(db, Lazy { connections }, coordinator)
+            val transport = FakeTransport()
+            val client = readyClient(transport, caps = "batch labeled-response")
+            connections.clients[networkId] = client
+            profile.onReady(networkId, client)
+            collectAvatarEvents(networkId, coordinator, client, profile = profile)
+            val values = mutableListOf<Map<ProfileKey, String>?>()
+            val supported = mutableListOf<Boolean>()
+            backgroundScope.launch { profile.observeUserProfile(networkId, "Alice").collect { values += it } }
+            backgroundScope.launch { profile.supportsMetadata(networkId).collect { supported += it } }
+            runCurrent()
+            assertEquals(listOf<Map<ProfileKey, String>?>(null), values)
+            assertEquals(listOf(false), supported)
+            assertFalse(transport.sent.any { " GET " in it })
+
+            transport.feed(":srv CAP me NEW :$METADATA_V3_CAP")
+            runCurrent()
+            assertTrue("CAP REQ :$METADATA_V3_CAP" in transport.sent)
+            transport.feed(":srv CAP me ACK :$METADATA_V3_CAP")
+            runCurrent()
+            val get = IrcMessage.parse(transport.sent.single { " GET " in it })
+            assertEquals("METADATA", get.command)
+            assertEquals(listOf("Alice", "GET") + ProfileKey.entries.map(ProfileKey::wireName), get.params)
+            assertEquals(emptyMap<ProfileKey, String>(), values.last())
+            assertEquals(listOf(false, true), supported)
+
+            transport.feed(":srv 761 me Alice status * :Available")
+            runCurrent()
+            assertEquals(mapOf(ProfileKey.STATUS to "Available"), values.last())
+            transport.feed("@label=${get.tags.getValue("label")} :srv BATCH +profile metadata Alice")
+            transport.feed("@batch=profile :srv 761 me Alice display-name * :Alice Example")
+            transport.feed(":srv BATCH -profile")
+            runCurrent()
+            assertEquals(mapOf(ProfileKey.STATUS to "Available", ProfileKey.DISPLAY_NAME to "Alice Example"), values.last())
+
+            transport.feed(":srv CAP me DEL :$METADATA_V3_CAP")
+            runCurrent()
+            assertNull(values.last())
+            assertEquals(listOf(false, true, false), supported)
+
+            transport.feed(":srv CAP me NEW :$METADATA_V3_CAP")
+            runCurrent()
+            transport.feed(":srv CAP me ACK :$METADATA_V3_CAP")
+            runCurrent()
+            assertEquals(2, transport.sent.count { " GET " in it })
+            assertEquals(emptyMap<ProfileKey, String>(), values.last())
+            assertEquals(listOf(false, true, false, true), supported)
         }
 
     @Test fun only_authoritative_profile_snapshots_clear_previously_subscribed_stale_values() =

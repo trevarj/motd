@@ -16,21 +16,27 @@ import io.github.trevarj.motd.irc.client.IrcTimeoutException
 import io.github.trevarj.motd.irc.event.IrcClientState
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.messageContextOrNull
+import io.github.trevarj.motd.irc.proto.IrcCaseMapping
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.service.ConnectionManager
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.buffer
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -132,37 +138,40 @@ class IrcProfileRepository
                 .flatMapLatest { route ->
                     if (route == null) return@flatMapLatest flowOf(ProfileEditorState("", null, ProfileAccess.OFFLINE, emptyMap()))
                     val network = db.networkDao().observeById(route.networkId)
+                    val persisted = db.networkIdentityDao().observe(route.networkId)
                     val live =
                         connections
                             .get()
                             .connectionStates
                             .map { it[route.networkId] }
                             .distinctUntilChanged()
-                    combine(network, live, sessionFlow(route.networkId)) { row, state, session -> Triple(row, state as? IrcClientState.Ready, session) }
-                        .flatMapLatest { (row, ready, session) ->
-                            val identity = route.channel ?: ready?.nick ?: row?.nick.orEmpty()
-                            val initial =
-                                ProfileEditorState(
-                                    identity,
-                                    route.networkId,
-                                    if (ready == null) ProfileAccess.OFFLINE else ProfileAccess.UNSUPPORTED,
-                                    emptyMap(),
-                                    row?.name,
-                                    ready?.isupport?.let(::advertisedSojuFileHostUrl),
-                                )
-                            if (ready == null || session == null) return@flatMapLatest flowOf(initial)
-                            val values = synchronized(lock) { session.entry(identity).values }
-                            combine(values, session.client.joinedChannels, session.client.selfChannelModes) { data, _, _ ->
-                                val access = access(route, session.client)
-                                initial.copy(
-                                    access = access,
-                                    values = data,
-                                    readable =
-                                        (access == ProfileAccess.READ_ONLY || access == ProfileAccess.WRITABLE) &&
-                                            (route.channel == null || session.client.isJoined(route.channel)),
-                                )
-                            }
+                    combine(network, persisted, live, liveSessionFlow(route.networkId)) { row, identityRow, state, session ->
+                        val ready = state as? IrcClientState.Ready
+                        val identity = route.channel ?: ready?.nick ?: identityRow?.selfNick ?: row?.nick.orEmpty()
+                        val caseMapping = if (ready == null) identityRow?.caseMapping else ready.isupport["CASEMAPPING"]
+                        val initial =
+                            ProfileEditorState(
+                                identity,
+                                route.networkId,
+                                if (ready == null) ProfileAccess.OFFLINE else ProfileAccess.UNSUPPORTED,
+                                emptyMap(),
+                                row?.name,
+                                ready?.isupport?.let(::advertisedSojuFileHostUrl),
+                                normalizedIdentity = IrcCaseMapping.from(caseMapping).normalize(identity),
+                            )
+                        if (ready == null || session == null) return@combine flowOf(initial)
+                        val values = synchronized(lock) { session.entry(identity).values }
+                        combine(values, session.client.joinedChannels, session.client.selfChannelModes) { data, _, _ ->
+                            val access = access(route, session.client)
+                            initial.copy(
+                                access = access,
+                                values = data,
+                                readable =
+                                    (access == ProfileAccess.READ_ONLY || access == ProfileAccess.WRITABLE) &&
+                                        (route.channel == null || session.client.isJoined(route.channel)),
+                            )
                         }
+                    }.flatMapLatest { it }
                 }.distinctUntilChanged()
         }
 
@@ -179,7 +188,39 @@ class IrcProfileRepository
                     }
                 }.distinctUntilChanged()
 
+        internal fun supportsMetadata(networkId: Long): Flow<Boolean> = liveSessionFlow(networkId).map { it != null }.distinctUntilChanged()
+
+        internal fun observeUserProfile(
+            networkId: Long,
+            nick: String,
+        ): Flow<Map<ProfileKey, String>?> {
+            if (!isMetadataTarget(nick) || nick.startsWith('*')) return flowOf(null)
+            val route = Route(networkId)
+            return liveSessionFlow(networkId)
+                .flatMapLatest { session ->
+                    if (session == null || session.client.isupport.isChannel(nick)) return@flatMapLatest flowOf(null)
+                    val values = synchronized(lock) { session.entry(nick).values }
+                    flow<Map<ProfileKey, String>?> {
+                        coroutineScope {
+                            launch { session.requests.withLock { read(route, session, nick, ProfileKey.entries) } }
+                            this@flow.emitAll(values.map { data -> data.takeIf { isCurrent(route, session) } })
+                        }
+                    }
+                }.buffer(0)
+                .distinctUntilChanged()
+        }
+
         private fun sessionFlow(networkId: Long) = sessions.map { it[networkId] }.distinctUntilChanged()
+
+        private fun liveSessionFlow(networkId: Long): Flow<Session?> {
+            val route = Route(networkId)
+            return sessionFlow(networkId)
+                .flatMapLatest { session ->
+                    if (session == null) return@flatMapLatest flowOf(null)
+                    session.client.state.map { session.takeIf { isCurrent(route, session) } }
+                }.buffer(0)
+                .distinctUntilChanged()
+        }
 
         private suspend fun route(target: ProfileTarget): Route? =
             when (target) {
@@ -215,17 +256,21 @@ class IrcProfileRepository
             }
         }
 
-        suspend fun refreshUser(
-            networkId: Long,
-            nick: String,
-        ) {
-            val session = sessions.value[networkId] ?: return
-            if (!isMetadataTarget(nick) || nick.startsWith('*') || session.client.isupport.isChannel(nick)) return
-            session.requests.withLock { read(Route(networkId), session, nick, ProfileKey.entries) }
+        internal suspend fun canWrite(
+            target: ProfileTarget,
+            expectedNetworkId: Long,
+            expectedIdentity: String,
+        ): Boolean {
+            val route = route(target) ?: return false
+            val session = sessions.value[route.networkId] ?: return false
+            return route.matches(session.client, expectedNetworkId, expectedIdentity) &&
+                isCurrent(route, session) && access(route, session.client) == ProfileAccess.WRITABLE
         }
 
         suspend fun write(
             target: ProfileTarget,
+            expectedNetworkId: Long,
+            expectedIdentity: String,
             key: ProfileKey,
             value: String?,
         ): ProfileWriteResult {
@@ -234,27 +279,35 @@ class IrcProfileRepository
             val session =
                 sessions.value[route.networkId]?.takeIf { it.client === client }
                     ?: return if (client.ready == null) ProfileWriteResult.OFFLINE else ProfileWriteResult.UNSUPPORTED
+            if (!route.matches(client, expectedNetworkId, expectedIdentity)) return ProfileWriteResult.READ_ONLY
             if (route.channel != null && key !in channelProfileKeys) return ProfileWriteResult.INVALID
             if (route.channel != null && !isMetadataTarget(route.channel)) return ProfileWriteResult.INVALID
             val valid = value?.let { validProfileValue(key, it) ?: return ProfileWriteResult.INVALID }
             if (valid == "" && session.version == METADATA_V3_CAP) return ProfileWriteResult.INVALID
-            val command = metadataSet(route.channel ?: "*", key, valid)
-            if (!profileWireFits(command)) return ProfileWriteResult.INVALID
             val operation: suspend (() -> Unit) -> ProfileWriteResult = { onAttempt ->
                 session.requests.withLock {
-                    if (route(target) != route) {
-                        ProfileWriteResult.READ_ONLY
-                    } else {
-                        write(route, session, key, valid, command, onAttempt)
+                    val current = route(target)
+                    if (current == null || !current.matches(client, expectedNetworkId, expectedIdentity)) {
+                        return@withLock ProfileWriteResult.READ_ONLY
                     }
+                    val command = metadataSet(current.channel ?: "*", key, valid)
+                    if (!profileWireFits(command)) return@withLock ProfileWriteResult.INVALID
+                    write(current, session, expectedIdentity, key, valid, command, onAttempt)
                 }
             }
             return if (route.channel == null && key == ProfileKey.AVATAR) avatars.explicitSelfAvatar(route.networkId, operation) else operation {}
         }
 
+        private fun Route.matches(
+            client: IrcClient,
+            expectedNetworkId: Long,
+            expectedIdentity: String,
+        ): Boolean = networkId == expectedNetworkId && client.same(channel ?: actualSelfNick(client), expectedIdentity)
+
         private suspend fun write(
             route: Route,
             session: Session,
+            expectedIdentity: String,
             key: ProfileKey,
             value: String?,
             command: IrcMessage,
@@ -268,6 +321,7 @@ class IrcProfileRepository
             val guard = {
                 caller.ensureActive()
                 val ready = requireCurrent(route, session)
+                if (route.channel == null && !client.same(ready.nick, expectedIdentity)) throw Aborted(ProfileWriteResult.READ_ONLY)
                 access(route, client).let {
                     when (it) {
                         ProfileAccess.WRITABLE -> Unit

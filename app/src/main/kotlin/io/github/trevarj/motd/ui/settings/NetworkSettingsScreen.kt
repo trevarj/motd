@@ -87,6 +87,7 @@ import io.github.trevarj.motd.ui.nav.NetworkSettingsTarget
 import io.github.trevarj.motd.ui.onboarding.AuthForm
 import io.github.trevarj.motd.ui.onboarding.AuthMode
 import io.github.trevarj.motd.ui.onboarding.ServerForm
+import io.github.trevarj.motd.ui.profile.rememberProfileMetadataSupported
 import io.github.trevarj.motd.ui.theme.LocalMotdSemanticColors
 import io.github.trevarj.motd.ui.theme.MotdMotion
 import io.github.trevarj.motd.ui.theme.MotdTheme
@@ -152,7 +153,7 @@ fun NetworkSettingsScreen(
         onOpenServerMessages = { viewModel.openServerBuffer(onOpenBuffer) },
         onOpenNetworkTools = { onOpenNetworkTools(networkId) },
         onOpenAccountSetup = { onOpenAccountSetup(networkId) },
-        onOpenUserProfile = { onOpenUserProfile(networkId) },
+        onOpenUserProfile = { if (state.entity?.id == networkId) onOpenUserProfile(networkId) },
         onSaveAvatar = viewModel::saveAvatar,
         onStopManagingAvatar = viewModel::stopManagingAvatar,
     )
@@ -236,12 +237,15 @@ fun NetworkSettingsContent(
             )
             AutoConnectRow(checked = state.autoConnect, onCheckedChange = onSetAutoConnect)
         }
-        if (state.entity?.let { it.role != NetworkRole.BOUNCER_ROOT } == true) {
+        val profileNetwork = state.entity?.takeUnless { it.role == NetworkRole.BOUNCER_ROOT }
+        if (profileNetwork != null) {
+            val profileEnabled = rememberProfileMetadataSupported(profileNetwork.id)
             SettingsGroup {
                 SettingsNavigationRow(
                     title = stringResource(R.string.profile_user_title),
-                    summary = stringResource(R.string.profile_network_entry_summary),
+                    summary = stringResource(if (profileEnabled) R.string.profile_network_entry_summary else R.string.profile_entry_unavailable),
                     modifier = Modifier.testTag("network_user_profile"),
+                    enabled = profileEnabled,
                     onClick = onOpenUserProfile,
                 )
             }
