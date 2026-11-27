@@ -521,6 +521,7 @@ flowchart TD
   the gesture handle while resting messages clear the complete composer host.
   A stationary alpha mask fades scrolling messages only behind the measured title
   and composer hosts, following expanded/mini headers and composer/IME changes.
+  The fade draws only the two edge bands unless they meet.
   Wallpaper uses matching boundaries in its fixed viewport; the readable area
   between hosts stays unfaded. Header, composer, floating controls and send-flight
   overlay remain unmasked.
@@ -545,6 +546,7 @@ flowchart TD
   until handoff, token replacement, or user scrolling. Paging and transcript order stay live;
   only entrance rendering waits. The held rows survive transient empty windows and cannot advance
   MARKREAD until rendered. Late preview growth owns row placement while its size animates.
+  Preview and audio effects observe readiness without passing scroll-state changes into message bodies.
 - Outgoing acceptance transfers ownership from the draft to durable transcript rows before
   waiting for transport. Ordered per-network service work retains lifecycle protection;
   immediate-wire consumers explicitly await its outcome. Pending rows show a spinner,

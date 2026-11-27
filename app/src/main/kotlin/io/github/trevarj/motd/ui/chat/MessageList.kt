@@ -56,6 +56,7 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.State
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -519,7 +520,7 @@ fun MessageList(
     val animatePlacement = (pagingHintsEnabled || temporaryFoolVisibilityMotion) && motionIdle
     // Scrolling postpones only cache misses. Parsed URLs and resolved previews remain renderable so
     // a recycled row does not lose rich content halfway through a fling.
-    val canStartNewRichContentWork = richContentReady && !scrolling
+    val richContentGate = rememberUpdatedState(richContentReady && !scrolling)
     val formatMessageTime = rememberMessageTimeFormatter()
     // A skeleton the size of the rows this conversation actually renders, so a page landing (which
     // regenerates the PagingSource and turns loaded rows back into placeholders) does not reflow
@@ -908,7 +909,7 @@ fun MessageList(
                         loadPreview = loadPreview,
                         showImages = showImages,
                         showLinkPreviews = showLinkPreviews,
-                        canStartNewRichContentWork = canStartNewRichContentWork && outgoingFlight?.matches(msg) != true,
+                        richContentGate = richContentGate.takeUnless { outgoingFlight?.matches(msg) == true },
                         cachedPreview = cachedPreview,
                         loadAudioMetadata = loadAudioMetadata,
                         cachedAudioMetadata = cachedAudioMetadata,
@@ -1955,7 +1956,7 @@ private fun MessageRow(
     loadPreview: suspend (String, Long?) -> LinkPreview?,
     showImages: Boolean,
     showLinkPreviews: Boolean,
-    canStartNewRichContentWork: Boolean,
+    richContentGate: State<Boolean>?,
     cachedPreview: (String, Long?) -> CachedLinkPreview?,
     loadAudioMetadata: suspend (String, Long?) -> AudioMetadata?,
     cachedAudioMetadata: (String) -> CachedAudioMetadata?,
@@ -2076,10 +2077,10 @@ private fun MessageRow(
     var richUrls by remember(msg.id, msg.text) {
         mutableStateOf(if (mayContainUrl) MessageUrlCache.get(msg.text) else MessageUrls.Empty)
     }
-    val latestCanStartNewRichContentWork by rememberUpdatedState(canStartNewRichContentWork)
+    val latestRichContentGate by rememberUpdatedState(richContentGate)
     LaunchedEffect(msg.id, msg.text, mayContainUrl) {
         if (!mayContainUrl || richUrls != null) return@LaunchedEffect
-        snapshotFlow { latestCanStartNewRichContentWork }.first { it }
+        snapshotFlow { latestRichContentGate?.value == true }.first { it }
         val parsed = withContext(Dispatchers.Default) { messageUrls(msg.text) }
         MessageUrlCache.put(msg.text, parsed)
         richUrls = parsed
@@ -2108,7 +2109,7 @@ private fun MessageRow(
     val latestLoadAudioMetadata by rememberUpdatedState(loadAudioMetadata)
     LaunchedEffect(msg.id, headCandidates, networkId, linkMediaAllowed) {
         if (headCandidates.isEmpty() || !linkMediaAllowed) return@LaunchedEffect
-        snapshotFlow { latestCanStartNewRichContentWork }.first { it }
+        snapshotFlow { latestRichContentGate?.value == true }.first { it }
         val resolved =
             headCandidates
                 .take(8)
@@ -2178,7 +2179,7 @@ private fun MessageRow(
             previewState = PreviewState.Done(it.preview)
             return@LaunchedEffect
         }
-        snapshotFlow { latestCanStartNewRichContentWork }.first { it }
+        snapshotFlow { latestRichContentGate?.value == true }.first { it }
         if (previewState !is PreviewState.Awaiting) return@LaunchedEffect
         latestCachedPreview(url, networkId)?.let {
             previewState = PreviewState.Done(it.preview)

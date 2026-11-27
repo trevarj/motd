@@ -121,6 +121,7 @@ import io.github.trevarj.motd.ui.settings.PalettePreviewScreen
 import io.github.trevarj.motd.ui.settings.PalettePreviewViewModel
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.resolvedMode
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -130,6 +131,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -186,7 +188,7 @@ class MessageTimelineUiTest {
         assertEquals(0, probes)
     }
 
-    @Test fun flightHiddenPaletteRowDefersPreviewAndAudioUntilLanding() {
+    @Test fun flightHiddenPaletteRowWaitsForLandingAndScrollToSettle() {
         var previews = 0
         var probes = 0
         val audio = "https://files.example/flight-audio"
@@ -202,12 +204,14 @@ class MessageTimelineUiTest {
         var flight by mutableStateOf<OutgoingFlight?>(
             OutgoingFlight(token = 1, text = row.text, launchedAtMs = 100, eventIds = setOf(row.id)),
         )
+        val listState = LazyListState()
         MessageUrlCache.put(row.text, messageUrls(row.text))
         render(
             flowOf(PagingData.from(listOf(row))),
             richContentReady = true,
             showLinkPreviews = true,
             automaticRemoteMedia = true,
+            listState = listState,
             outgoingFlight = { flight },
             loadPreview = { _, _ ->
                 previews++
@@ -222,14 +226,31 @@ class MessageTimelineUiTest {
         compose.runOnIdle {
             assertEquals("Flight-hidden palette must not fetch a preview", 0, previews)
             assertEquals("Flight-hidden palette must not start auxiliary audio work", 0, probes)
-            flight = null
         }
-        compose.waitUntil(10_000) {
-            compose.waitForIdle()
-            previews == 1 && probes == 1
+        val finishScroll = CompletableDeferred<Unit>()
+        val scroll =
+            compose.runOnIdle {
+                CoroutineScope(Dispatchers.Main.immediate).launch {
+                    listState.scroll { finishScroll.await() }
+                }
+            }
+        try {
+            compose.waitUntil { listState.isScrollInProgress }
+            compose.runOnIdle { flight = null }
+            compose.runOnIdle {
+                assertEquals("Landing during a scroll must not fetch a preview yet", 0, previews)
+                assertEquals("Landing during a scroll must not start auxiliary audio work yet", 0, probes)
+                finishScroll.complete(Unit)
+            }
+            compose.waitUntil(10_000) {
+                compose.waitForIdle()
+                previews == 1 && probes == 1
+            }
+            assertEquals(1, previews)
+            assertEquals(1, probes)
+        } finally {
+            scroll.cancel()
         }
-        assertEquals(1, previews)
-        assertEquals(1, probes)
     }
 
     @Test fun disabledPalettePreviewsSuppressEvenCachedCards() {

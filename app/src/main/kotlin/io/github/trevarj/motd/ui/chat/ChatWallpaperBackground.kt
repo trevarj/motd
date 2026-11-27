@@ -20,6 +20,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -200,18 +202,30 @@ internal fun Modifier.fadeChatEdges(
         val bottom = (size.height - readBottomOffsetPx()).coerceIn(0f, size.height)
         val topExtent = readTopHostHeightPx().toFloat().coerceIn(0f, bottom)
         val bottomExtent = readBottomHostHeightPx().toFloat().coerceIn(0f, bottom)
-        val scale = if (topExtent + bottomExtent > bottom) bottom / (topExtent + bottomExtent) else 1f
+        val totalExtent = topExtent + bottomExtent
+        val scale = if (totalExtent > bottom) bottom / totalExtent else 1f
+        val topEdge = topExtent * scale
+        val bottomEdge = (bottom - bottomExtent * scale).coerceAtLeast(topEdge)
         val transparent = color.copy(alpha = 0f)
         val fade =
             Brush.verticalGradient(
                 0f to color,
-                topExtent * scale / height to transparent,
-                (bottom - bottomExtent * scale) / height to transparent,
+                topEdge / height to transparent,
+                bottomEdge / height to transparent,
                 bottom / height to color,
             )
         onDrawWithContent {
             drawContent()
-            drawRect(fade, blendMode = blendMode)
+            if (totalExtent >= bottom) {
+                drawRect(fade, blendMode = blendMode)
+                return@onDrawWithContent
+            }
+            if (topEdge > 0f) {
+                drawRect(fade, size = Size(size.width, topEdge), blendMode = blendMode)
+            }
+            if (bottomEdge < size.height) {
+                drawRect(fade, topLeft = Offset(0f, bottomEdge), size = Size(size.width, size.height - bottomEdge), blendMode = blendMode)
+            }
         }
     }
 
