@@ -48,6 +48,7 @@ import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.InstalledPalette
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MAX_INSTALLED_PALETTE_BYTES
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
@@ -1968,6 +1969,63 @@ class ConfigurationBackupRepositoryTest {
             } finally {
                 settings.setMentionsEnabled(false)
                 settings.setMentionsPlacement(MentionsPlacement.DRAWER)
+            }
+        }
+
+    @Test
+    fun keywordHighlightRulesRoundTrip() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val settings = DataStoreSettingsRepository(context)
+            val key = PrefKeys.KEYWORD_HIGHLIGHT_RULES
+            val original = context.settingsDataStore.data.first()[key]
+            val db = inMemoryDb()
+            try {
+                val silent = KeywordHighlightRule("garden party", alerts = false)
+                val alert = KeywordHighlightRule("C++", alerts = true)
+                settings.setKeywordHighlightRules(emptyList())
+                assertTrue(settings.editKeywordHighlightRule(null, silent.copy(phrase = "  garden party  ")))
+                assertFalse(settings.editKeywordHighlightRule(null, silent.copy(phrase = "GARDEN PARTY", alerts = true)))
+                assertTrue(settings.editKeywordHighlightRule(null, alert))
+                assertFalse(settings.editKeywordHighlightRule(alert, silent))
+
+                val backup = repository(db)
+                val raw = backup.exportToString(BackupExportMode.CREDENTIALS_EXCLUDED)
+                assertTrue(settings.editKeywordHighlightRule(silent, null))
+                backup.import(raw, importMode = BackupImportMode.MERGE)
+                assertEquals(listOf(silent, alert), settings.settings.first().keywordHighlightRules)
+                assertEquals(listOf(silent, alert), settings.keywordHighlightRules.first())
+
+                val envelope = Json.parseToJsonElement(raw).jsonObject
+                val payload = envelope.getValue("payload").jsonObject
+                val portable = payload.getValue("settings").jsonObject
+                val general = portable.getValue("general").jsonObject
+
+                fun withGeneral(next: JsonObject): String {
+                    val updatedSettings = JsonObject(portable + ("general" to next))
+                    val updatedPayload = JsonObject(payload + ("settings" to updatedSettings))
+                    return JsonObject(envelope + ("payload" to updatedPayload)).toString()
+                }
+
+                val savedRule =
+                    general
+                        .getValue("keywordHighlightRules")
+                        .jsonArray
+                        .first()
+                        .jsonObject
+                val duplicate = JsonObject(savedRule + ("phrase" to JsonPrimitive("GARDEN PARTY")))
+                val invalid = withGeneral(JsonObject(general + ("keywordHighlightRules" to JsonArray(listOf(savedRule, duplicate)))))
+                assertTrue(runCatching { backup.import(invalid, importMode = BackupImportMode.REPLACE) }.exceptionOrNull() is BackupFormatException)
+                assertEquals(listOf(silent, alert), settings.settings.first().keywordHighlightRules)
+
+                val legacy = withGeneral(JsonObject(general - "keywordHighlightRules"))
+                backup.import(legacy, importMode = BackupImportMode.MERGE)
+                assertEquals(emptyList<KeywordHighlightRule>(), settings.settings.first().keywordHighlightRules)
+            } finally {
+                context.settingsDataStore.edit {
+                    if (original == null) it.remove(key) else it[key] = original
+                }
+                db.close()
             }
         }
 

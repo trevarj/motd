@@ -1419,7 +1419,7 @@ interface MessageDao {
               )
              AND kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
              AND notificationEligible = 1
-             AND (:hasMention IS NULL OR hasMention = :hasMention)
+             AND (:hasMention IS NULL OR (directMention = 1 OR keywordMatch IS 'ALERT') = :hasMention)
            ORDER BY serverTime DESC, timelineOrder DESC, id DESC
            LIMIT :limit""",
     )
@@ -2322,6 +2322,24 @@ interface RoomAliasDao {
     ): Int
 }
 
+private const val RECOVERABLE_NOTIFICATION =
+    """m.notificationHandled = 0 AND m.isSelf = 0 AND m.failed = 0
+       AND EXISTS (
+           SELECT 1 FROM event_observations o
+           WHERE o.timelineEventId = m.id AND o.origin IN ('LIVE', 'PUSH')
+       )
+       AND (
+           (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION') AND b.type != 'SERVER'
+              AND m.notificationEligibilityResolved = 1 AND m.notificationEligible = 1
+              AND EXISTS (
+                  SELECT 1 FROM event_observations o WHERE o.timelineEventId = m.id
+                    AND (o.origin = 'LIVE' OR (o.origin = 'PUSH'
+                         AND (b.type = 'QUERY' OR m.directMention = 1 OR m.keywordMatch = 'ALERT' OR m.notificationWatched = 1)))
+              ))
+           OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
+           OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
+       )"""
+
 @Dao
 interface CanonicalTimelineDao {
     @Query(
@@ -2464,7 +2482,7 @@ interface CanonicalTimelineDao {
                timeProvenance, semanticFingerprint, batchExactOrdinal, observedAt
            ) SELECT :networkId, :eventId, :origin, :connectionGeneration, :receiveOrder, :batchId,
                     :timeProvenance, :semanticFingerprint, :batchExactOrdinal, :observedAt
-           WHERE NOT EXISTS (
+           WHERE :keepForClassification OR NOT EXISTS (
                SELECT 1 FROM event_observations
                WHERE timelineEventId = :eventId AND origin = :origin AND timeProvenance = :timeProvenance
            ) OR (:batchExactOrdinal IS NOT NULL AND NOT EXISTS (
@@ -2483,10 +2501,14 @@ interface CanonicalTimelineDao {
         semanticFingerprint: ByteArray,
         batchExactOrdinal: Int?,
         observedAt: Long,
+        keepForClassification: Boolean,
     ): Long
 
-    /** Keep one origin/provenance witness plus the first exact batch ordinal for each event. */
-    suspend fun insertObservation(observation: EventObservationEntity): Long =
+    /** Keep origin/provenance and exact batch witnesses, plus reserve the first classification's id. */
+    suspend fun insertObservation(
+        observation: EventObservationEntity,
+        keepForClassification: Boolean = false,
+    ): Long =
         insertObservationIfNovel(
             observation.networkId,
             observation.timelineEventId,
@@ -2498,10 +2520,15 @@ interface CanonicalTimelineDao {
             observation.semanticFingerprint,
             observation.batchExactOrdinal,
             observation.observedAt,
+            keepForClassification,
         )
 
     @Query("SELECT COALESCE(MAX(receiveOrder), 0) + 1 FROM event_observations WHERE networkId = :networkId")
     suspend fun nextReceiveOrder(networkId: Long): Long
+
+    @SkipQueryVerification
+    @Query("SELECT COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'event_observations'), 0) + 1")
+    suspend fun nextObservationId(): Long
 
     /**
      * Newest authoritative server time among rows that already existed (lower id) when [beforeEventId]
@@ -2725,6 +2752,16 @@ interface CanonicalTimelineDao {
     )
     suspend fun releaseNotification(eventId: TimelineEventId)
 
+    @Query(
+        """UPDATE messages SET notificationClaimed = 0, notificationClaimOwner = NULL
+           WHERE id = COALESCE((SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId), :eventId)
+             AND notificationHandled = 0 AND notificationClaimOwner = :owner""",
+    )
+    suspend fun releaseRecoveryNotification(
+        eventId: TimelineEventId,
+        owner: String,
+    )
+
     // Both recovery scans are floored at the later of `newest event - :window` and the serverTime
     // of the :maxRows-th newest event (so at most :maxRows rows plus ties), walking a bounded index range instead of the whole
     // table: `notificationHandled` only ever flips to 1 one row at a time, so on a large archive
@@ -2754,32 +2791,44 @@ interface CanonicalTimelineDao {
                      (SELECT MAX(serverTime) FROM messages) - :window,
                      COALESCE((SELECT serverTime FROM messages
                                ORDER BY serverTime DESC LIMIT 1 OFFSET :maxRows - 1), 0))
-             AND m.notificationHandled = 0 AND m.notificationClaimed = 0
-             AND m.isSelf = 0 AND m.failed = 0
-             AND EXISTS (
-                 SELECT 1 FROM event_observations o
-                 WHERE o.timelineEventId = m.id AND o.origin IN ('LIVE', 'PUSH')
-             )
-             AND (
-                 (m.kind IN ('PRIVMSG', 'NOTICE', 'ACTION')
-                    AND b.type != 'SERVER'
-                    AND m.notificationEligibilityResolved = 1 AND m.notificationEligible = 1
-                    AND EXISTS (
-                        SELECT 1 FROM event_observations o WHERE o.timelineEventId = m.id
-                          AND (o.origin = 'LIVE' OR (o.origin = 'PUSH'
-                               AND (b.type = 'QUERY' OR m.hasMention = 1 OR m.notificationWatched = 1)))
-                    ))
-                 OR (m.kind = 'INVITE' AND m.inviteState IN ('PENDING', 'FAILED'))
-                 OR (m.kind = 'DCC_TRANSFER' AND m.eventPayload IS NOT NULL)
-             )
-           ORDER BY m.serverTime, m.timelineOrder, m.id
-           LIMIT :limit""",
+             AND m.notificationClaimed = 0
+             AND """ + RECOVERABLE_NOTIFICATION +
+            " ORDER BY m.serverTime, m.timelineOrder, m.id LIMIT :limit",
     )
     suspend fun pendingNotifications(
         limit: Int,
         window: Long,
         maxRows: Int,
     ): List<TimelineEventEntity>
+
+    @Query(
+        """SELECT m.* FROM messages m JOIN buffers b ON b.id = m.bufferId
+           WHERE m.id = COALESCE((SELECT canonicalEventId FROM event_redirects WHERE losingEventId = :eventId), :eventId)
+             AND m.notificationClaimed = 1 AND m.notificationClaimOwner = :owner
+             AND """ + RECOVERABLE_NOTIFICATION,
+    )
+    suspend fun claimedRecoveryEvent(
+        eventId: TimelineEventId,
+        owner: String,
+    ): TimelineEventEntity?
+
+    @Query(
+        """UPDATE messages SET notificationHandled = 1, notificationClaimed = 0, notificationClaimOwner = NULL
+           WHERE id IN (
+               SELECT m.id FROM messages m JOIN buffers b ON b.id = m.bufferId
+               WHERE m.id = :eventId AND m.bufferId = :bufferId
+                 AND m.notificationClaimed = 1 AND m.notificationClaimOwner = :owner
+                 AND (m.directMention = 1 OR m.keywordMatch IS 'ALERT') = :alertMention
+                 AND m.notificationWatched = :watched
+                 AND """ + RECOVERABLE_NOTIFICATION + ")",
+    )
+    suspend fun completeRecoveryNotification(
+        eventId: TimelineEventId,
+        bufferId: RoomId,
+        owner: String,
+        alertMention: Boolean,
+        watched: Boolean,
+    ): Int
 }
 
 /** One room the pruner may trim: its network has completed a server-derived history sync. */

@@ -6,6 +6,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import androidx.sqlite.db.SupportSQLiteOpenHelper
 import androidx.sqlite.db.framework.FrameworkSQLiteOpenHelperFactory
 import androidx.test.core.app.ApplicationProvider
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -507,6 +508,69 @@ class AllMigrationsTest {
                             hasMention = null,
                         ).map { it.text },
                 )
+            } finally {
+                migrated.close()
+            }
+        }
+
+    @Test
+    fun migrateVersion56ToCurrent_preservesDirectMentionsWithoutClassifyingOldBodies() =
+        runTest {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            legacyHelper =
+                FrameworkSQLiteOpenHelperFactory().create(
+                    SupportSQLiteOpenHelper.Configuration
+                        .builder(context)
+                        .name(DB_NAME)
+                        .callback(
+                            object : SupportSQLiteOpenHelper.Callback(56) {
+                                override fun onCreate(db: SupportSQLiteDatabase) = createExportedVersion(db, 56)
+
+                                override fun onUpgrade(
+                                    db: SupportSQLiteDatabase,
+                                    old: Int,
+                                    new: Int,
+                                ) = Unit
+                            },
+                        ).build(),
+                )
+            legacyHelper!!.writableDatabase.apply {
+                execSQL(
+                    """INSERT INTO networks
+                        (id, name, role, host, port, tls, nick, username, realname, saslMechanism,
+                         autoConnect, ordering, restoreAutoConnect)
+                        VALUES (1, 'Network', 'DIRECT', 'irc.example.org', 6697, 1, 'me', 'me', 'Me',
+                                'NONE', 1, 0, 1)""",
+                )
+                execSQL(
+                    """INSERT INTO buffers
+                        (id, networkId, name, displayName, type, joined, membershipCycle, pinned,
+                         muted, archived, ordering, historyComplete, dismissed)
+                        VALUES (1, 1, '#room', '#room', 'CHANNEL', 1, 0, 0, 0, 0, 0, 0, 0)""",
+                )
+                execSQL(
+                    """INSERT INTO messages
+                        (id, bufferId, serverTime, sender, normalizedActor, kind, text, isSelf,
+                         hasMention, failed, dedupKey, serverTimeAuthoritative, timelineOrder,
+                         timelineOrderConfirmed, timeProvenance, notificationHandled,
+                         notificationClaimed, soundHandled)
+                        VALUES (1, 1, 1000, 'alice', 'alice', 'PRIVMSG', 'ordinary', 0, 0, 0, 'ordinary',
+                                1, 1, 0, 'SERVER_TAG', 0, 0, 0),
+                               (2, 1, 2000, 'alice', 'alice', 'PRIVMSG', 'me: mention', 0, 1, 0, 'mention',
+                                1, 2, 0, 'SERVER_TAG', 0, 0, 0),
+                               (3, 1, 3000, 'alice', 'alice', 'REDACTED', 'Message deleted', 0, 0, 0, 'redacted',
+                                1, 3, 0, 'SERVER_TAG', 0, 0, 0)""",
+                )
+            }
+            legacyHelper!!.close()
+            legacyHelper = null
+
+            val migrated = Room.databaseBuilder(context, MotdDatabase::class.java, DB_NAME).addMigrations(*ALL_MIGRATIONS).build()
+            try {
+                val events = migrated.canonicalTimelineDao().eventsForRoom(1)
+                assertEquals(listOf(false, true, false), events.map { it.hasMention })
+                assertEquals(listOf(false, true, false), events.map { it.directMention })
+                assertEquals(listOf(KeywordMatch.NONE, KeywordMatch.NONE, null), events.map { it.keywordMatch })
             } finally {
                 migrated.close()
             }

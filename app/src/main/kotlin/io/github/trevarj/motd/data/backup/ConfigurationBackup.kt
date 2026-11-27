@@ -27,6 +27,7 @@ import io.github.trevarj.motd.data.prefs.ColorThemePreset
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
 import io.github.trevarj.motd.data.prefs.DEFAULT_WALLPAPER_INTENSITY
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.InstalledPalette
 import io.github.trevarj.motd.data.prefs.LauncherIcon
 import io.github.trevarj.motd.data.prefs.MAX_WALLPAPER_DESIGNS
@@ -38,7 +39,6 @@ import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.prefs.WallpaperChatChoice
 import io.github.trevarj.motd.data.prefs.WallpaperLibrary
 import io.github.trevarj.motd.data.prefs.WallpaperLibraryException
@@ -60,6 +60,7 @@ import io.github.trevarj.motd.data.prefs.paletteSelection
 import io.github.trevarj.motd.data.prefs.supportsMode
 import io.github.trevarj.motd.data.prefs.validateInstalledPalette
 import io.github.trevarj.motd.data.prefs.validateInstalledPalettes
+import io.github.trevarj.motd.data.prefs.validateKeywordHighlightRules
 import io.github.trevarj.motd.data.repo.ChatFolderRepository
 import io.github.trevarj.motd.data.repo.FolderIconRef
 import io.github.trevarj.motd.data.repo.FolderPortableAssignment
@@ -177,7 +178,7 @@ class ConfigurationBackupRepositoryImpl
     @Inject
     constructor(
         private val db: MotdDatabase,
-        private val settingsRepository: SettingsRepository,
+        private val settingsRepository: DataStoreSettingsRepository,
         private val appearancePrefs: AppearancePrefs,
         private val contentPreviewPrefs: ContentPreviewPrefs,
         private val chatSoundPrefs: ChatSoundPrefs,
@@ -806,6 +807,7 @@ class ConfigurationBackupRepositoryImpl
 
         private fun validatePayloadFields(payload: BackupPayload) {
             require(payload.version == FORMAT_VERSION) { "Unsupported payload version ${payload.version}." }
+            payload.settings.general?.let { validateKeywordHighlightRules(it.keywordHighlightRules) }
             payload.settings.appearance?.let { appearance ->
                 require(normalizeEmojiSetId(appearance.emojiSetId) == appearance.emojiSetId) { "Backup contains an invalid emoji set id." }
                 validateInstalledPalettes(appearance.customPalettes)
@@ -989,6 +991,7 @@ class ConfigurationBackupRepositoryImpl
                 settingsRepository.setChatListSwipeAction(it.chatListSwipeAction)
                 settingsRepository.setMentionsEnabled(it.mentionsEnabled)
                 settingsRepository.setMentionsPlacement(it.mentionsPlacement)
+                settingsRepository.setKeywordHighlightRules(it.keywordHighlightRules)
                 settingsRepository.setNickColorsEnabled(it.nickColorsEnabled)
                 settingsRepository.setNickColorPalette(it.nickColorPalette)
                 settingsRepository.setNickMentionStyle(it.nickMentionStyle)

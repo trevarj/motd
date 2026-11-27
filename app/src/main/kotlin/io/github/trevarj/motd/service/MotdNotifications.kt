@@ -36,6 +36,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.RoomEntity
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineAnchor
+import io.github.trevarj.motd.data.db.alertsAsMention
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.prefs.AvatarStyle
@@ -63,10 +64,12 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.retryWhen
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import android.provider.Settings as AndroidSettings
@@ -201,7 +204,7 @@ class MotdNotifications
                     }
                 }
                 retireCommittedRoomMerges()
-                retireRedactedNotifications()
+                retireInvalidCanonicalCards()
                 recoverCanonicalNotifications()
             }
         }
@@ -350,78 +353,83 @@ class MotdNotifications
         internal suspend fun recoverCanonicalNotifications() {
             val dao = db.canonicalTimelineDao()
             dao.releaseInterruptedNotificationClaims(NotificationClaimSession.owner, RECOVERY_WINDOW_MS, RECOVERY_SCAN_ROWS)
-            for (event in dao.pendingNotifications(MAX_RECOVERY_NOTIFICATIONS, RECOVERY_WINDOW_MS, RECOVERY_SCAN_ROWS)) {
-                if (dao.claimNotification(event.id, NotificationClaimSession.owner) != 1) continue
+            val owner = NotificationClaimSession.owner
+            for (candidate in dao.pendingNotifications(MAX_RECOVERY_NOTIFICATIONS, RECOVERY_WINDOW_MS, RECOVERY_SCAN_ROWS)) {
+                if (dao.claimNotification(candidate.id, owner) != 1) continue
+                var completed = false
                 try {
-                    val buffer = db.bufferDao().observeById(event.bufferId)
-                    if (buffer == null) {
-                        dao.completeNotification(event.id)
-                        continue
+                    while (true) {
+                        val event = dao.claimedRecoveryEvent(candidate.id, owner) ?: break
+                        postRecoveredNotification(event)
+                        completed = dao.completeRecoveryNotification(event.id, event.bufferId, owner, event.alertsAsMention, event.notificationWatched) == 1
+                        if (completed) break
                     }
-                    when (event.kind) {
-                        MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION -> {
-                            postIncoming(
-                                networkId = buffer.networkId,
-                                bufferId = buffer.id,
-                                type = buffer.type,
-                                hasMention = event.hasMention,
-                                eventId = event.id,
-                                // Recovery re-presents state the user may already have been alerted
-                                // about (the claim/present/complete cycle was interrupted after an
-                                // unknown amount of presentation work); it must never re-alert.
-                                firstPresentation = false,
-                                watched = event.notificationWatched,
-                                message =
-                                    IrcEvent.ChatMessage(
-                                        ctx =
-                                            MessageContext(
-                                                msgid = event.msgid,
-                                                serverTime = event.serverTime,
-                                                account = event.senderAccount,
-                                                batchId = null,
-                                                label = null,
-                                                serverTimeSource =
-                                                    when (event.timeProvenance) {
-                                                        TimeProvenance.SERVER_TAG -> ServerTimeSource.TAG
-                                                        TimeProvenance.LOCAL_CLOCK -> ServerTimeSource.LOCAL
-                                                        TimeProvenance.UNKNOWN -> ServerTimeSource.UNKNOWN
-                                                    },
-                                            ),
-                                        kind =
-                                            when (event.kind) {
-                                                MessageKind.PRIVMSG -> IrcEvent.ChatKind.PRIVMSG
-                                                MessageKind.NOTICE -> IrcEvent.ChatKind.NOTICE
-                                                else -> IrcEvent.ChatKind.ACTION
-                                            },
-                                        source = Prefix(event.sender),
-                                        target = buffer.ircTarget,
-                                        text = event.text,
-                                        isSelf = false,
-                                        replyToMsgid = event.replyToMsgid,
-                                    ),
-                            )
-                        }
-
-                        MessageKind.INVITE -> {
-                            onRecoveredInvitation(buffer.networkId, buffer.id, event.id)
-                        }
-
-                        MessageKind.DCC_TRANSFER -> {
-                            onDccTransferOffer(buffer.networkId, buffer.id, event.id, silent = true)
-                        }
-
-                        else -> {}
-                    }
-                    dao.completeNotification(event.id)
                 } catch (cancelled: CancellationException) {
-                    dao.releaseNotification(event.id)
                     throw cancelled
                 } catch (error: Exception) {
-                    dao.releaseNotification(event.id)
                     diagnostics.record("notifications", "recovery_failed") {
-                        mapOf("event_id" to event.id, "error" to error::class.simpleName)
+                        mapOf("event_id" to candidate.id, "error" to error::class.simpleName)
                     }
+                } finally {
+                    if (!completed) withContext(NonCancellable) { dao.releaseRecoveryNotification(candidate.id, owner) }
                 }
+            }
+        }
+
+        private suspend fun postRecoveredNotification(event: MessageEntity) {
+            val buffer = db.bufferDao().observeById(event.bufferId) ?: return
+            when (event.kind) {
+                MessageKind.PRIVMSG, MessageKind.NOTICE, MessageKind.ACTION -> {
+                    postIncoming(
+                        networkId = buffer.networkId,
+                        bufferId = buffer.id,
+                        type = buffer.type,
+                        hasMention = event.alertsAsMention,
+                        eventId = event.id,
+                        // A claim may have been interrupted after posting; recovery must never alert again.
+                        firstPresentation = false,
+                        watched = event.notificationWatched,
+                        recovering = true,
+                        message =
+                            IrcEvent.ChatMessage(
+                                ctx =
+                                    MessageContext(
+                                        msgid = event.msgid,
+                                        serverTime = event.serverTime,
+                                        account = event.senderAccount,
+                                        batchId = null,
+                                        label = null,
+                                        serverTimeSource =
+                                            when (event.timeProvenance) {
+                                                TimeProvenance.SERVER_TAG -> ServerTimeSource.TAG
+                                                TimeProvenance.LOCAL_CLOCK -> ServerTimeSource.LOCAL
+                                                TimeProvenance.UNKNOWN -> ServerTimeSource.UNKNOWN
+                                            },
+                                    ),
+                                kind =
+                                    when (event.kind) {
+                                        MessageKind.PRIVMSG -> IrcEvent.ChatKind.PRIVMSG
+                                        MessageKind.NOTICE -> IrcEvent.ChatKind.NOTICE
+                                        else -> IrcEvent.ChatKind.ACTION
+                                    },
+                                source = Prefix(event.sender),
+                                target = buffer.ircTarget,
+                                text = event.text,
+                                isSelf = false,
+                                replyToMsgid = event.replyToMsgid,
+                            ),
+                    )
+                }
+
+                MessageKind.INVITE -> {
+                    onRecoveredInvitation(buffer.networkId, buffer.id, event.id)
+                }
+
+                MessageKind.DCC_TRANSFER -> {
+                    onDccTransferOffer(buffer.networkId, buffer.id, event.id, silent = true)
+                }
+
+                else -> {}
             }
         }
 
@@ -520,6 +528,7 @@ class MotdNotifications
             firstPresentation: Boolean,
             watched: Boolean = false,
             refreshOnly: Boolean = false,
+            recovering: Boolean = false,
         ) {
             while (true) {
                 val (preview, revision) = previewSnapshot()
@@ -542,9 +551,14 @@ class MotdNotifications
                 ) {
                     return
                 }
+                if (recovering) {
+                    val ready = db.canonicalTimelineDao().claimedRecoveryEvent(checkNotNull(eventId), NotificationClaimSession.owner) ?: return
+                    if (ready != canonicalEvent) continue
+                }
                 val canonicalEventId = canonicalEvent?.id
                 val canonicalEventTime = canonicalEvent?.serverTime ?: message.ctx.serverTime
-                val thread = NotificationThreadKey(bufferId, type == BufferType.CHANNEL && (canonicalEvent?.hasMention ?: hasMention))
+                val alertMention = canonicalEvent?.alertsAsMention ?: hasMention
+                val thread = NotificationThreadKey(bufferId, type == BufferType.CHANNEL && alertMention)
                 if (refreshOnly &&
                     (
                         !thread.channelMentions || canonicalEvent == null || canonicalEvent.isSelf ||
@@ -569,6 +583,7 @@ class MotdNotifications
                 // Only a watch bypasses buffer mute, never sender category permission or read/foreground.
                 val foreground = foregroundBufferTracker.foregroundBufferId.value == bufferId
                 val muted = buffer?.muted == true
+                val bypassesMute = if (recovering) checkNotNull(canonicalEvent).notificationWatched else watched
                 val senderIsFriend = identityRules.matchesConfiguredNick(message.source.nick, settings.friends)
                 val senderIsFool =
                     foolPolicy.matchesFoolIdentity(
@@ -583,7 +598,7 @@ class MotdNotifications
                             if (canonicalEvent != null) canonicalEvent.senderAccount else message.ctx.account,
                             canonicalEvent?.normalizedActor ?: identityRules.normalize(message.source.nick),
                             directMessage = type == BufferType.QUERY,
-                            hasMention = canonicalEvent?.hasMention ?: hasMention,
+                            hasMention = alertMention,
                         )
                     }
                 val incomingAnchor =
@@ -594,7 +609,7 @@ class MotdNotifications
                 val effectiveReadAnchor = buffer?.let { effectiveLocalReadAnchor(it) }
                 val alreadyRead = effectiveReadAnchor?.let { incomingAnchor <= it } == true
                 val decision =
-                    shouldPostNotification(foreground, muted, senderAllowsNotification, alreadyRead, watched = watched)
+                    shouldPostNotification(foreground, muted, senderAllowsNotification, alreadyRead, watched = bypassesMute)
                 diagnostics.record("notifications", "message_evaluated") {
                     mapOf(
                         "network_id" to networkId,
@@ -607,7 +622,7 @@ class MotdNotifications
                         "friend" to senderIsFriend,
                         "fool" to senderIsFool,
                         "already_read" to alreadyRead,
-                        "watched" to watched,
+                        "watched" to bypassesMute,
                         "post" to decision,
                         "mention" to hasMention,
                     )
@@ -639,7 +654,7 @@ class MotdNotifications
                     return
                 }
 
-                val channel = if (canonicalEvent?.hasMention ?: hasMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
+                val channel = if (alertMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
                 val title =
                     if (thread.channelMentions) buffer?.ircTarget ?: message.target else buffer?.displayName ?: message.target
                 val dickordBatch =
@@ -695,7 +710,7 @@ class MotdNotifications
                     cachedRows.orEmpty().forEachIndexed { index, row ->
                         checkNotNull(row)
                         if (foolPolicy.allowsNotification(row, type) &&
-                            (type != BufferType.CHANNEL || row.hasMention == thread.channelMentions) &&
+                            (type != BufferType.CHANNEL || row.alertsAsMention == thread.channelMentions) &&
                             (effectiveReadAnchor == null || TimelineAnchor(row.serverTime, row.id, row.timelineOrder) > effectiveReadAnchor)
                         ) {
                             val key = NotificationMessageKey.from(row)
@@ -737,6 +752,11 @@ class MotdNotifications
                 val latestAnchor = resolveLatestNotificationAnchor(db, bufferId, notificationEventIds.toList())
                 val latestEvent = latestAnchor?.let { db.messageDao().byCanonicalId(it.eventId) }
                 if (readPreview() != preview) continue
+                if (recovering &&
+                    db.canonicalTimelineDao().claimedRecoveryEvent(checkNotNull(eventId), NotificationClaimSession.owner) != canonicalEvent
+                ) {
+                    continue
+                }
                 var requestedAlert = false
                 val canPost =
                     commitPreview(preview, revision) {
@@ -761,6 +781,7 @@ class MotdNotifications
                                 network,
                                 shortcutId,
                                 silent = !requestedAlert,
+                                channelEventId = canonicalEventId.takeIf { type == BufferType.QUERY && alertMention },
                             )
                         val ordinaryNotification =
                             promotedOrdinary?.takeIf { it.keys.isNotEmpty() }?.let { staged ->
@@ -830,6 +851,7 @@ class MotdNotifications
             network: String?,
             shortcutId: String?,
             silent: Boolean,
+            channelEventId: Long? = null,
         ): Notification {
             val bufferId = thread.bufferId
             val automotiveMessaging = type == BufferType.QUERY || thread.channelMentions
@@ -917,6 +939,7 @@ class MotdNotifications
                     android.os.Bundle().apply {
                         putString(EXTRA_MESSAGE_CHANNEL, channel)
                         putLongArray(EXTRA_NOTIFICATION_EVENT_IDS, notificationEventIds)
+                        if (channelEventId != null) putLong(EXTRA_NOTIFICATION_CHANNEL_EVENT_ID, channelEventId)
                         putBoolean(EXTRA_SERVICE_ACTIONS, true)
                     },
                 ).addAction(replyAction)
@@ -1024,7 +1047,7 @@ class MotdNotifications
             if (cachedMatch && cached.first.size == cached.second.size && cachedRows.orEmpty().all { it != null }) {
                 cachedRows.orEmpty().forEachIndexed { index, event ->
                     val row = checkNotNull(event)
-                    if (row.id != promoted.id && !row.hasMention &&
+                    if (row.id != promoted.id && !row.alertsAsMention &&
                         foolPolicy.allowsNotification(row, BufferType.CHANNEL) &&
                         (readFloor == null || TimelineAnchor(row.serverTime, row.id, row.timelineOrder) > readFloor)
                     ) {
@@ -1083,7 +1106,7 @@ class MotdNotifications
                 if (type == BufferType.SERVER) {
                     !isFool(message)
                 } else {
-                    allowsNotification(message.senderAccount, message.normalizedActor, type == BufferType.QUERY, message.hasMention)
+                    allowsNotification(message.senderAccount, message.normalizedActor, type == BufferType.QUERY, message.alertsAsMention)
                 }
 
         private fun chatStyle(
@@ -1294,21 +1317,29 @@ class MotdNotifications
             }
         }
 
-        private suspend fun retireRedactedNotifications() {
+        private suspend fun retireInvalidCanonicalCards() {
             val dao = db.messageDao()
-            val ids =
-                manager.activeNotifications
-                    .asSequence()
-                    .filter { it.notification.baseChannelId in MESSAGE_CHANNELS }
-                    .flatMap {
-                        it.notification.extras
-                            .getLongArray(EXTRA_NOTIFICATION_EVENT_IDS)
-                            ?.asSequence() ?: emptySequence()
-                    }.distinct()
+            val ids = mutableSetOf<Long>()
+            val mentionIds = mutableSetOf<Long>()
+            for (entry in manager.activeNotifications) {
+                val channel = entry.notification.baseChannelId
+                if (channel !in MESSAGE_CHANNELS) continue
+                val eventIds = entry.notification.extras.getLongArray(EXTRA_NOTIFICATION_EVENT_IDS) ?: continue
+                for (eventId in eventIds) {
+                    ids += eventId
+                    if (channel == CHANNEL_MENTIONS) mentionIds += eventId
+                }
+            }
+            val mentionRooms = mutableSetOf<Long>()
             for (id in ids) {
                 val event = dao.byCanonicalId(id) ?: continue
-                if (event.kind == MessageKind.REDACTED) onMessageRedacted(event.bufferId, event.id)
+                if (event.kind == MessageKind.REDACTED) {
+                    onMessageRedacted(event.bufferId, event.id)
+                } else if (id in mentionIds) {
+                    mentionRooms += event.bufferId
+                }
             }
+            mentionRooms.forEach { onMentionAlertChanged(it) }
         }
 
         override suspend fun onRead(
@@ -1378,10 +1409,131 @@ class MotdNotifications
                 clearThread(NotificationThreadKey(loserId, true))
                 forgetConversationShortcuts(listOf("$CONVERSATION_SHORTCUT_PREFIX$loserId"))
             }
+            onMentionAlertChanged(winnerId)
             diagnostics.record("notifications", "room_notification_retired") {
                 mapOf("winner_id" to winnerId, "loser_id" to loserId)
             }
         }
+
+        override suspend fun onMentionAlertChanged(bufferId: Long) {
+            synchronized(history) { historyRevision++ }
+            while (true) {
+                val (preview, revision) = previewSnapshot()
+                val room =
+                    db
+                        .bufferDao()
+                        .observeById(bufferId)
+                        ?.takeIf { it.id == bufferId && it.type != BufferType.SERVER } ?: return
+                val thread = NotificationThreadKey(bufferId, channelMentions = room.type == BufferType.CHANNEL)
+                val tag = if (thread.channelMentions) CHANNEL_MENTION_TAG else null
+                val active =
+                    manager.activeNotifications.firstOrNull {
+                        it.id == messageNotificationId(bufferId) && it.tag == tag && it.notification.baseChannelId == CHANNEL_MENTIONS
+                    } ?: return
+                val ids = active.notification.extras.getLongArray(EXTRA_NOTIFICATION_EVENT_IDS) ?: return
+                val messages = db.messageDao()
+                val rows = ids.map { messages.byCanonicalId(it)?.takeIf { row -> row.bufferId == bufferId && row.kind != MessageKind.REDACTED } }
+                val projected =
+                    if (thread.channelMentions) {
+                        null
+                    } else {
+                        val channelEventId = active.notification.extras.getLong(EXTRA_NOTIFICATION_CHANNEL_EVENT_ID)
+                        rows.getOrNull(ids.indexOf(channelEventId))
+                            ?: rows.filterNotNull().maxByOrNull { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+                    }
+                if (rows.none { it != null && (!it.eligibleIn(room) || (thread.channelMentions && !it.alertsAsMention)) } &&
+                    (thread.channelMentions || projected?.alertsAsMention != false)
+                ) {
+                    return
+                }
+
+                fun cardStillActive(): Boolean = manager.activeNotifications.any { it.id == active.id && it.tag == active.tag && it.postTime == active.postTime }
+
+                val settings =
+                    try {
+                        settingsRepository.settings.first()
+                    } catch (cancelled: CancellationException) {
+                        throw cancelled
+                    } catch (_: Exception) {
+                        null
+                    }
+                val identityRules = db.networkIdentityDao().byNetwork(room.networkId)?.identityRules ?: IrcIdentityRules()
+                val policy = settings?.let { MessageVisibilityPolicy(MessageVisibilitySpec.from(it), identityRules) }
+                val remaining =
+                    if (policy == null) {
+                        emptyList()
+                    } else {
+                        val readAnchor = effectiveLocalReadAnchor(room)
+                        rows
+                            .filterNotNull()
+                            .filter {
+                                it.eligibleIn(room) &&
+                                    (!thread.channelMentions || it.alertsAsMention) &&
+                                    (readAnchor == null || TimelineAnchor(it.serverTime, it.id, it.timelineOrder) > readAnchor) &&
+                                    policy.allowsNotification(it, room.type)
+                            }.distinctBy { it.id }
+                    }
+                if (remaining.isEmpty()) {
+                    val cleared =
+                        commitPreview(preview, revision) {
+                            if (cardStillActive()) {
+                                historyRevision++
+                                clearThread(thread)
+                            }
+                        }
+                    if (cleared != null) return
+                    continue
+                }
+
+                val avatarStyle = checkNotNull(settings).avatarStyle
+                val dickordBatch =
+                    synchronized(history) { dickordBatches[thread] }
+                        ?: (dickordLabsPrefs.enabled.first() && isDickordChannel(room.displayName))
+                val title = if (thread.channelMentions) room.ircTarget else dickordChannelLabel(room.displayName, dickordBatch)
+                val style = chatStyle(preview, room.type, title)
+                val keys = remaining.mapTo(mutableListOf(), NotificationMessageKey::from)
+                keys.forEach { style.addChatMessage(preview, it, room.networkId, dickordBatch, avatarStyle, identityRules) }
+                val latest = remaining.maxBy { TimelineAnchor(it.serverTime, it.id, it.timelineOrder) }
+                val projection = remaining.firstOrNull { it.id == projected?.id } ?: latest
+                val channel = if (projection.alertsAsMention) CHANNEL_MENTIONS else CHANNEL_MESSAGES
+                val network = networkLabel(room.networkId, preview)
+                if (readPreview() != preview) continue
+                val committed =
+                    commitPreview(preview, revision) {
+                        if (!cardStillActive()) {
+                            return@commitPreview false
+                        }
+                        val shortcut = conversationShortcut(room, network, preview, avatarStyle)
+                        val replacement =
+                            buildMessageNotification(
+                                thread,
+                                room.type,
+                                channel,
+                                style,
+                                keys.mapNotNull { it.eventId }.toLongArray(),
+                                latest.msgid,
+                                latest.serverTime,
+                                latest.id,
+                                preview,
+                                network,
+                                shortcut,
+                                silent = true,
+                                channelEventId = projection.id.takeIf { room.type == BufferType.QUERY && projection.alertsAsMention },
+                            )
+                        historyRevision++
+                        history[thread] = style
+                        historyKeys[thread] = keys
+                        dickordBatches[thread] = dickordBatch
+                        if (channel != CHANNEL_MENTIONS) manager.cancel(active.tag, active.id)
+                        postMessageNotification(thread, replacement).also { posted ->
+                            if (!posted) clearThread(thread)
+                        }
+                    }
+                if (committed != null) return
+            }
+        }
+
+        private fun MessageEntity.eligibleIn(room: RoomEntity): Boolean = !isSelf && !failed && notificationEligible && (!room.muted || notificationWatched)
 
         override suspend fun onInvitation(
             networkId: Long,
@@ -1853,6 +2005,7 @@ internal suspend fun resolveLatestNotificationAnchor(
 }
 
 private const val EXTRA_NOTIFICATION_EVENT_IDS = "motd.notificationEventIds"
+private const val EXTRA_NOTIFICATION_CHANNEL_EVENT_ID = "motd.notificationChannelEventId"
 
 private const val EXTRA_PREVIEW = "motd.notificationPreview"
 private const val EXTRA_SERVICE_ACTIONS = "motd.notificationServiceActions"

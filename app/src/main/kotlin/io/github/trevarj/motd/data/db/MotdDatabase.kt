@@ -47,7 +47,7 @@ import io.github.trevarj.motd.data.saved.SavedMessagesDao
         MemberEntity::class,
         DccTransferEntity::class,
     ],
-    version = 56,
+    version = 57,
     exportSchema = true,
 )
 @TypeConverters(Converters::class)
@@ -1260,6 +1260,19 @@ val MIGRATION_55_56 =
         }
     }
 
+val MIGRATION_56_57 =
+    object : Migration(56, 57) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            db.execSQL("ALTER TABLE messages ADD COLUMN directMention INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE messages ADD COLUMN keywordMatch TEXT DEFAULT 'NONE'")
+            db.execSQL("ALTER TABLE messages ADD COLUMN keywordClassifiedAtOrder INTEGER")
+            db.execSQL("ALTER TABLE messages ADD COLUMN notificationEligibilityFromKeyword INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("ALTER TABLE messages ADD COLUMN notificationWatchFromKeyword INTEGER NOT NULL DEFAULT 0")
+            db.execSQL("UPDATE messages SET directMention = 1 WHERE hasMention = 1 AND kind != 'REDACTED'")
+            db.execSQL("UPDATE messages SET keywordMatch = NULL WHERE kind = 'REDACTED'")
+        }
+    }
+
 /**
  * The complete registered upgrade path, single-sourced so the runtime builder (DbModule) and the
  * migration tests cannot drift apart.
@@ -1328,6 +1341,7 @@ val ALL_MIGRATIONS: Array<Migration> =
         MIGRATION_53_54,
         MIGRATION_54_55,
         MIGRATION_55_56,
+        MIGRATION_56_57,
     )
 
 private fun legacyReactionNormalizedSender(column: String): String = "replace(replace(replace(replace(lower($column), '[', '{'), ']', '}'), '\\', '|'), '~', '^')"

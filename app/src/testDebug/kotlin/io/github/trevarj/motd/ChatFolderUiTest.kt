@@ -573,7 +573,7 @@ class ChatFolderUiTest {
         }
         assertTrue("Selected tab content uses its paired ink", selectedInkVisible)
 
-        compose.onNodeWithTag("chatlist_pinned_mentions").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_pinned_activity").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_folder_tab_7").performClick().assertIsSelected()
         assertColorNear("Switching tabs restores the measured initial backdrop", plainFill, pillPixel(allTag))
         assertEquals(colors.secondaryContainer.toArgb(), pillPixel(folderTag))
@@ -827,12 +827,12 @@ class ChatFolderUiTest {
             assertColorNear("The leading inset has no hard border", pixel(bounds.left + 2 * sampleInset, centerY), pixel(bounds.left + sampleInset, centerY))
             assertColorNear("The upper inset has no underline", pixel(pillCenterX, bounds.top + 2 * sampleInset), pixel(pillCenterX, bounds.top + sampleInset))
             assertColorNear("The lower inset has no separator", pixel(pillCenterX, bounds.bottom - 2 * sampleInset), pixel(pillCenterX, bounds.bottom - sampleInset))
-            val mentionsTab = compose.onNodeWithTag("chatlist_folder_tab_mentions").fetchSemanticsNode().boundsInRoot
-            val mentionsPill = compose.onNodeWithTag("chatlist_folder_tab_pill_mentions", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
-            assertEquals("Mentions keeps the same 48dp target", tabBounds.height, mentionsTab.height, 0.5f)
-            assertEquals("Mentions keeps the same 40dp content geometry", selected.height, mentionsPill.height, 0.5f)
-            assertEquals(pillInset, mentionsPill.top - mentionsTab.top, 0.5f)
-            assertEquals(pillInset, mentionsTab.bottom - mentionsPill.bottom, 0.5f)
+            val activityTab = compose.onNodeWithTag("chatlist_folder_tab_activity").fetchSemanticsNode().boundsInRoot
+            val activityPill = compose.onNodeWithTag("chatlist_folder_tab_pill_activity", useUnmergedTree = true).fetchSemanticsNode().boundsInRoot
+            assertEquals("Activity keeps the same 48dp target", tabBounds.height, activityTab.height, 0.5f)
+            assertEquals("Activity keeps the same 40dp content geometry", selected.height, activityPill.height, 0.5f)
+            assertEquals(pillInset, activityPill.top - activityTab.top, 0.5f)
+            assertEquals(pillInset, activityTab.bottom - activityPill.bottom, 0.5f)
             compose.onNodeWithTag("chatlist_row_1").assertIsDisplayed()
         }
     }
@@ -953,7 +953,7 @@ class ChatFolderUiTest {
         scrollUnreadRowsBehindCapsule()
         compose.runOnIdle { state.value = state.value.copy(rows = emptyList()) }
         compose.onAllNodesWithTag("chatlist_rows").assertCountEquals(0)
-        compose.onNodeWithTag("chatlist_folder_tab_mentions").assertIsDisplayed()
+        compose.onNodeWithTag("chatlist_folder_tab_activity").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_folder_tab_all").assertIsSelected()
         assertColorNear("The empty header shows only its tint, never disposed unread rows", tintOnly, capsulePixel())
 
@@ -1465,13 +1465,13 @@ class ChatFolderUiTest {
                                 allSummary = summarizeFolder(emptyList()),
                                 showAllTab = true,
                                 dickordSummary = null,
-                                mentionsEnabled = false,
+                                activityEnabled = false,
                                 mentionsCount = 0,
                                 mentionsIncomplete = false,
                                 selectedFolderId = null,
                                 onSelect = {},
                                 onOpenDickord = {},
-                                onOpenMentions = {},
+                                onOpenActivity = {},
                                 backdrop = backdrop,
                             )
                         }

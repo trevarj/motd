@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.settings
 
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -108,6 +109,7 @@ internal fun SettingsScaffold(
     scroll: Boolean = true,
     pagePadding: Boolean = true,
     maxPageWidth: Dp = 720.dp,
+    scrollState: ScrollState? = null,
     content: @Composable () -> Unit,
 ) {
     Scaffold(
@@ -140,7 +142,7 @@ internal fun SettingsScaffold(
                     .testTag("settings_scroll")
                     .then(if (pagePadding) Modifier.padding(horizontal = 16.dp, vertical = 12.dp) else Modifier)
             Column(
-                modifier = if (scroll) base.verticalScroll(rememberScrollState()) else base.fillMaxHeight(),
+                modifier = if (scroll) base.verticalScroll(scrollState ?: rememberScrollState()) else base.fillMaxHeight(),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
                 status?.invoke()

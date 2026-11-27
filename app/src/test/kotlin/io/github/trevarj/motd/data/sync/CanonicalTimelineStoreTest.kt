@@ -14,6 +14,7 @@ import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ObservationOrigin
 import io.github.trevarj.motd.data.db.TimeProvenance
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -370,7 +371,7 @@ class CanonicalTimelineStoreTest {
             val name = "canonical-delayed-reopen.db"
             val setup = openSetup(name)
             val live =
-                setup.store.ingest(
+                setup.store.ingestChat(
                     TimelineObservation(
                         networkId = setup.networkId,
                         event = event(setup.roomId, null, 1_000, "same delayed event"),
@@ -379,6 +380,7 @@ class CanonicalTimelineStoreTest {
                         batchId = null,
                         timeProvenance = TimeProvenance.LOCAL_CLOCK,
                     ),
+                    IncomingChatAttention({ KeywordMatch.SILENT }) { mention -> IncomingNotificationDecision(mention, true, false) },
                 )
             setup.db.openHelper.writableDatabase.execSQL(
                 "UPDATE event_observations SET observedAt = 0 WHERE timelineEventId = ?",
@@ -388,7 +390,7 @@ class CanonicalTimelineStoreTest {
 
             val reopened = open(name)
             val history =
-                CanonicalTimelineStore(reopened).ingest(
+                CanonicalTimelineStore(reopened).ingestChat(
                     tagged(
                         setup.networkId,
                         setup.roomId,
@@ -396,9 +398,12 @@ class CanonicalTimelineStoreTest {
                         31L * 24 * 60 * 60 * 1_000,
                         "same delayed event",
                     ),
+                    IncomingChatAttention({ error("already classified") }) { mention -> IncomingNotificationDecision(mention, true, false) },
                 )
 
             assertEquals(live.event.id, history.event.id)
+            assertEquals(KeywordMatch.SILENT, history.event.keywordMatch)
+            assertEquals(false, history.event.notificationEligible)
             assertEquals(1, rows(reopened, setup.roomId).size)
             assertEquals("delayed-msgid", reopened.messageDao().byId(live.event.id)?.msgid)
             reopened.close()
@@ -637,6 +642,53 @@ class CanonicalTimelineStoreTest {
                 assertEquals(!loserResolved, stored.notificationEligible)
                 assertEquals(loserResolved, stored.notificationEligibilityResolved)
                 assertEquals(false, stored.notificationWatched)
+                setup.db.close()
+            }
+        }
+
+    @Test
+    fun coalescenceKeepsFirstClassifiedBodyRatherThanLowestRowId() =
+        runTest {
+            for (allowsAll in listOf(false, true)) {
+                val setup = openSetup("canonical-keyword-merge-$allowsAll.db")
+                val otherRoom = setup.db.bufferDao().insert(room(setup.networkId, "#other"))
+                val observation =
+                    ObservationSpec(ObservationOrigin.HISTORY, null, 80_000, TimeProvenance.SERVER_TAG)
+                        .observation(setup.networkId, setup.roomId)
+                val winner = setup.store.ingest(observation).event
+                setup.store.ingestChat(
+                    observation.copy(event = observation.event.copy(bufferId = otherRoom)),
+                    IncomingChatAttention({ KeywordMatch.SILENT }) { IncomingNotificationDecision(false, false, false) },
+                )
+                val laterAlert =
+                    setup
+                        .store
+                        .ingestChat(
+                            observation.copy(origin = ObservationOrigin.LIVE),
+                            IncomingChatAttention({ KeywordMatch.ALERT }) { mention ->
+                                IncomingNotificationDecision(allowsAll || mention, true, bypassesMute = false)
+                            },
+                        ).event
+                assertEquals(winner.id, laterAlert.id)
+                assertEquals(KeywordMatch.ALERT, laterAlert.keywordMatch)
+                assertEquals(true, laterAlert.notificationEligible)
+
+                setup.store.moveEventsToRoom(setup.networkId, otherRoom, setup.roomId)
+
+                val stored = rows(setup.db, setup.roomId).single()
+                assertEquals(winner.id, stored.id)
+                assertEquals(KeywordMatch.SILENT, stored.keywordMatch)
+                assertEquals(true, stored.hasMention)
+                assertEquals(false, stored.directMention)
+                assertEquals(allowsAll, stored.notificationEligible)
+                assertEquals(
+                    if (allowsAll) listOf(winner.id) else emptyList(),
+                    setup
+                        .db
+                        .canonicalTimelineDao()
+                        .pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE)
+                        .map { it.id },
+                )
                 setup.db.close()
             }
         }

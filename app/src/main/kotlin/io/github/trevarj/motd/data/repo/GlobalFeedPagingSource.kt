@@ -6,8 +6,8 @@ import androidx.paging.PagingState
 import androidx.room.InvalidationTracker
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.SearchHit
+import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
-import io.github.trevarj.motd.data.visibility.GlobalFeedMode
 import io.github.trevarj.motd.data.visibility.GlobalFeedSeek
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
@@ -33,7 +33,7 @@ internal val GLOBAL_FEED_TABLES =
 internal class GlobalFeedPagingSource(
     private val db: MotdDatabase,
     private val spec: MessageVisibilitySpec,
-    private val mode: GlobalFeedMode = GlobalFeedMode.ALL,
+    private val activityFilter: ActivityFilter? = null,
     private val isAtNewest: () -> Boolean = { false },
 ) : PagingSource<GlobalFeedKey, SearchHit>() {
     private val observer =
@@ -53,9 +53,9 @@ internal class GlobalFeedPagingSource(
      * from a position, which a merged stream does not have.
      */
     override fun getRefreshKey(state: PagingState<GlobalFeedKey, SearchHit>): GlobalFeedKey? {
-        // A mention inserted while the reader is at its newest edge must be in the next refresh's
-        // first page. Elsewhere, retain the anchor so an invalidation does not move the viewport.
-        if (mode == GlobalFeedMode.MENTIONS && isAtNewest()) return null
+        // At Activity's newest edge, refresh from the top so new events land in the first page.
+        // Elsewhere, retain the anchor so an invalidation does not move the viewport.
+        if (activityFilter != null && isAtNewest()) return null
         return state.anchorPosition
             ?.let(state::closestItemToPosition)
             ?.let { GlobalFeedKey(it.message.serverTime, it.message.id) }
@@ -66,11 +66,12 @@ internal class GlobalFeedPagingSource(
         // database work, and the caller collects this Pager on the main dispatcher.
         withContext(Dispatchers.IO) {
             observe()
+            if (invalid) return@withContext LoadResult.Invalid()
             try {
                 when (params) {
                     // Anchored refresh includes the anchor row itself, so the viewport keeps its place.
                     is LoadParams.Refresh -> {
-                        if (mode == GlobalFeedMode.MENTIONS) return@withContext refreshMentions(params)
+                        if (activityFilter != null) return@withContext refreshActivity(params)
                         val rows = page(params.key, GlobalFeedSeek.OLDER_OR_AT, params.loadSize)
                         LoadResult.Page(
                             data = rows,
@@ -98,7 +99,7 @@ internal class GlobalFeedPagingSource(
             }
         }
 
-    private suspend fun refreshMentions(params: LoadParams.Refresh<GlobalFeedKey>): LoadResult.Page<GlobalFeedKey, SearchHit> {
+    private suspend fun refreshActivity(params: LoadParams.Refresh<GlobalFeedKey>): LoadResult.Page<GlobalFeedKey, SearchHit> {
         val newerLimit = params.loadSize / 2
         val newer =
             if (params.key != null && newerLimit > 0) {
@@ -109,7 +110,7 @@ internal class GlobalFeedPagingSource(
         val olderLimit = params.loadSize - newer.size
         val older = page(params.key, GlobalFeedSeek.OLDER_OR_AT, olderLimit)
         return LoadResult.Page(
-            data = newer + older,
+            data = if (newer.isEmpty()) older else newer + older,
             prevKey =
                 if (params.key != null && (newerLimit == 0 || newer.size == newerLimit)) {
                     newer.firstOrNull()?.key() ?: older.firstOrNull()?.key() ?: params.key
@@ -124,11 +125,15 @@ internal class GlobalFeedPagingSource(
         key: GlobalFeedKey?,
         seek: GlobalFeedSeek,
         limit: Int,
-    ): List<SearchHit> = db.messageDao().globalFeedPage(globalFeedPagingQuery(spec, key, seek, limit, mode))
+    ): List<SearchHit> = db.messageDao().globalFeedPage(globalFeedPagingQuery(spec, key, seek, limit, activityFilter))
 
     /** First load arms the observer; the source is discarded on the first invalidation after that. */
     private fun observe() {
-        if (observing.compareAndSet(false, true)) db.invalidationTracker.addObserver(observer)
+        if (!invalid && observing.compareAndSet(false, true)) {
+            db.invalidationTracker.addObserver(observer)
+            // The pager may have been canceled before registration finished.
+            if (invalid) db.invalidationTracker.removeObserver(observer)
+        }
     }
 }
 

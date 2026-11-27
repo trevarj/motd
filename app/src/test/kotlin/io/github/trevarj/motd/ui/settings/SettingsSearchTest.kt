@@ -52,6 +52,8 @@ class SettingsSearchTest {
             "reply swipe" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.SWIPE_TO_REPLY),
             "replies feed" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS),
             "mentions drawer" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS_LOCATION),
+            "activity keyword highlight" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.MENTIONS),
+            "activity keyword highlight" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.KEYWORD_HIGHLIGHTS),
             "ircv3 typing" to SettingsSearchDestination.Page(SettingsSearchPage.SECURITY, SettingsTarget.SEND_TYPING),
             "blur reveal" to SettingsSearchDestination.Page(SettingsSearchPage.CHAT, SettingsTarget.FOOLS_MODE),
             "channel privilege prefixes" to SettingsSearchDestination.Page(SettingsSearchPage.APPEARANCE, SettingsTarget.CHANNEL_PREFIXES),

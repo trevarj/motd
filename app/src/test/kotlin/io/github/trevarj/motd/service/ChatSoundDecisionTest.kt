@@ -25,8 +25,13 @@ import io.github.trevarj.motd.data.prefs.ChatSoundVoice
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.Settings
 import io.github.trevarj.motd.data.prefs.matchesConfiguredNick
+import io.github.trevarj.motd.data.sync.EventProcessor
+import io.github.trevarj.motd.data.sync.MessageNotifier
+import io.github.trevarj.motd.data.sync.TypingTrackerImpl
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.di.ForegroundBufferTrackerImpl
@@ -389,7 +394,7 @@ class ChatSoundDecisionTest {
     }
 
     @Test
-    fun `canonical adapter forwards reply mention to the actual foreground sound gate`() =
+    fun `canonical reply and receipt-time keyword provenance reach the actual foreground sound gate`() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val db = Room.inMemoryDatabaseBuilder(context, MotdDatabase::class.java).allowMainThreadQueries().build()
@@ -480,7 +485,7 @@ class ChatSoundDecisionTest {
                     )
                 for (hasMention in listOf(false, true)) {
                     val player = AndroidChatSoundPlayer(db, tracker, repo, prefs, backend, playback, AudioActivityTracker())
-                    player.onCanonicalIncoming(bufferId, BufferType.CHANNEL, message, canonical.copy(hasMention = hasMention))
+                    player.onCanonicalIncoming(bufferId, BufferType.CHANNEL, message, canonical.copy(hasMention = hasMention, directMention = hasMention))
                     // Observe accepted cues before SoundPool's asynchronous asset-loading boundary.
                     val conversation = ReflectionHelpers.getField<ChatSoundConversation>(player, "conversation")
                     assertEquals(
@@ -488,10 +493,32 @@ class ChatSoundDecisionTest {
                         conversation.next(ChatSoundCue.RECEIVE, bufferId, android.os.SystemClock.elapsedRealtimeNanos(), ChatSoundConfig())?.semitones,
                     )
                 }
+
+                val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop, settingsRepository = repo)
+                processor.onRegistered(networkId, "me", emptyMap())
+                val silent = message.copy(ctx = message.ctx.copy(msgid = "sound-silent", account = fool), text = "project silent")
+                val alert = message.copy(ctx = message.ctx.copy(msgid = "sound-alert", account = fool), text = "project alert")
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("silent", false), KeywordHighlightRule("alert", true)))
+                processor.process(networkId, silent)
+                processor.process(networkId, alert)
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("silent", true), KeywordHighlightRule("alert", false)))
+                for ((incoming, match) in listOf(silent to KeywordMatch.SILENT, alert to KeywordMatch.ALERT)) {
+                    val stored = requireNotNull(db.messageDao().byMsgid(bufferId, checkNotNull(incoming.ctx.msgid)))
+                    assertEquals(match, stored.keywordMatch)
+                    assertFalse(stored.directMention)
+                    val player = AndroidChatSoundPlayer(db, tracker, repo, prefs, backend, playback, AudioActivityTracker())
+                    player.onCanonicalIncoming(bufferId, BufferType.CHANNEL, incoming, stored)
+                    val conversation = ReflectionHelpers.getField<ChatSoundConversation>(player, "conversation")
+                    assertEquals(
+                        if (match == KeywordMatch.ALERT) 4 else 0,
+                        conversation.next(ChatSoundCue.RECEIVE, bufferId, android.os.SystemClock.elapsedRealtimeNanos(), ChatSoundConfig())?.semitones,
+                    )
+                }
             } finally {
                 repo.setFool(fool, false)
                 repo.setChatSoundsEnabled(originalSettings.chatSoundsEnabled)
                 prefs.replace(originalConfig)
+                repo.setKeywordHighlightRules(originalSettings.keywordHighlightRules)
                 db.close()
             }
         }

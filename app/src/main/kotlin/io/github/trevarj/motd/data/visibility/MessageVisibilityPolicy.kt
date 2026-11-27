@@ -266,6 +266,14 @@ internal class MessageVisibilitySql(
             "${column(alias, "kind")} IN ($CONVERSATION_KIND_SQL)",
             "${column(alias, "isSelf")} = 0",
             "${column(alias, "hasMention")} = 1",
+            attentionPermissions(bufferTypeExpr, alias),
+        )
+
+    private fun attentionPermissions(
+        bufferTypeExpr: String,
+        alias: String,
+    ): String =
+        allOf(
             notHidden(alias),
             "(($bufferTypeExpr = 'QUERY' AND ${buildNotFoolPredicate(directMessagesDisabled, alias)}) " +
                 "OR ($bufferTypeExpr != 'QUERY' AND ${buildNotFoolPredicate(mentionsDisabled, alias)}))",
@@ -366,12 +374,12 @@ internal class MessageVisibilitySql(
             alias: String = "m",
         ): String = anyCasemap(spec, caseMappingExpr) { it.notFool(alias) }
 
-        fun mentionAttentionAnyCasemap(
+        fun attentionPermissionsAnyCasemap(
             spec: MessageVisibilitySpec,
             caseMappingExpr: String,
             bufferTypeExpr: String,
             alias: String = "m",
-        ): String = anyCasemap(spec, caseMappingExpr) { it.mentionAttention(bufferTypeExpr, alias) }
+        ): String = anyCasemap(spec, caseMappingExpr) { it.attentionPermissions(bufferTypeExpr, alias) }
 
         private fun anyCasemap(
             spec: MessageVisibilitySpec,
@@ -565,8 +573,8 @@ data class GlobalFeedKey(
 /** Which side of a [GlobalFeedKey] a page reads, and whether the key row itself is included. */
 internal enum class GlobalFeedSeek { OLDER, OLDER_OR_AT, NEWER }
 
-/** The shared cross-buffer pager supports the ordinary stream and its mention-only view. */
-internal enum class GlobalFeedMode { ALL, MENTIONS }
+/** Stored attention provenance to include in Activity. */
+enum class ActivityFilter { ALL, MENTIONS, KEYWORDS }
 
 /**
  * Cross-buffer reverse-chronological conversation stream, newest first.
@@ -575,8 +583,8 @@ internal enum class GlobalFeedMode { ALL, MENTIONS }
  * `event_redirects` anti-join is defensive only — `CanonicalTimelineStore.coalesce` already deletes
  * the losing row.
  *
- * ALL excludes every fool. MENTIONS admits only non-Hidden, permitted mention attention, keyed on
- * each row's own network casemap so the SQL never depends on which networks exist.
+ * The ordinary feed excludes archived buffers and every fool. Activity includes archived buffers
+ * and applies attention permissions using each row's own network casemap.
  *
  * [key] seeks one page without OFFSET; a null key reads the newest page. [GlobalFeedSeek.NEWER] is the
  * prepend direction and returns rows oldest-first, so the caller reverses them.
@@ -586,11 +594,28 @@ internal fun globalFeedPagingQuery(
     key: GlobalFeedKey? = null,
     seek: GlobalFeedSeek = GlobalFeedSeek.OLDER,
     limit: Int? = null,
-    mode: GlobalFeedMode = GlobalFeedMode.ALL,
+    activityFilter: ActivityFilter? = null,
 ): SimpleSQLiteQuery {
     val direction = if (key != null && seek == GlobalFeedSeek.NEWER) "ASC" else "DESC"
     val keyset = if (key == null) "" else "${keysetPredicate(seek)} "
     val limitClause = if (limit == null) "" else " LIMIT ?"
+    val mentions = "m.directMention = 1"
+    val keywords = "m.keywordMatch IN ('SILENT','ALERT')"
+    val provenance =
+        when (activityFilter) {
+            null -> ""
+            ActivityFilter.ALL -> "($mentions OR $keywords)"
+            ActivityFilter.MENTIONS -> mentions
+            ActivityFilter.KEYWORDS -> keywords
+        }
+    // The persisted aggregate bounds every Activity scope to the sparse attention index.
+    val attention = if (activityFilter == null) "" else "AND m.hasMention = 1 AND m.isSelf = 0 AND $provenance "
+    val visibility =
+        if (activityFilter == null) {
+            MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")
+        } else {
+            MessageVisibilitySql.attentionPermissionsAnyCasemap(spec, "ni.caseMapping", "b.type")
+        }
     return SimpleSQLiteQuery(
         "SELECT m.*, b.displayName AS bufferDisplayName, n.name AS networkName, " +
             "b.type AS bufferType, b.networkId AS networkId, " +
@@ -604,18 +629,12 @@ internal fun globalFeedPagingQuery(
             "LEFT JOIN network_identity ni ON ni.networkId = b.networkId " +
             "LEFT JOIN event_redirects redirect ON redirect.losingEventId = m.id " +
             "WHERE b.type IN ('CHANNEL','QUERY') AND b.dismissed = 0 " +
-            (if (mode == GlobalFeedMode.ALL) "AND b.archived = 0 " else "") +
+            (if (activityFilter == null) "AND b.archived = 0 " else "") +
             "AND b.pendingCloseAt IS NULL AND b.redirectToRoomId IS NULL " +
             "AND redirect.losingEventId IS NULL " +
             "AND m.kind IN ($CONVERSATION_KIND_SQL) " +
-            (if (mode == GlobalFeedMode.MENTIONS) "AND m.hasMention = 1 AND m.isSelf = 0 " else "") +
-            "AND ${
-                if (mode == GlobalFeedMode.MENTIONS) {
-                    MessageVisibilitySql.mentionAttentionAnyCasemap(spec, "ni.caseMapping", "b.type")
-                } else {
-                    MessageVisibilitySql.notFoolAnyCasemap(spec, "ni.caseMapping")
-                }
-            } " +
+            attention +
+            "AND $visibility " +
             keyset +
             "ORDER BY m.serverTime $direction, m.id $direction" +
             limitClause,

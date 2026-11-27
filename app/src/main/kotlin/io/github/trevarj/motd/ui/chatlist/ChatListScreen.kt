@@ -72,9 +72,9 @@ import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.PushPin
-import androidx.compose.material.icons.outlined.AlternateEmail
 import androidx.compose.material.icons.outlined.Anchor
 import androidx.compose.material.icons.outlined.Archive
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.DateRange
 import androidx.compose.material.icons.outlined.Delete
 import androidx.compose.material.icons.outlined.DoneAll
@@ -255,7 +255,7 @@ fun ChatListScreen(
     onOpenSettings: () -> Unit = {},
     onOpenSearch: () -> Unit = {},
     onOpenFeed: () -> Unit = {},
-    onOpenMentions: () -> Unit = {},
+    onOpenActivity: () -> Unit = {},
     onOpenDickord: () -> Unit = {},
     onOpenManageFolders: (Long?) -> Unit = {},
     onOpenFolderEditor: (Long) -> Unit = {},
@@ -382,7 +382,7 @@ fun ChatListScreen(
         onOpenSavedMessages = onOpenSavedMessages,
         onOpenSearch = onOpenSearch,
         onOpenFeed = onOpenFeed,
-        onOpenMentions = onOpenMentions,
+        onOpenActivity = onOpenActivity,
         onOpenDickord = onOpenDickord,
         onOpenManageFolders = onOpenManageFolders,
         onOpenFolderEditor = onOpenFolderEditor,
@@ -483,7 +483,7 @@ fun ChatListContent(
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
     onOpenFeed: () -> Unit = {},
-    onOpenMentions: () -> Unit = {},
+    onOpenActivity: () -> Unit = {},
     onOpenDickord: () -> Unit = {},
     onOpenManageFolders: (Long?) -> Unit = {},
     onOpenFolderEditor: (Long) -> Unit = {},
@@ -561,11 +561,11 @@ fun ChatListContent(
     val showNetworkChip = state.networks.size > 1 && state.selectedNetworkId == null
     val visibleRows = if (archiveMode) state.archivedRows else state.rows
     val folderTabs = if (state.folderDisplayMode == FolderDisplayMode.TABS) presentFolderTabs(state.rows, state.folders) else emptyList()
-    val mentionsAsTab = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.FOLDER_TAB
+    val activityAsTab = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.FOLDER_TAB
     val allTabRows = folderAllRows(state.rows, state.showFolderChatsInAll)
     val showAllTab =
         state.dickordEnabled ||
-            mentionsAsTab ||
+            activityAsTab ||
             allTabRows.isNotEmpty() ||
             state.archivedRows.isNotEmpty() ||
             state.invitations.any(ChatListInvitation::actionable) ||
@@ -747,11 +747,11 @@ fun ChatListContent(
                         scope.launch { drawerState.close() }
                         onOpenFeed()
                     },
-                    onOpenMentions = {
+                    onOpenActivity = {
                         scope.launch { drawerState.close() }
-                        onOpenMentions()
+                        onOpenActivity()
                     },
-                    mentionsEnabled = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.DRAWER,
+                    activityEnabled = state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.DRAWER,
                     globalFeedEnabled = state.globalFeedEnabled,
                     onMarkAllRead = {
                         scope.launch { drawerState.close() }
@@ -762,8 +762,8 @@ fun ChatListContent(
                 )
             },
         ) {
-            val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || mentionsAsTab)
-            val pinnedMentionsVisible =
+            val folderTabsVisible = !archiveMode && !invitationMode && (folderTabs.isNotEmpty() || state.dickordEnabled || activityAsTab)
+            val pinnedActivityVisible =
                 !archiveMode && !invitationMode && !filterUnread && state.mentionsEnabled && state.mentionsPlacement == MentionsPlacement.CHAT_LIST
             val hasInvitationRoute = state.invitations.any(ChatListInvitation::actionable)
             val portalOnly =
@@ -1289,7 +1289,7 @@ fun ChatListContent(
                                     allSummary = summarizeFolder(allTabRows),
                                     showAllTab = showAllTab,
                                     dickordSummary = state.dickordUnreadSummary,
-                                    mentionsEnabled = mentionsAsTab,
+                                    activityEnabled = activityAsTab,
                                     mentionsCount = state.allMentions,
                                     mentionsIncomplete = state.allMentionsIncomplete,
                                     selectedFolderId = effectiveFolderId,
@@ -1305,13 +1305,13 @@ fun ChatListContent(
                                         selectedIds = emptyList()
                                         onOpenDickord()
                                     },
-                                    onOpenMentions = {
+                                    onOpenActivity = {
                                         selectedIds = emptyList()
-                                        onOpenMentions()
+                                        onOpenActivity()
                                     },
                                     backdrop = folderBackdrop,
                                 )
-                                if (pinnedMentionsVisible) MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
+                                if (pinnedActivityVisible) ActivityPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenActivity)
                             }
                         }
                     }
@@ -1350,8 +1350,8 @@ fun ChatListContent(
                                 }
                             }
                         }
-                        if (!folderTabsVisible && pinnedMentionsVisible) {
-                            MentionsPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenMentions)
+                        if (!folderTabsVisible && pinnedActivityVisible) {
+                            ActivityPinnedRow(state.allMentions, state.allMentionsIncomplete, onOpenActivity)
                         }
                         communityInvitation()
                     }
@@ -1633,14 +1633,14 @@ internal fun FolderTabStrip(
     allSummary: ChatFolderSummary,
     showAllTab: Boolean,
     dickordSummary: ChatFolderSummary?,
-    mentionsEnabled: Boolean,
+    activityEnabled: Boolean,
     mentionsCount: Int,
     mentionsIncomplete: Boolean,
     selectedFolderId: Long?,
     onSelect: (Long?) -> Unit,
     onOpenDickord: () -> Unit,
-    onOpenMentions: () -> Unit,
-    mentionsSelected: Boolean = false,
+    onOpenActivity: () -> Unit,
+    activitySelected: Boolean = false,
     backdrop: SurfaceBackdropSource? = null,
 ) {
     Box(
@@ -1663,37 +1663,37 @@ internal fun FolderTabStrip(
         ) {
             if (showAllTab) {
                 FolderPillTab(
-                    selected = selectedFolderId == null && !mentionsSelected,
+                    selected = selectedFolderId == null && !activitySelected,
                     onClick = { onSelect(null) },
                     tag = "chatlist_folder_tab_all",
                 ) {
                     FolderTabLabel(
                         name = stringResource(R.string.folders_all),
                         summary = allSummary,
-                        selected = selectedFolderId == null && !mentionsSelected,
+                        selected = selectedFolderId == null && !activitySelected,
                         pillTag = "chatlist_folder_tab_pill_all",
                         icon = { Icon(Icons.Outlined.Forum, contentDescription = null, modifier = Modifier.size(20.dp)) },
                     )
                 }
             }
-            if (mentionsEnabled) {
+            if (activityEnabled) {
                 FolderPillTab(
-                    selected = mentionsSelected,
-                    onClick = onOpenMentions,
-                    tag = "chatlist_folder_tab_mentions",
+                    selected = activitySelected,
+                    onClick = onOpenActivity,
+                    tag = "chatlist_folder_tab_activity",
                 ) {
                     Row(
                         modifier =
                             Modifier
-                                .testTag("chatlist_folder_tab_pill_mentions")
+                                .testTag("chatlist_folder_tab_pill_activity")
                                 .heightIn(min = 40.dp)
-                                .background(if (mentionsSelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, MotdShapes.channelAvatar)
+                                .background(if (activitySelected) MaterialTheme.colorScheme.secondaryContainer else Color.Transparent, MotdShapes.channelAvatar)
                                 .padding(horizontal = 12.dp, vertical = 8.dp),
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Icon(Icons.Outlined.AlternateEmail, contentDescription = null, modifier = Modifier.size(20.dp))
-                        Text(stringResource(R.string.mentions_title), style = MaterialTheme.typography.labelLarge)
+                        Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(20.dp))
+                        Text(stringResource(R.string.activity_title), style = MaterialTheme.typography.labelLarge)
                         if (mentionsCount > 0) MentionBadge(mentionsCount, lowerBound = mentionsIncomplete)
                     }
                 }
@@ -1747,14 +1747,14 @@ internal fun FolderTabStrip(
 }
 
 @Composable
-internal fun MentionsPinnedRow(
+internal fun ActivityPinnedRow(
     count: Int,
     incomplete: Boolean,
     onClick: () -> Unit,
 ) {
     Card(
         onClick = onClick,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("chatlist_pinned_mentions"),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp).testTag("chatlist_pinned_activity"),
         shape = MotdShapes.channelAvatar,
     ) {
         Row(
@@ -1762,8 +1762,8 @@ internal fun MentionsPinnedRow(
             horizontalArrangement = Arrangement.spacedBy(12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(Icons.Outlined.AlternateEmail, contentDescription = null, modifier = Modifier.size(24.dp))
-            Text(stringResource(R.string.mentions_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
+            Icon(Icons.Outlined.Bolt, contentDescription = null, modifier = Modifier.size(24.dp))
+            Text(stringResource(R.string.activity_title), modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleSmall)
             if (count > 0) MentionBadge(count, lowerBound = incomplete)
         }
     }

@@ -21,8 +21,12 @@ import io.github.trevarj.motd.data.db.RoomAliasNamespace
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.repo.ChatRoomRevisions
 import io.github.trevarj.motd.data.saved.SavedMessage
 import io.github.trevarj.motd.data.saved.SavedMessageSource
@@ -54,6 +58,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.test.StandardTestDispatcher
@@ -1935,6 +1940,12 @@ class EventProcessorTest {
     @Test
     fun historicalQueryReplayRepairsIncorrectSelfAttribution() =
         runTest {
+            val persistedSettings = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext())
+            val rules =
+                object : SettingsRepository by persistedSettings {
+                    override val keywordHighlightRules = flowOf(listOf(KeywordHighlightRule("repair", alerts = true)))
+                }
+            val processor = EventProcessor(db, TypingTrackerImpl(), MessageNotifier.Noop, settingsRepository = rules)
             processor.onRegistered(networkId, "newMe", mapOf("CASEMAPPING" to "rfc1459"))
             val incorrectlyAttributed =
                 IrcEvent.ChatMessage(
@@ -1948,7 +1959,9 @@ class EventProcessorTest {
                 )
             processor.processPush(networkId, incorrectlyAttributed)
             val bob = db.bufferDao().byName(networkId, "bob")!!
-            assertTrue(pagingList(bob.id).single().isSelf)
+            val self = pagingList(bob.id).single()
+            assertTrue(self.isSelf)
+            assertNull(self.keywordMatch)
 
             processor.process(
                 networkId,
@@ -1965,6 +1978,8 @@ class EventProcessorTest {
 
             val repaired = pagingList(bob.id).single()
             assertFalse(repaired.isSelf)
+            assertEquals(self.id, repaired.id)
+            assertEquals(KeywordMatch.ALERT, repaired.keywordMatch)
             assertEquals("repair-query-direction", repaired.msgid)
         }
 

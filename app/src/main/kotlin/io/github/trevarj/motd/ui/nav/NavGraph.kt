@@ -67,8 +67,8 @@ import io.github.trevarj.motd.ui.chatlist.FolderEditorScreen
 import io.github.trevarj.motd.ui.chatlist.ManageFoldersScreen
 import io.github.trevarj.motd.ui.chatlist.isNormalChatListReady
 import io.github.trevarj.motd.ui.components.LocalOpenIrcChannelLink
+import io.github.trevarj.motd.ui.feed.ActivityScreen
 import io.github.trevarj.motd.ui.feed.GlobalFeedScreen
-import io.github.trevarj.motd.ui.feed.MentionsScreen
 import io.github.trevarj.motd.ui.imageviewer.ImageViewerScreen
 import io.github.trevarj.motd.ui.imageviewer.VideoViewerScreen
 import io.github.trevarj.motd.ui.invite.AccountSetupScreen
@@ -721,8 +721,8 @@ fun MotdNavGraph(
                 },
             )
         }
-        composable<MentionsRoute> {
-            MentionsScreen(
+        composable<ActivityRoute> {
+            ActivityScreen(
                 onBack = { navController.popBackStack() },
                 onOpenAiSetup = { navController.navigate(AiLabsRoute(SettingsTarget.AI_TEXT_TOOLS)) },
                 onOpenMessage = { bufferId, eventId, time ->
@@ -996,7 +996,7 @@ private fun ChatListPane(
         onOpenSavedMessages = { navController.navigate(SavedMessagesRoute) { launchSingleTop = true } },
         onOpenSearch = { navController.navigate(SearchRoute()) },
         onOpenFeed = { navController.navigate(GlobalFeedRoute) },
-        onOpenMentions = { navController.navigate(MentionsRoute) },
+        onOpenActivity = { navController.navigate(ActivityRoute) },
         onOpenDickord = {
             navController.navigate(DickordPortalRoute) { launchSingleTop = true }
         },

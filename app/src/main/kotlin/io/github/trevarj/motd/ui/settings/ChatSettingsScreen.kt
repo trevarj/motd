@@ -1,5 +1,6 @@
 package io.github.trevarj.motd.ui.settings
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -7,6 +8,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FormatColorText
 import androidx.compose.material.icons.outlined.Block
 import androidx.compose.material.icons.outlined.PersonOutline
 import androidx.compose.material3.AlertDialog
@@ -20,6 +22,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.testTag
@@ -43,6 +46,7 @@ import io.github.trevarj.motd.data.prefs.AUTO_AWAY_MINUTE_CHOICES
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.PresenceMode
@@ -63,6 +67,7 @@ import io.github.trevarj.motd.ui.nav.SettingsTarget
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import io.github.trevarj.motd.ui.theme.readableOutlinedTextFieldColors
 import io.github.trevarj.motd.ui.theme.readableTextButtonColors
+import io.github.trevarj.motd.ui.theme.uiIcon
 import io.github.trevarj.motd.ui.components.EmojiOutlinedTextField as OutlinedTextField
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 
@@ -142,6 +147,7 @@ fun ChatSettingsScreen(
         onStopReadAloudPreview = viewModel::stopReadAloudPreview,
         target = target,
         snackbarHostState = snackbarHostState,
+        onEditKeywordHighlightRule = viewModel::editKeywordHighlightRule,
     )
 }
 
@@ -194,6 +200,7 @@ fun ChatSettingsContent(
     onStopReadAloudPreview: () -> Unit,
     target: SettingsTarget? = null,
     snackbarHostState: SnackbarHostState? = null,
+    onEditKeywordHighlightRule: (suspend (KeywordHighlightRule?, KeywordHighlightRule?) -> Boolean)? = null,
 ) {
     var qualitySheetOpen by remember { mutableStateOf(false) }
     var presenceSheetOpen by remember { mutableStateOf(false) }
@@ -216,11 +223,21 @@ fun ChatSettingsContent(
             onStopReadAloudPreview()
         }
     }
+    var keywordHighlightsOpen by rememberSaveable { mutableStateOf(false) }
+    val chatSettingsScroll = rememberScrollState()
+    if (keywordHighlightsOpen && onEditKeywordHighlightRule != null) {
+        val close = { keywordHighlightsOpen = false }
+        BackHandler(onBack = close)
+        KeywordHighlightSettings(settings.keywordHighlightRules, onBack = close, onEdit = onEditKeywordHighlightRule)
+        return
+    }
+
     val defaultAwayMessage = stringResource(R.string.auto_away_default_message)
     SettingsScaffold(
         title = stringResource(R.string.settings_chat),
         onBack = onBack,
         snackbarHostState = snackbarHostState,
+        scrollState = chatSettingsScroll,
     ) {
         Text(stringResource(R.string.settings_device_preferences_scope), style = MaterialTheme.typography.bodySmall)
         SettingsGroup(title = stringResource(R.string.settings_conversation_section)) {
@@ -280,7 +297,7 @@ fun ChatSettingsContent(
             )
             HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
             SwitchRow(
-                title = stringResource(R.string.mentions_title),
+                title = stringResource(R.string.activity_title),
                 subtitle = stringResource(R.string.settings_mentions_desc),
                 checked = settings.mentionsEnabled,
                 onCheckedChange = onMentionsEnabled,
@@ -298,6 +315,19 @@ fun ChatSettingsContent(
                 targetName = SettingsTarget.MENTIONS_LOCATION.name,
                 onClick = { mentionsPlacementSheetOpen = true },
             )
+        }
+        if (onEditKeywordHighlightRule != null) {
+            SettingsGroup {
+                SettingsNavigationRow(
+                    title = stringResource(R.string.settings_keyword_highlights),
+                    icon = uiIcon(Icons.Filled.FormatColorText),
+                    summary = stringResource(R.string.settings_keyword_highlights_summary),
+                    modifier = Modifier.testTag("keyword_highlight_settings"),
+                    requestedTarget = target?.name,
+                    targetName = SettingsTarget.KEYWORD_HIGHLIGHTS.name,
+                    onClick = { keywordHighlightsOpen = true },
+                )
+            }
         }
         SettingsGroup(title = stringResource(R.string.settings_auto_away_section)) {
             SwitchRow(

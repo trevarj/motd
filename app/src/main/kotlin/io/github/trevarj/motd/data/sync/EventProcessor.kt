@@ -30,7 +30,11 @@ import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.db.TimelineEventId
 import io.github.trevarj.motd.data.db.UserEntity
+import io.github.trevarj.motd.data.db.alertsAsMention
 import io.github.trevarj.motd.data.db.identityRules
+import io.github.trevarj.motd.data.prefs.KeywordMatch
+import io.github.trevarj.motd.data.prefs.SettingsRepository
+import io.github.trevarj.motd.data.prefs.matchKeywordHighlight
 import io.github.trevarj.motd.data.repo.NetworkIgnoreCache
 import io.github.trevarj.motd.data.repo.ignoredBy
 import io.github.trevarj.motd.diagnostics.AutoFollowTrace
@@ -60,6 +64,8 @@ import io.github.trevarj.motd.service.IrcEventSink
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationSettings
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.first
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
@@ -106,7 +112,7 @@ internal data class AdvertisedActivity(
 internal data class PlaybackCommit(
     val primaryOrder: List<TimelineEventId> = emptyList(),
     val inserted: Int = 0,
-    val redactions: List<Pair<RoomId, TimelineEventId>> = emptyList(),
+    val notificationInvalidations: List<Pair<RoomId, TimelineEventId>> = emptyList(),
 )
 
 internal data class HistoryPageWrite(
@@ -137,6 +143,7 @@ class EventProcessor
         private val networkIgnoreCache: NetworkIgnoreCache = NetworkIgnoreCache(db.networkIgnoreDao()),
         private val notificationSettings: NotificationSettings = NotificationSettings.Noop,
         private val incomingMessageReader: IncomingMessageReader = IncomingMessageReader.Noop,
+        private val settingsRepository: SettingsRepository? = null,
     ) : IrcEventSink {
         private val networkDao get() = db.networkDao()
         private val networkIdentityDao get() = db.networkIdentityDao()
@@ -588,15 +595,15 @@ class EventProcessor
             networkId: Long,
             event: IrcEvent,
         ) {
-            val redactions =
+            val invalidations =
                 sequencer.withNetwork(networkId) {
-                    val redactions = processEvent(networkId, event, EventOrigin.LIVE)
+                    val invalidations = processEvent(networkId, event, EventOrigin.LIVE)
                     completeCommandFromState(networkId, event)
                     if (event is IrcEvent.Disconnected) clearCommandResponses(networkId)
                     bufferStore.drainCommittedRoomMerges()
-                    redactions
+                    invalidations
                 }
-            notifyCommittedRedactions(redactions)
+            notifyCommittedInvalidations(invalidations)
         }
 
         /** Consecutive live peer membership changes share a commit, not a canonical event identity. */
@@ -623,13 +630,13 @@ class EventProcessor
             networkId: Long,
             event: IrcEvent,
         ) {
-            val redactions =
+            val invalidations =
                 sequencer.withNetwork(networkId) {
-                    val redactions = processEvent(networkId, event, EventOrigin.PUSH)
+                    val invalidations = processEvent(networkId, event, EventOrigin.PUSH)
                     bufferStore.drainCommittedRoomMerges()
-                    redactions
+                    invalidations
                 }
-            notifyCommittedRedactions(redactions)
+            notifyCommittedInvalidations(invalidations)
         }
 
         /** Persist one event according to its provenance and, for history, its enclosing target. */
@@ -673,15 +680,15 @@ class EventProcessor
                 }
 
                 is IrcEvent.HistoryBatch -> {
-                    return onHistoryBatch(networkId, event, expectedHistoryRoomId).redactions
+                    return onHistoryBatch(networkId, event, expectedHistoryRoomId).notificationInvalidations
                 }
 
                 is IrcEvent.PlaybackBatch -> {
-                    return onPlaybackBatch(networkId, event, expectedHistoryRoomId).redactions
+                    return onPlaybackBatch(networkId, event, expectedHistoryRoomId).notificationInvalidations
                 }
 
                 is IrcEvent.ReplayBatch -> {
-                    return onReplayBatch(networkId, event).redactions
+                    return onReplayBatch(networkId, event).notificationInvalidations
                 }
 
                 is IrcEvent.NetworkBatch -> {
@@ -850,6 +857,16 @@ class EventProcessor
 
         // -- chat / tags ---------------------------------------------------------
 
+        private suspend fun classifyChatKeyword(text: String): KeywordMatch? =
+            try {
+                matchKeywordHighlight(text, settingsRepository?.keywordHighlightRules?.first().orEmpty())
+            } catch (error: IOException) {
+                diagnostics.record("messages", "keyword_rules_unavailable") {
+                    mapOf("error" to error::class.simpleName)
+                }
+                null
+            }
+
         private suspend fun onChat(
             networkId: Long,
             e: IrcEvent.ChatMessage,
@@ -935,27 +952,30 @@ class EventProcessor
                 }
             val bodyMentionsSelf =
                 !sourceIsSelf && type != BufferType.SERVER && st.containsSelfMention(storedText)
-            val hasMention = !sourceIsSelf && type != BufferType.SERVER && (replyMentionsSelf || bodyMentionsSelf)
+            val directMention = !sourceIsSelf && type != BufferType.SERVER && (replyMentionsSelf || bodyMentionsSelf)
             val capturesHighlight = bodyMentionsSelf && !origin.isHistorical
             val resolvedNotifications = notificationSettings.resolve(networkId, bufferId)
-            val decision =
-                incomingNotificationDecision(
-                    type = type,
-                    kind = e.kind,
-                    origin = origin,
-                    hasMention = hasMention,
-                    consoleNotice = consoleNotice,
-                    mode = resolvedNotifications?.mode ?: NotificationMode.OFF,
-                    watchActive = !sourceIsSelf && resolvedNotifications?.watch != null,
+            val attention =
+                IncomingChatAttention(
+                    classifyKeyword =
+                        if (!sourceIsSelf && type != BufferType.SERVER && !isServerSource(e.source.nick)) {
+                            ::classifyChatKeyword
+                        } else {
+                            null
+                        },
+                    decideNotification = { keywordAlerts ->
+                        incomingNotificationDecision(
+                            type = type,
+                            kind = e.kind,
+                            origin = origin,
+                            hasMention = directMention || keywordAlerts,
+                            consoleNotice = !sourceIsSelf && consoleNotice,
+                            mode = if (sourceIsSelf) NotificationMode.OFF else resolvedNotifications?.mode ?: NotificationMode.OFF,
+                            watchActive = !sourceIsSelf && resolvedNotifications?.watch != null,
+                        )
+                    },
                 )
             val identitySender = st.normalize(e.source.nick)
-
-            traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
-                mapOf(
-                    "buffer_type" to type.name,
-                    "mention" to hasMention,
-                )
-            }
 
             val row =
                 MessageEntity(
@@ -970,14 +990,12 @@ class EventProcessor
                     ircFormattedText = ircFormattedText,
                     isSelf = sourceIsSelf,
                     isBot = e.isBot,
-                    hasMention = hasMention,
+                    hasMention = directMention,
                     highlightNick = st.selfNick.takeIf { capturesHighlight },
                     highlightCaseMapping =
                         st.identityRules.caseMapping.rawName
                             .takeIf { capturesHighlight },
-                    notificationEligible = !sourceIsSelf && decision.eligible,
-                    notificationEligibilityResolved = decision.eligibilityResolved,
-                    notificationWatched = decision.bypassesMute,
+                    directMention = directMention,
                     replyToMsgid = e.replyToMsgid,
                     dedupKey = SemanticIdentity.keyFor(e.ctx, identitySender, ircFormattedText ?: storedText),
                     serverTimeAuthoritative = e.ctx.serverTimeSource == ServerTimeSource.TAG,
@@ -997,7 +1015,7 @@ class EventProcessor
                     db.withTransaction {
                         if (isDm) bufferDao.reviveQuery(bufferId)
                         val ingested =
-                            canonicalTimeline.ingest(
+                            canonicalTimeline.ingestChat(
                                 TimelineObservation(
                                     networkId = networkId,
                                     event = row,
@@ -1012,6 +1030,7 @@ class EventProcessor
                                     persistHistoryCursor = networkId !in activeProtocolPageCursorWrites,
                                     selfAttributionAuthoritative = route.selfAttributionAuthoritative,
                                 ),
+                                attention,
                             )
                         // A new peer chat revives an unmuted archive. Live delivery is authoritative on
                         // its own; history, replay, and push revive only when they insert a genuinely new
@@ -1032,6 +1051,12 @@ class EventProcessor
                         ingested
                     }
                 val canonical = result.event
+                traceMessageDecision("message_classified", networkId, bufferId, e, origin) {
+                    mapOf(
+                        "buffer_type" to type.name,
+                        "mention" to canonical.hasMention,
+                    )
+                }
                 recordPlaybackResult(networkId, result)
                 traceMessageWrite(
                     when (result) {
@@ -1093,14 +1118,14 @@ class EventProcessor
                 if (result is IngestResult.Enriched &&
                     !canonical.isSelf && type == BufferType.CHANNEL &&
                     canonical.notificationHandled && canonical.notificationEligible &&
-                    canonical.notificationEligibilityResolved && canonical.hasMention
+                    canonical.notificationEligibilityResolved && canonical.alertsAsMention
                 ) {
                     try {
                         notifier.onCanonicalIncoming(
                             networkId,
                             canonical.bufferId,
                             type,
-                            canonical.hasMention,
+                            canonical.alertsAsMention,
                             canonical.id,
                             e.copy(
                                 ctx =
@@ -1134,7 +1159,7 @@ class EventProcessor
                         ),
                         type,
                         origin,
-                        canonical.hasMention,
+                        canonical.alertsAsMention,
                         consoleNotice,
                     )
                 ) {
@@ -1143,7 +1168,7 @@ class EventProcessor
                             networkId,
                             canonical.bufferId,
                             type,
-                            canonical.hasMention,
+                            canonical.alertsAsMention,
                             canonical.id,
                             e.copy(
                                 ctx =
@@ -1160,7 +1185,7 @@ class EventProcessor
                         )
                     }
                 }
-                return null
+                return if (result.mentionAlertRevoked) canonical.bufferId to canonical.id else null
             }
         }
 
@@ -1325,23 +1350,27 @@ class EventProcessor
             return sourceIsPeer || (!st.isSelfNick(event.source.nick) && st.isSelfNick(event.target))
         }
 
-        private suspend fun notifyCommittedRedactions(redactions: List<Pair<RoomId, TimelineEventId>>) {
-            for ((bufferId, eventId) in redactions) dispatchCommittedRedaction(bufferId, eventId)
-            bufferStore.drainCommittedMergeRedactions(::dispatchCommittedRedaction)
+        private suspend fun notifyCommittedInvalidations(invalidations: List<Pair<RoomId, TimelineEventId>>) {
+            for ((bufferId, eventId) in invalidations) dispatchCommittedInvalidation(bufferId, eventId)
+            bufferStore.drainCommittedMergeRedactions(::dispatchCommittedInvalidation)
         }
 
-        private suspend fun dispatchCommittedRedaction(
+        private suspend fun dispatchCommittedInvalidation(
             bufferId: RoomId,
             eventId: TimelineEventId,
         ): Boolean =
             try {
                 val canonical = messageDao.byCanonicalId(eventId)
-                notifier.onMessageRedacted(canonical?.bufferId ?: bufferId, canonical?.id ?: eventId)
+                if (canonical == null || canonical.kind == MessageKind.REDACTED) {
+                    notifier.onMessageRedacted(canonical?.bufferId ?: bufferId, canonical?.id ?: eventId)
+                } else {
+                    notifier.onMentionAlertChanged(canonical.bufferId)
+                }
                 true
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
-                diagnostics.record("notifications", "redaction_failed") {
+                diagnostics.record("notifications", "invalidation_failed") {
                     mapOf("event_id" to eventId, "error" to error::class.simpleName)
                 }
                 false
@@ -1427,7 +1456,7 @@ class EventProcessor
             }
             var primaryOrder = emptyList<TimelineEventId>()
             var insertedCount = 0
-            var redactions: MutableList<Pair<RoomId, TimelineEventId>>? = null
+            var invalidations: MutableList<Pair<RoomId, TimelineEventId>>? = null
             try {
                 db.withTransaction {
                     activeHistoryChatRoutes[networkId] = ArrayDeque()
@@ -1483,10 +1512,10 @@ class EventProcessor
                     val primaryIds = mutableListOf<TimelineEventId>()
                     for (ev in events) {
                         val firstIndex = committedOrder.size
-                        val eventRedactions = processEvent(networkId, ev, origin, target)
-                        if (eventRedactions.isNotEmpty()) {
-                            val collected = redactions ?: mutableListOf<Pair<RoomId, TimelineEventId>>().also { redactions = it }
-                            collected.addAll(eventRedactions)
+                        val eventInvalidations = processEvent(networkId, ev, origin, target)
+                        if (eventInvalidations.isNotEmpty()) {
+                            val collected = invalidations ?: mutableListOf<Pair<RoomId, TimelineEventId>>().also { invalidations = it }
+                            collected.addAll(eventInvalidations)
                         }
                         if (ev.historyEventMetadataOrNull()?.isContext != true) {
                             for (index in firstIndex until committedOrder.size) {
@@ -1520,7 +1549,7 @@ class EventProcessor
                     "source" to origin.name,
                 )
             }
-            return PlaybackCommit(primaryOrder, insertedCount, redactions.orEmpty())
+            return PlaybackCommit(primaryOrder, insertedCount, invalidations.orEmpty())
         }
 
         /**
@@ -1652,7 +1681,7 @@ class EventProcessor
             historyGapId: Long? = null,
             preserveUnread: Boolean = false,
         ): PersistedHistoryPage {
-            val redactions = mutableListOf<Pair<RoomId, TimelineEventId>>()
+            val invalidations = mutableListOf<Pair<RoomId, TimelineEventId>>()
             val persisted =
                 sequencer.withNetwork(networkId) {
                     val persisted =
@@ -1663,14 +1692,14 @@ class EventProcessor
                                 response,
                                 expectedRoomId,
                                 historyGapId,
-                                redactions,
+                                invalidations,
                                 preserveUnread,
                             )
                         }
                     bufferStore.drainCommittedRoomMerges()
                     persisted
                 }
-            notifyCommittedRedactions(redactions)
+            notifyCommittedInvalidations(invalidations)
             return persisted
         }
 
@@ -1680,7 +1709,7 @@ class EventProcessor
             pages: List<HistoryPageWrite>,
             expectedRoomId: RoomId,
         ): PersistedHistoryPage {
-            val redactions = mutableListOf<Pair<RoomId, TimelineEventId>>()
+            val invalidations = mutableListOf<Pair<RoomId, TimelineEventId>>()
             val persisted =
                 sequencer.withNetwork(networkId) {
                     require(pages.isNotEmpty()) { "history page batch is empty" }
@@ -1696,7 +1725,7 @@ class EventProcessor
                                         page.response,
                                         canonicalRoomId,
                                         page.historyGapId,
-                                        redactions,
+                                        invalidations,
                                     )
                                 canonicalRoomId = persistedPage.roomId
                                 inserted += persistedPage.inserted
@@ -1706,7 +1735,7 @@ class EventProcessor
                     bufferStore.drainCommittedRoomMerges()
                     persisted
                 }
-            notifyCommittedRedactions(redactions)
+            notifyCommittedInvalidations(invalidations)
             return persisted
         }
 
@@ -1716,7 +1745,7 @@ class EventProcessor
             response: ChatHistoryResponse.Messages,
             expectedRoomId: RoomId?,
             historyGapId: Long?,
-            redactions: MutableList<Pair<RoomId, TimelineEventId>>,
+            invalidations: MutableList<Pair<RoomId, TimelineEventId>>,
             preserveUnread: Boolean = false,
         ): PersistedHistoryPage {
             require(request.subcommand != ChatHistoryRequest.Subcommand.TARGETS) {
@@ -1792,7 +1821,7 @@ class EventProcessor
                 } else {
                     PlaybackCommit()
                 }
-            redactions.addAll(pageCommit.redactions)
+            invalidations.addAll(pageCommit.notificationInvalidations)
 
             val canonicalRoomId = bufferDao.canonicalId(initialCanonicalId) ?: initialCanonicalId
             val after = db.historyCursorDao().byRoom(canonicalRoomId)
@@ -5129,6 +5158,9 @@ interface MessageNotifier {
         winnerId: RoomId,
         loserId: RoomId,
     ) = Unit
+
+    /** Reconcile the surviving mentions lane after a committed canonical classification change. */
+    suspend fun onMentionAlertChanged(bufferId: RoomId) = Unit
 
     suspend fun onMessageRedacted(
         bufferId: Long,

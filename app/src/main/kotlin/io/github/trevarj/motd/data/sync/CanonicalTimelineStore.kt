@@ -14,6 +14,8 @@ import io.github.trevarj.motd.data.db.RoomId
 import io.github.trevarj.motd.data.db.TimeProvenance
 import io.github.trevarj.motd.data.db.TimelineEventEntity
 import io.github.trevarj.motd.data.db.TimelineEventId
+import io.github.trevarj.motd.data.db.alertsAsMention
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -43,22 +45,31 @@ data class TimelineObservation(
     val selfAttributionAuthoritative: Boolean = false,
 )
 
+internal data class IncomingChatAttention(
+    val classifyKeyword: (suspend (String) -> KeywordMatch?)?,
+    val decideNotification: (Boolean) -> IncomingNotificationDecision,
+)
+
 sealed interface IngestResult {
     val event: TimelineEventEntity
     val redactionMerged: Boolean get() = false
+    val mentionAlertRevoked: Boolean get() = false
 
     data class Inserted(
         override val event: TimelineEventEntity,
+        override val mentionAlertRevoked: Boolean = false,
     ) : IngestResult
 
     data class Merged(
         override val event: TimelineEventEntity,
         override val redactionMerged: Boolean = false,
+        override val mentionAlertRevoked: Boolean = false,
     ) : IngestResult
 
     data class Enriched(
         override val event: TimelineEventEntity,
         override val redactionMerged: Boolean = false,
+        override val mentionAlertRevoked: Boolean = false,
     ) : IngestResult
 
     data class Ignored(
@@ -90,6 +101,14 @@ class CanonicalTimelineStore
         suspend fun ingest(observation: TimelineObservation): IngestResult =
             db.withTransaction {
                 ingestInTransaction(observation)
+            }
+
+        internal suspend fun ingestChat(
+            observation: TimelineObservation,
+            attention: IncomingChatAttention,
+        ): IngestResult =
+            db.withTransaction {
+                ingestInTransaction(observation, attention)
             }
 
         suspend fun ingestBatch(observations: List<TimelineObservation>): List<IngestResult> =
@@ -381,7 +400,10 @@ class CanonicalTimelineStore
             }
         }
 
-        private suspend fun ingestInTransaction(observation: TimelineObservation): IngestResult {
+        private suspend fun ingestInTransaction(
+            observation: TimelineObservation,
+            chatAttention: IncomingChatAttention? = null,
+        ): IngestResult {
             val incoming =
                 observation.event.copy(
                     id = 0,
@@ -519,7 +541,9 @@ class CanonicalTimelineStore
             val inserted: Boolean
             if (candidate == null) {
                 val eventId = dao.nextTimelineEventId()
-                initial = applyKnownRedaction(observation.networkId, incoming.copy(id = eventId, timelineOrder = eventId))
+                initial =
+                    applyKnownRedaction(observation.networkId, incoming.copy(id = eventId, timelineOrder = eventId))
+                        .withChatAttention(chatAttention, captureUnresolved = true)
                 dao.insertEvent(initial)
                 if (initial.msgid != null) db.savedMessagesDao().reconcileEvent(observation.networkId, initial)
                 inserted = true
@@ -530,6 +554,7 @@ class CanonicalTimelineStore
 
             var canonical = initial
             var redactionMerged = false
+            var mentionAlertRevoked = false
             for ((namespace, value) in aliases) {
                 val existingAlias = dao.aliasByValue(observation.networkId, namespace, value)
                 if (existingAlias != null && existingAlias.timelineEventId != canonical.id) {
@@ -537,6 +562,7 @@ class CanonicalTimelineStore
                     if (compatible(other, incoming) == null) continue
                     val merged = coalesce(observation.networkId, canonical, other, incoming) ?: continue
                     redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
+                    mentionAlertRevoked = mentionAlertRevoked || merged.revokesMentionAlertFrom(canonical) || merged.revokesMentionAlertFrom(other)
                     canonical = merged
                 } else if (existingAlias == null) {
                     dao.insertAliasIgnore(
@@ -553,6 +579,8 @@ class CanonicalTimelineStore
                 val merged = coalesce(observation.networkId, canonical, provisionalCandidate, incoming)
                 if (merged != null) {
                     redactionMerged = redactionMerged || merged.kind == MessageKind.REDACTED
+                    mentionAlertRevoked =
+                        mentionAlertRevoked || merged.revokesMentionAlertFrom(canonical) || merged.revokesMentionAlertFrom(provisionalCandidate)
                     canonical = merged
                 }
             }
@@ -578,7 +606,13 @@ class CanonicalTimelineStore
                         observation.selfAttributionAuthoritative,
                     ),
                 )
-            val updated = if (canonical != enriched) applyKnownRedaction(observation.networkId, enriched) else canonical
+            val redactionChecked = if (canonical != enriched) applyKnownRedaction(observation.networkId, enriched) else canonical
+            val updated =
+                if (inserted && canonical === initial) {
+                    redactionChecked
+                } else {
+                    redactionChecked.withChatAttention(chatAttention)
+                }
             if (updated != canonical) {
                 if (canonical.kind != MessageKind.REDACTED && updated.kind == MessageKind.REDACTED) redactionMerged = true
                 dao.updateEvent(updated)
@@ -610,6 +644,9 @@ class CanonicalTimelineStore
                             ?: if (observation.timeProvenance == TimeProvenance.SERVER_TAG) 0 else null,
                     observedAt = observedAt,
                 ),
+                keepForClassification =
+                    (inserted && initial.keywordMatch != null) ||
+                        (redactionChecked.keywordMatch == null && updated.keywordMatch != null),
             )
 
             if (observation.persistHistoryCursor) updateHistoryCursor(observation, canonical)
@@ -637,10 +674,64 @@ class CanonicalTimelineStore
             }
 
             return when {
-                inserted -> IngestResult.Inserted(canonical)
-                canonical != initial -> IngestResult.Enriched(canonical, redactionMerged)
-                else -> IngestResult.Merged(canonical, redactionMerged)
+                inserted -> IngestResult.Inserted(canonical, mentionAlertRevoked)
+                canonical != initial -> IngestResult.Enriched(canonical, redactionMerged, mentionAlertRevoked)
+                else -> IngestResult.Merged(canonical, redactionMerged, mentionAlertRevoked)
             }
+        }
+
+        private fun TimelineEventEntity.revokesMentionAlertFrom(previous: TimelineEventEntity): Boolean =
+            previous.alertsAsMention &&
+                (
+                    !alertsAsMention ||
+                        (previous.notificationEligible && !notificationEligible) ||
+                        (previous.notificationWatched && !notificationWatched)
+                )
+
+        private suspend fun TimelineEventEntity.withChatAttention(
+            attention: IncomingChatAttention?,
+            captureUnresolved: Boolean = false,
+        ): TimelineEventEntity {
+            if (attention == null || kind !in CHAT_MESSAGE_KINDS) return this
+            val classify = attention.classifyKeyword
+            val classified =
+                if (keywordMatch == null && !isSelf && classify != null) {
+                    val match = classify(text)
+                    if (match == null) {
+                        this
+                    } else {
+                        copy(
+                            hasMention = directMention || match != KeywordMatch.NONE,
+                            keywordMatch = match,
+                            keywordClassifiedAtOrder = dao.nextObservationId(),
+                        )
+                    }
+                } else {
+                    this
+                }
+            val alert = classified.keywordMatch == KeywordMatch.ALERT
+            if (classified.notificationEligibilityResolved) {
+                if (!alert || keywordMatch != null) return classified
+                return classified.copy(
+                    notificationEligible = classified.notificationEligible || classified.notificationEligibilityFromKeyword,
+                    notificationWatched = classified.notificationWatched || classified.notificationWatchFromKeyword,
+                )
+            }
+
+            val baseline = attention.decideNotification(false)
+            if (!baseline.eligibilityResolved && !captureUnresolved) return classified
+            // Capture the alternate decision even on NONE/SILENT: an earlier separately
+            // classified row (or a later successful read) can supply the canonical ALERT.
+            val promoted = if (classify != null || alert) attention.decideNotification(true) else baseline
+            val keywordEligibility = !classified.isSelf && !baseline.eligible && promoted.eligible
+            val keywordWatch = !classified.isSelf && !baseline.bypassesMute && promoted.bypassesMute
+            return classified.copy(
+                notificationEligible = !classified.isSelf && (baseline.eligible || (alert && keywordEligibility)),
+                notificationEligibilityResolved = baseline.eligibilityResolved,
+                notificationWatched = baseline.bypassesMute || (alert && keywordWatch),
+                notificationEligibilityFromKeyword = keywordEligibility,
+                notificationWatchFromKeyword = keywordWatch,
+            )
         }
 
         private suspend fun applyKnownRedaction(
@@ -780,17 +871,10 @@ class CanonicalTimelineStore
             val loser = if (winner.id == first.id) second else first
             if (compatible(winner, loser) == null) return null
             // Independent canonical rows may each have captured a different notify-capable decision.
-            // Union those decisions only here, never when enriching a duplicate observation.
+            // Prefer the earliest classified body; do not inherit later keyword-only promotion
+            // when that first classification did not qualify. Independent modes still union.
             val combined = enrich(winner, loser, provenanceOf(loser))
-            val coalesced =
-                if (winner.notificationEligibilityResolved && loser.notificationEligibilityResolved) {
-                    combined.copy(
-                        notificationEligible = winner.notificationEligible || loser.notificationEligible,
-                        notificationWatched = winner.notificationWatched || loser.notificationWatched,
-                    )
-                } else {
-                    combined
-                }
+            val coalesced = combined.withMergedNotification(winner, loser)
             val merged = applyKnownRedaction(networkId, enrich(coalesced, incoming, provenanceOf(incoming)))
             if (merged != winner) dao.updateEvent(merged)
             db.savedMessagesDao().reconcileEvent(networkId, merged, loser.id)
@@ -820,6 +904,32 @@ class CanonicalTimelineStore
                 db.bufferDao().refreshMonitorActivity(loser.bufferId)
             }
             return merged
+        }
+
+        private fun TimelineEventEntity.withMergedNotification(
+            first: TimelineEventEntity,
+            second: TimelineEventEntity,
+        ): TimelineEventEntity {
+            if (kind == MessageKind.REDACTED) return this
+            val a = first.takeIf { it.notificationEligibilityResolved }
+            val b = second.takeIf { it.notificationEligibilityResolved }
+            if (a == null && b == null) return this
+
+            val independentEligibility =
+                (a?.notificationEligible == true && !a.notificationEligibilityFromKeyword) ||
+                    (b?.notificationEligible == true && !b.notificationEligibilityFromKeyword)
+            val independentWatch =
+                (a?.notificationWatched == true && !a.notificationWatchFromKeyword) ||
+                    (b?.notificationWatched == true && !b.notificationWatchFromKeyword)
+            val keywordEligibility = a?.notificationEligibilityFromKeyword == true || b?.notificationEligibilityFromKeyword == true
+            val keywordWatch = a?.notificationWatchFromKeyword == true || b?.notificationWatchFromKeyword == true
+            val alert = keywordMatch == KeywordMatch.ALERT
+            return copy(
+                notificationEligible = independentEligibility || (alert && keywordEligibility),
+                notificationWatched = independentWatch || (alert && keywordWatch),
+                notificationEligibilityFromKeyword = keywordEligibility && !independentEligibility,
+                notificationWatchFromKeyword = keywordWatch && !independentWatch,
+            )
         }
 
         /**
@@ -870,6 +980,18 @@ class CanonicalTimelineStore
             val redaction =
                 existing.takeIf { it.kind == MessageKind.REDACTED }
                     ?: incoming.takeIf { it.kind == MessageKind.REDACTED }
+            val directMention = redaction == null && (existing.directMention || incoming.directMention)
+            val existingKeywordOrder = existing.keywordClassifiedAtOrder ?: Long.MIN_VALUE
+            val incomingKeywordOrder = incoming.keywordClassifiedAtOrder ?: Long.MIN_VALUE
+            val keywordSource =
+                when {
+                    redaction != null -> null
+                    existing.keywordMatch == null -> incoming
+                    incoming.keywordMatch == null -> existing
+                    existingKeywordOrder <= incomingKeywordOrder -> existing
+                    else -> incoming
+                }
+            val keywordMatch = keywordSource?.keywordMatch
             return existing.copy(
                 bufferId = existing.bufferId,
                 msgid = existing.msgid ?: incoming.msgid,
@@ -904,7 +1026,10 @@ class CanonicalTimelineStore
                         existing.isSelf || incoming.isSelf
                     },
                 isBot = existing.isBot || incoming.isBot,
-                hasMention = redaction == null && (existing.hasMention || incoming.hasMention),
+                hasMention = directMention || (keywordMatch != null && keywordMatch != KeywordMatch.NONE),
+                directMention = directMention,
+                keywordMatch = keywordMatch,
+                keywordClassifiedAtOrder = keywordSource?.keywordClassifiedAtOrder,
                 highlightNick = if (redaction == null) existing.highlightNick ?: incoming.highlightNick else null,
                 highlightCaseMapping =
                     if (redaction == null) existing.highlightCaseMapping ?: incoming.highlightCaseMapping else null,
@@ -926,6 +1051,8 @@ class CanonicalTimelineStore
                 notificationEligible = notification.notificationEligible,
                 notificationEligibilityResolved = notification.notificationEligibilityResolved,
                 notificationWatched = notification.notificationWatched,
+                notificationEligibilityFromKeyword = redaction == null && notification.notificationEligibilityFromKeyword,
+                notificationWatchFromKeyword = redaction == null && notification.notificationWatchFromKeyword,
                 notificationHandled = existing.notificationHandled || incoming.notificationHandled,
                 notificationClaimed = existing.notificationClaimed || incoming.notificationClaimed,
                 notificationClaimOwner = existing.notificationClaimOwner ?: incoming.notificationClaimOwner,
@@ -1078,6 +1205,11 @@ internal fun TimelineEventEntity.redacted(tombstone: String = "Message deleted")
         text = tombstone,
         ircFormattedText = null,
         hasMention = false,
+        directMention = false,
+        keywordMatch = null,
+        keywordClassifiedAtOrder = null,
+        notificationEligibilityFromKeyword = false,
+        notificationWatchFromKeyword = false,
         highlightNick = null,
         highlightCaseMapping = null,
         pendingLabel = null,

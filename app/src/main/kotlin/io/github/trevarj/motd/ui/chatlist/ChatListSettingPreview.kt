@@ -5,7 +5,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.offset
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -67,13 +67,13 @@ internal fun FolderLayoutPreview(
                     allSummary = allSummary,
                     showAllTab = true,
                     dickordSummary = null,
-                    mentionsEnabled = false,
+                    activityEnabled = false,
                     mentionsCount = 0,
                     mentionsIncomplete = false,
                     selectedFolderId = selected,
                     onSelect = { selected = it },
                     onOpenDickord = {},
-                    onOpenMentions = {},
+                    onOpenActivity = {},
                 )
                 (if (selected == null) all else tabs.single().children).forEach { SettingSampleChatRow(it) }
             }
@@ -96,17 +96,18 @@ internal fun MentionsPlacementExample(placement: MentionsPlacement) {
         when (placement) {
             MentionsPlacement.DRAWER -> {
                 Text(stringResource(R.string.settings_mentions_drawer))
-                DrawerActionTile(Icons.Outlined.AlternateEmail, stringResource(R.string.mentions_title), stringResource(R.string.mentions_title), { opened = !opened }, Modifier)
+                val label = stringResource(R.string.activity_title)
+                DrawerActionTile(Icons.Outlined.Bolt, label, label, { opened = !opened }, Modifier)
             }
 
             MentionsPlacement.CHAT_LIST -> {
-                MentionsPinnedRow(1, false) { opened = !opened }
+                ActivityPinnedRow(1, false) { opened = !opened }
                 SettingSampleChatRow(settingSampleChats[0])
             }
 
             MentionsPlacement.FOLDER_TAB -> {
                 val summary = remember { summarizeFolder(settingSampleChats) }
-                FolderTabStrip(emptyList(), summary, true, null, true, 1, false, null, { opened = false }, {}, { opened = true }, mentionsSelected = opened)
+                FolderTabStrip(emptyList(), summary, true, null, true, 1, false, null, { opened = false }, {}, { opened = true }, activitySelected = opened)
                 SettingSampleChatRow(settingSampleChats[0])
             }
         }

@@ -22,7 +22,7 @@ import org.robolectric.annotation.GraphicsMode
 
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
-class MentionsEntryPointsTest {
+class ActivityEntryPointsTest {
     @get:Rule(order = 1)
     val uiDispatcher = UiDispatcherResetRule()
 
@@ -32,8 +32,8 @@ class MentionsEntryPointsTest {
     fun explicitDisableHidesEveryShortcut() {
         assertEquals(true, ChatListState().mentionsEnabled)
         setChatList(enabled = false, placement = MentionsPlacement.FOLDER_TAB)
-        assertEquals(0, compose.onAllNodesWithTag("chatlist_folder_tab_mentions").fetchSemanticsNodes().size)
-        assertEquals(0, compose.onAllNodesWithTag("chatlist_pinned_mentions").fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_folder_tab_activity").fetchSemanticsNodes().size)
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_pinned_activity").fetchSemanticsNodes().size)
     }
 
     @Test
@@ -55,21 +55,21 @@ class MentionsEntryPointsTest {
                     onAddNetwork = {},
                     onToggleOffline = {},
                     onOpenSettings = {},
-                    onOpenMentions = { opened++ },
+                    onOpenActivity = { opened++ },
                     onMarkAllRead = {},
                 )
             }
         }
-        compose.onNodeWithTag("drawer_open_mentions").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("drawer_open_activity").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(1, opened) }
     }
 
     @Test
-    fun pinnedPlacementOpensFeedAboveChatsWithoutAddingATab() {
+    fun pinnedPlacementOpensActivityAboveChatsWithoutAddingATab() {
         var opened = 0
         setChatList(enabled = true, placement = MentionsPlacement.CHAT_LIST) { opened++ }
-        compose.onNodeWithTag("chatlist_pinned_mentions").assertIsDisplayed().performClick()
-        assertEquals(0, compose.onAllNodesWithTag("chatlist_folder_tab_mentions").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("chatlist_pinned_activity").assertIsDisplayed().performClick()
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_folder_tab_activity").fetchSemanticsNodes().size)
         compose.runOnIdle { assertEquals(1, opened) }
     }
 
@@ -78,8 +78,8 @@ class MentionsEntryPointsTest {
         var opened = 0
         setChatList(enabled = true, placement = MentionsPlacement.FOLDER_TAB) { opened++ }
         compose.onNodeWithTag("chatlist_folder_tab_all").assertIsDisplayed()
-        compose.onNodeWithTag("chatlist_folder_tab_mentions").assertIsDisplayed().performClick()
-        assertEquals(0, compose.onAllNodesWithTag("chatlist_pinned_mentions").fetchSemanticsNodes().size)
+        compose.onNodeWithTag("chatlist_folder_tab_activity").assertIsDisplayed().performClick()
+        assertEquals(0, compose.onAllNodesWithTag("chatlist_pinned_activity").fetchSemanticsNodes().size)
         compose.runOnIdle { assertEquals(1, opened) }
     }
 
@@ -103,7 +103,7 @@ class MentionsEntryPointsTest {
                     onOpenBuffer = {},
                     onOpenSettings = {},
                     onOpenSearch = {},
-                    onOpenMentions = onOpen,
+                    onOpenActivity = onOpen,
                     onSetPinned = { _, _ -> },
                     onSetMuted = { _, _ -> },
                     onJoinChannel = { _, _, _ -> },

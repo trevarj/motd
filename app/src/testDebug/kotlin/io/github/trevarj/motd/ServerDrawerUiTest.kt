@@ -415,7 +415,7 @@ class ServerDrawerUiTest {
         val rows = (1L..20L).map { drawerRow(it, IrcClientState.Ready("alice", emptySet(), emptyMap())) }
         val selectedNetworkId = mutableStateOf<Long?>(1)
         val scopedUnread = mutableStateOf(3)
-        val mentionsEnabled = mutableStateOf(true)
+        val activityEnabled = mutableStateOf(true)
         val globalFeedEnabled = mutableStateOf(true)
         val allOffline = mutableStateOf(false)
         val actions = mutableListOf<String>()
@@ -443,8 +443,8 @@ class ServerDrawerUiTest {
                     },
                     onOpenSettings = { actions += "settings" },
                     onOpenFeed = { actions += "feed" },
-                    onOpenMentions = { actions += "mentions" },
-                    mentionsEnabled = mentionsEnabled.value,
+                    onOpenActivity = { actions += "activity" },
+                    activityEnabled = activityEnabled.value,
                     globalFeedEnabled = globalFeedEnabled.value,
                     onMarkAllRead = { actions += "mark" },
                     onCreateContactInvite = {
@@ -458,7 +458,7 @@ class ServerDrawerUiTest {
 
         val labels =
             listOf(
-                "drawer_open_mentions" to R.string.mentions_title,
+                "drawer_open_activity" to R.string.activity_title,
                 "drawer_open_feed" to R.string.drawer_feed,
                 "drawer_add_network" to R.string.drawer_add_network,
                 "drawer_create_contact_invite" to R.string.contact_invite_create_title,
@@ -468,7 +468,7 @@ class ServerDrawerUiTest {
             )
         val gridTags =
             listOf(
-                "drawer_open_mentions",
+                "drawer_open_activity",
                 "drawer_open_feed",
                 "drawer_create_contact_invite",
                 "drawer_scan_invite",
@@ -545,7 +545,7 @@ class ServerDrawerUiTest {
         }
         val visibleLabels =
             listOf(
-                R.string.mentions_title,
+                R.string.activity_title,
                 R.string.drawer_feed,
                 R.string.invite_share,
                 R.string.invite_scan_title,
@@ -569,7 +569,7 @@ class ServerDrawerUiTest {
 
         for ((tag, _) in labels) compose.onNodeWithTag(tag).assertIsDisplayed().performClick()
         compose.runOnIdle {
-            assertEquals(listOf("mentions", "feed", "add", "share", "scan", "offline", "settings"), actions)
+            assertEquals(listOf("activity", "feed", "add", "share", "scan", "offline", "settings"), actions)
             assertEquals(1L, contactInviteNetworkId)
         }
         compose
@@ -615,7 +615,7 @@ class ServerDrawerUiTest {
         compose.runOnIdle {
             assertEquals(20L, selectedNetworkId.value)
             scopedUnread.value = 0
-            mentionsEnabled.value = false
+            activityEnabled.value = false
             globalFeedEnabled.value = false
         }
         assertFourColumns(
@@ -628,7 +628,7 @@ class ServerDrawerUiTest {
         compose.onNodeWithTag("drawer_mark_all_read").assertDoesNotExist()
         compose.onNodeWithTag("drawer_toggle_offline").assertIsDisplayed()
         compose.onNodeWithTag("drawer_add_network").assertIsDisplayed()
-        compose.onNodeWithTag("drawer_open_mentions").assertDoesNotExist()
+        compose.onNodeWithTag("drawer_open_activity").assertDoesNotExist()
         compose.onNodeWithTag("drawer_open_feed").assertDoesNotExist()
         compose.onNodeWithTag("drawer_open_settings").assertIsDisplayed()
     }

@@ -55,6 +55,7 @@ internal object PrefKeys {
     val CHAT_LIST_SWIPE_ACTION = stringPreferencesKey("chat_list_swipe_action")
     val MENTIONS_ENABLED = stringPreferencesKey("mentions_enabled")
     val MENTIONS_PLACEMENT = stringPreferencesKey("mentions_placement")
+    val KEYWORD_HIGHLIGHT_RULES = stringPreferencesKey("keyword_highlight_rules")
     val NICK_COLORS_ENABLED = stringPreferencesKey("nick_colors_enabled")
     val NICK_COLOR_PALETTE = stringPreferencesKey("nick_color_palette")
     val NICK_MENTION_STYLE = stringPreferencesKey("nick_mention_style")
@@ -179,10 +180,19 @@ class DataStoreSettingsRepository
         private val store get() = context.settingsDataStore
         private val json = Json { ignoreUnknownKeys = true }
 
+        @Volatile
+        private var keywordRuleSnapshot: Pair<String, List<KeywordHighlightRule>>? = null
+
         // -- SettingsRepository --
 
         override val notificationPreview: Flow<NotificationPreview> =
             store.data.map { notificationPreviewFromPreference(it[PrefKeys.NOTIFICATION_PREVIEW]) }.distinctUntilChanged()
+
+        override val keywordHighlightRules: Flow<List<KeywordHighlightRule>> =
+            store.data
+                .map { it[PrefKeys.KEYWORD_HIGHLIGHT_RULES] }
+                .distinctUntilChanged()
+                .map(::decodeKeywordHighlightRules)
 
         internal val hideRecentsPreviews: Flow<Boolean> =
             store.data.map { it[PrefKeys.HIDE_RECENTS_PREVIEWS] ?: false }.distinctUntilChanged()
@@ -263,6 +273,7 @@ class DataStoreSettingsRepository
                     chatListSwipeAction = chatListSwipeActionFromPreference(prefs[PrefKeys.CHAT_LIST_SWIPE_ACTION]),
                     mentionsEnabled = mentionsEnabledFromPreference(prefs[PrefKeys.MENTIONS_ENABLED]),
                     mentionsPlacement = mentionsPlacementFromPreference(prefs[PrefKeys.MENTIONS_PLACEMENT]),
+                    keywordHighlightRules = decodeKeywordHighlightRules(prefs[PrefKeys.KEYWORD_HIGHLIGHT_RULES]),
                 )
             }
 
@@ -329,6 +340,46 @@ class DataStoreSettingsRepository
 
         override suspend fun setMentionsPlacement(placement: MentionsPlacement) {
             store.edit { it[PrefKeys.MENTIONS_PLACEMENT] = placement.name }
+        }
+
+        private fun decodeKeywordHighlightRules(raw: String?): List<KeywordHighlightRule> {
+            if (raw == null) return emptyList()
+            keywordRuleSnapshot?.let { if (it.first == raw) return it.second }
+            val rules =
+                try {
+                    validateKeywordHighlightRules(json.decodeFromString(raw))
+                } catch (_: IllegalArgumentException) {
+                    emptyList()
+                }
+            keywordRuleSnapshot = raw to rules
+            return rules
+        }
+
+        internal suspend fun setKeywordHighlightRules(rules: List<KeywordHighlightRule>) {
+            val validated = validateKeywordHighlightRules(rules)
+            store.edit { it[PrefKeys.KEYWORD_HIGHLIGHT_RULES] = json.encodeToString(validated) }
+        }
+
+        /** An exact previous value avoids editing or deleting a different row after a settings change. */
+        internal suspend fun editKeywordHighlightRule(
+            previous: KeywordHighlightRule?,
+            replacement: KeywordHighlightRule?,
+        ): Boolean {
+            var saved = false
+            store.edit { prefs ->
+                val rules = decodeKeywordHighlightRules(prefs[PrefKeys.KEYWORD_HIGHLIGHT_RULES]).toMutableList()
+                val index = if (previous == null) rules.size else rules.indexOf(previous)
+                if (index < 0) return@edit
+                if (previous != null) rules.removeAt(index)
+                if (replacement != null) {
+                    val term = replacement.phrase.trim()
+                    if (keywordHighlightRuleError(term, rules) != null) return@edit
+                    rules.add(index, if (term == replacement.phrase) replacement else replacement.copy(phrase = term))
+                }
+                prefs[PrefKeys.KEYWORD_HIGHLIGHT_RULES] = json.encodeToString(rules)
+                saved = true
+            }
+            return saved
         }
 
         override suspend fun setNickColorsEnabled(enabled: Boolean) {

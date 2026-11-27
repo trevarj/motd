@@ -23,6 +23,7 @@ import io.github.trevarj.motd.data.prefs.HistorySyncMode
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PaletteDocument
 import io.github.trevarj.motd.data.prefs.PresenceMode
+import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import kotlinx.coroutines.flow.Flow
@@ -419,12 +420,11 @@ interface SearchRepository {
 
 /** Read-only cross-buffer conversation stream over the shared messages table, newest first. */
 interface GlobalFeedRepository {
-    fun globalFeed(spec: MessageVisibilitySpec): Flow<PagingData<SearchHit>>
-
-    /** Stored messages from other people that mention or reply to the user, newest first. */
-    fun mentionsFeed(
+    /** Without an activity filter, reads the ordinary Global Feed. */
+    fun globalFeed(
         spec: MessageVisibilitySpec,
-        isAtNewest: () -> Boolean,
+        activityFilter: ActivityFilter? = null,
+        isAtNewest: () -> Boolean = { false },
     ): Flow<PagingData<SearchHit>>
 }
 

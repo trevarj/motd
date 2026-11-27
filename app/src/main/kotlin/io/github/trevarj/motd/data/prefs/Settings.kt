@@ -392,10 +392,11 @@ data class Settings(
     val seasonalWordmarksEnabled: Boolean = true,
     /** End-to-start action on active chat-list rows; archived rows always unarchive. */
     val chatListSwipeAction: ChatListSwipeAction = ChatListSwipeAction.ARCHIVE,
-    /** Show the cross-network feed of stored messages that mention or reply to you. */
+    /** Show the cross-network Activity feed. */
     val mentionsEnabled: Boolean = true,
     /** Presentation location retained while [mentionsEnabled] is off. */
     val mentionsPlacement: MentionsPlacement = MentionsPlacement.DRAWER,
+    val keywordHighlightRules: List<KeywordHighlightRule> = emptyList(),
     @Transient val notificationPreview: NotificationPreview = NotificationPreview.FULL,
     @Transient val hideRecentsPreviews: Boolean = false,
 )
@@ -419,6 +420,9 @@ interface SettingsRepository {
 
     val notificationPreview: Flow<NotificationPreview>
         get() = settings.map { it.notificationPreview }.distinctUntilChanged()
+
+    val keywordHighlightRules: Flow<List<KeywordHighlightRule>>
+        get() = settings.map { it.keywordHighlightRules }.distinctUntilChanged()
 
     suspend fun setThemeMode(m: ThemeMode)
 

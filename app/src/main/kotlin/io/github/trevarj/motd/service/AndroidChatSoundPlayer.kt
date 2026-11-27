@@ -11,6 +11,7 @@ import io.github.trevarj.motd.audio.AudioPlaybackController
 import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.MotdDatabase
+import io.github.trevarj.motd.data.db.alertsAsMention
 import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.prefs.ChatSoundConfig
 import io.github.trevarj.motd.data.prefs.ChatSoundMelody
@@ -421,7 +422,7 @@ class AndroidChatSoundPlayer
                 if (canonical != null) canonical.senderAccount else message.ctx.account,
                 message.source.nick,
                 canonical?.normalizedActor,
-                canonical?.hasMention ?: false,
+                canonical?.alertsAsMention ?: false,
             )
         }
 
@@ -430,7 +431,7 @@ class AndroidChatSoundPlayer
             type: BufferType,
             message: IrcEvent.ChatMessage,
             canonical: MessageEntity,
-        ) = playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor, canonical.hasMention)
+        ) = playIncoming(bufferId, type, canonical.senderAccount, null, canonical.normalizedActor, canonical.alertsAsMention)
 
         private suspend fun playIncoming(
             bufferId: Long,

@@ -5,13 +5,19 @@ import androidx.room.Room
 import androidx.test.core.app.ApplicationProvider
 import io.github.trevarj.motd.data.db.BufferEntity
 import io.github.trevarj.motd.data.db.BufferType
+import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineEventId
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
+import io.github.trevarj.motd.data.prefs.KeywordMatch
+import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.di.AppClock
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
 import io.github.trevarj.motd.service.NotificationMode
 import io.github.trevarj.motd.service.NotificationSettings
@@ -19,11 +25,15 @@ import io.github.trevarj.motd.service.NotificationSettingsImpl
 import io.github.trevarj.motd.service.NotificationSettingsState
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -36,6 +46,7 @@ class EventProcessorChannelWatchTest {
     private class RecordingNotifier : MessageNotifier {
         val incoming = mutableListOf<IrcEvent.ChatMessage>()
         val watchedFlags = mutableListOf<Boolean>()
+        val mentionFlags = mutableListOf<Boolean>()
 
         override suspend fun onIncoming(
             networkId: Long,
@@ -45,6 +56,7 @@ class EventProcessorChannelWatchTest {
             message: IrcEvent.ChatMessage,
         ) {
             incoming += message
+            mentionFlags += hasMention
         }
 
         override suspend fun onCanonicalIncoming(
@@ -366,6 +378,177 @@ class EventProcessorChannelWatchTest {
 
             assertEquals(listOf("ordinary pushed"), notifier.incoming.map { it.text })
             assertEquals(listOf(false), notifier.watchedFlags)
+        }
+
+    @Test
+    fun `keyword snapshots do not change when history and push converge with live`() =
+        runTest {
+            val rules = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext())
+            val settings = watching()
+            settings.setChannel(bufferId, NotificationMode.MENTIONS)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifier, notificationSettings = settings, settingsRepository = rules)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val silent = chat(IrcEvent.ChatKind.ACTION, "\u0002urgent\u000f review", "keyword-silent")
+            val noMatch = chat(IrcEvent.ChatKind.PRIVMSG, "urgently reviewing", "keyword-none")
+            val alert = chat(IrcEvent.ChatKind.PRIVMSG, "urgent release", "keyword-alert")
+            val direct = chat(IrcEvent.ChatKind.PRIVMSG, "me: urgent", "keyword-direct")
+
+            try {
+                rules.setKeywordHighlightRules(listOf(KeywordHighlightRule("urgent", alerts = false)))
+                processor.processPush(networkId, silent)
+                processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(noMatch)))
+                assertEquals(emptyList<Long>(), pendingIds())
+
+                rules.setKeywordHighlightRules(
+                    listOf(KeywordHighlightRule("urgent", alerts = true), KeywordHighlightRule("reviewing", alerts = true)),
+                )
+                processor.process(networkId, silent)
+                processor.processPush(networkId, noMatch)
+                processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(alert)))
+                assertEquals(emptyList<IrcEvent.ChatMessage>(), notifier.incoming)
+                assertEquals(emptyList<Long>(), pendingIds())
+
+                rules.setKeywordHighlightRules(listOf(KeywordHighlightRule("urgent", alerts = false)))
+                processor.processPush(networkId, alert)
+                processor.process(networkId, alert)
+                processor.process(networkId, direct)
+                assertEquals(listOf("urgent release", "me: urgent"), notifier.incoming.map { it.text })
+                assertEquals(listOf(true, true), notifier.mentionFlags)
+                assertEquals(emptyList<Long>(), pendingIds())
+
+                val storedSilent = requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-silent"))
+                assertEquals(KeywordMatch.SILENT, storedSilent.keywordMatch)
+                assertTrue(storedSilent.hasMention)
+                assertFalse(storedSilent.directMention)
+                val storedNone = requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-none"))
+                assertEquals(KeywordMatch.NONE, storedNone.keywordMatch)
+                assertFalse(storedNone.hasMention)
+                assertEquals(KeywordMatch.ALERT, db.messageDao().byMsgid(bufferId, "keyword-alert")?.keywordMatch)
+                val storedDirect = requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-direct"))
+                assertTrue(storedDirect.directMention)
+                assertEquals(KeywordMatch.SILENT, storedDirect.keywordMatch)
+
+                suspend fun assertRedacted(): Long {
+                    val tombstone = requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-direct"))
+                    assertEquals(MessageKind.REDACTED, tombstone.kind)
+                    assertFalse(tombstone.hasMention)
+                    assertFalse(tombstone.directMention)
+                    assertNull(tombstone.keywordMatch)
+                    assertNull(tombstone.keywordClassifiedAtOrder)
+                    return tombstone.id
+                }
+
+                processor.process(networkId, IrcEvent.MessageRedacted(direct.ctx, Prefix("oper"), "#chan", "keyword-direct", null))
+                db.messageDao().deleteById(assertRedacted())
+                processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(direct)))
+                assertRedacted()
+            } finally {
+                rules.setKeywordHighlightRules(emptyList())
+            }
+        }
+
+    @Test
+    fun `silent keyword keeps independent all and watch notifications ordinary`() =
+        runTest {
+            val rules = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext())
+            val settings = watching()
+            settings.setChannel(bufferId, NotificationMode.ALL)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifier, notificationSettings = settings, settingsRepository = rules)
+            processor.onRegistered(networkId, "me", emptyMap())
+            try {
+                rules.setKeywordHighlightRules(listOf(KeywordHighlightRule("urgent", alerts = false)))
+                val all = chat(IrcEvent.ChatKind.PRIVMSG, "urgent all", "keyword-all")
+                processor.processPush(networkId, all)
+                assertEquals(emptyList<IrcEvent.ChatMessage>(), notifier.incoming)
+                assertEquals(emptyList<Long>(), pendingIds())
+                processor.process(networkId, all)
+
+                settings.setChannel(bufferId, NotificationMode.OFF)
+                settings.startWatch(bufferId, null)
+                processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "urgent watch", "keyword-watch"))
+                processor.process(networkId, chat(IrcEvent.ChatKind.PRIVMSG, "urgent self", "keyword-self").copy(isSelf = true))
+                processor.process(networkId, chat(IrcEvent.ChatKind.NOTICE, "urgent server", "keyword-server").copy(source = Prefix("irc.example.org")))
+                assertEquals(listOf("urgent all", "urgent watch"), notifier.incoming.map { it.text })
+                assertEquals(listOf(false, false), notifier.mentionFlags)
+                assertEquals(listOf(false, true), notifier.watchedFlags)
+                assertNull(requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-self")).keywordMatch)
+                assertNull(requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-server")).keywordMatch)
+            } finally {
+                rules.setKeywordHighlightRules(emptyList())
+            }
+        }
+
+    @Test
+    fun `authoritative msgid merges a silent provisional row into the first alert snapshot`() =
+        runTest {
+            val rules = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext())
+            val settings = watching()
+            settings.setChannel(bufferId, NotificationMode.MENTIONS)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifier, notificationSettings = settings, settingsRepository = rules)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val original = rules.keywordHighlightRules.first()
+            val message = chat(IrcEvent.ChatKind.PRIVMSG, "urgent project", "keyword-durable")
+            val tagged = message.copy(ctx = message.ctx.copy(serverTime = 80_000, serverTimeSource = ServerTimeSource.TAG))
+            val provisional = message.copy(ctx = message.ctx.copy(msgid = null, serverTime = 150_000, serverTimeSource = ServerTimeSource.LOCAL))
+            try {
+                rules.setKeywordHighlightRules(listOf(KeywordHighlightRule("urgent", alerts = true)))
+                processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(tagged)))
+                val earlier = requireNotNull(db.messageDao().byMsgid(bufferId, "keyword-durable"))
+                rules.setKeywordHighlightRules(listOf(KeywordHighlightRule("urgent", alerts = false)))
+                processor.process(networkId, provisional)
+                val later = db.canonicalTimelineDao().eventsForRoom(bufferId).single { it.msgid == null }
+                assertEquals(KeywordMatch.SILENT, later.keywordMatch)
+                assertFalse(later.notificationEligible)
+                assertTrue(notifier.incoming.isEmpty())
+
+                settings.setChannel(bufferId, NotificationMode.OFF)
+                processor.processPush(networkId, tagged)
+
+                val stored = requireNotNull(db.messageDao().byCanonicalId(later.id))
+                assertEquals(earlier.id, stored.id)
+                assertEquals(KeywordMatch.ALERT, stored.keywordMatch)
+                assertTrue(stored.notificationEligible)
+                assertTrue(stored.notificationHandled)
+                assertEquals(listOf("urgent project"), notifier.incoming.map { it.text })
+                assertEquals(listOf(true), notifier.mentionFlags)
+            } finally {
+                rules.setKeywordHighlightRules(original)
+            }
+        }
+
+    @Test
+    fun `failed keyword read preserves the first live policy for a later successful classification`() =
+        runTest {
+            val store = DataStoreSettingsRepository(ApplicationProvider.getApplicationContext())
+            var unavailable = true
+            val rules =
+                object : SettingsRepository by store {
+                    override val keywordHighlightRules =
+                        flow {
+                            if (unavailable) throw IOException("settings temporarily unavailable")
+                            emit(listOf(KeywordHighlightRule("urgent", alerts = true)))
+                        }
+                }
+            val settings = watching()
+            settings.setChannel(bufferId, NotificationMode.MENTIONS)
+            val processor = EventProcessor(db, TypingTrackerImpl(), notifier, notificationSettings = settings, settingsRepository = rules)
+            processor.onRegistered(networkId, "me", emptyMap())
+            val message = chat(IrcEvent.ChatKind.PRIVMSG, "urgent project", "recover-rule-read")
+            processor.process(networkId, message)
+            val before = requireNotNull(db.messageDao().byMsgid(bufferId, "recover-rule-read"))
+            assertNull(before.keywordMatch)
+            assertFalse(before.notificationEligible)
+
+            unavailable = false
+            settings.setChannel(bufferId, NotificationMode.OFF)
+            processor.process(networkId, message)
+
+            val stored = requireNotNull(db.messageDao().byMsgid(bufferId, "recover-rule-read"))
+            assertEquals(before.id, stored.id)
+            assertEquals(KeywordMatch.ALERT, stored.keywordMatch)
+            assertTrue(stored.notificationEligible)
+            assertEquals(listOf("urgent project"), notifier.incoming.map { it.text })
+            assertEquals(listOf(true), notifier.mentionFlags)
         }
 
     private suspend fun pendingIds(): List<Long> = db.canonicalTimelineDao().pendingNotifications(10, window = Long.MAX_VALUE / 2, maxRows = Int.MAX_VALUE).map { it.id }

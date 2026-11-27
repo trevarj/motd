@@ -7,22 +7,28 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.DynamicFeed
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -31,10 +37,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
@@ -65,6 +73,7 @@ import io.github.trevarj.motd.data.db.BufferType
 import io.github.trevarj.motd.data.db.MessageEntity
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.MessageVisibilityPolicy
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
@@ -92,8 +101,8 @@ import io.github.trevarj.motd.ui.components.EffectFloatingActionButton as Floati
 import io.github.trevarj.motd.ui.components.EmojiText as Text
 import io.github.trevarj.motd.ui.theme.UiIcon as Icon
 
-private const val MENTIONS_NAVIGATION_FAB_HOLD_MS = 450
-private const val MENTIONS_NAVIGATION_FAB_SETTLE_MS = 160
+private const val ACTIVITY_NAVIGATION_FAB_HOLD_MS = 450
+private const val ACTIVITY_NAVIGATION_FAB_SETTLE_MS = 160
 
 /** Read-only merged stream of conversation lines from every channel and DM, newest first. */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -165,17 +174,17 @@ fun GlobalFeedScreen(
     }
 }
 
-/** Read-only stream of stored mentions, with the same exact-message jump as Global Feed. */
+/** Read-only stream of mentions and keyword highlights, with exact-message jumps. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MentionsScreen(
+fun ActivityScreen(
     onBack: () -> Unit = {},
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit = { _, _, _ -> },
-    viewModel: MentionsViewModel = hiltViewModel(),
+    viewModel: ActivityViewModel = hiltViewModel(),
     aiTextViewModel: AiTextViewModel = hiltViewModel(),
     onOpenAiSetup: () -> Unit = {},
 ) {
-    val rows = viewModel.items.collectAsLazyPagingItems()
+    val page by viewModel.page.collectAsStateWithLifecycle()
     val showNetwork by viewModel.showNetwork.collectAsStateWithLifecycle()
     val visibilitySpec by viewModel.visibilitySpec.collectAsStateWithLifecycle()
     val aiState by aiTextViewModel.state.collectAsStateWithLifecycle()
@@ -199,10 +208,39 @@ fun MentionsScreen(
         onOpenAiSetup,
         onOpenAiSetup,
     )
-    val listState = rememberLazyListState()
-    ReportMentionsViewportAtNewest(
+    ActivityFeed(
+        page = page,
+        onFilterSelected = viewModel::selectFilter,
+        showNetwork = showNetwork,
+        visibilitySpec = visibilitySpec,
+        onBack = onBack,
+        onOpenMessage = onOpenMessage,
+        onTranslateMessage =
+            if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
+                { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
+            } else {
+                null
+            },
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+internal fun ActivityFeed(
+    page: ActivityPage,
+    onFilterSelected: (ActivityFilter) -> Unit,
+    showNetwork: Boolean,
+    visibilitySpec: MessageVisibilitySpec,
+    onBack: () -> Unit,
+    onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
+    onTranslateMessage: ((MessageEntity) -> Unit)? = null,
+) {
+    val rows = page.items.collectAsLazyPagingItems()
+    val filter = page.filter
+    val listState = key(filter) { rememberLazyListState() }
+    ReportActivityViewportAtNewest(
         listState = listState,
-        onAtNewestChanged = viewModel::reportViewportAtNewest,
+        onAtNewestChanged = page.reportViewportAtNewest,
     )
     val pageBackdrop = rememberSurfaceBackdropSource()
     SurfaceBackdropPage(pageBackdrop) {
@@ -218,30 +256,60 @@ fun MentionsScreen(
                             Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = stringResource(R.string.action_back))
                         }
                     },
-                    title = { Text(stringResource(R.string.mentions_title)) },
+                    title = { Text(stringResource(R.string.activity_title)) },
                 )
             },
             floatingActionButton = {
-                MentionsNavigationFab(
+                ActivityNavigationFab(
                     listState = listState,
                     itemCount = rows.itemCount,
                 )
             },
         ) { padding ->
-            GlobalFeedContent(
-                rows = rows,
-                showNetwork = showNetwork,
-                onOpenMessage = onOpenMessage,
-                modifier = Modifier.padding(padding),
-                mentions = true,
-                visibilitySpec = visibilitySpec,
-                listState = listState,
-                onTranslateMessage =
-                    if (AiFeature.TEXT_TOOLS in aiLabs.enabledFeatures) {
-                        { message -> aiTextViewModel.openStoredMessage(message.bufferId, message.id) }
-                    } else {
-                        null
-                    },
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                ActivityFilterChips(filter, onFilterSelected)
+                GlobalFeedContent(
+                    rows = rows,
+                    showNetwork = showNetwork,
+                    onOpenMessage = onOpenMessage,
+                    activityFilter = filter,
+                    visibilitySpec = visibilitySpec,
+                    listState = listState,
+                    onTranslateMessage = onTranslateMessage,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+internal fun ActivityFilterChips(
+    filter: ActivityFilter,
+    onFilterSelected: (ActivityFilter) -> Unit,
+) {
+    Row(
+        modifier =
+            Modifier
+                .fillMaxWidth()
+                .selectableGroup()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        ActivityFilter.entries.forEach { option ->
+            val label =
+                when (option) {
+                    ActivityFilter.ALL -> R.string.activity_filter_all
+                    ActivityFilter.MENTIONS -> R.string.activity_filter_mentions
+                    ActivityFilter.KEYWORDS -> R.string.activity_filter_keywords
+                }
+            val selected = filter == option
+            FilterChip(
+                selected = selected,
+                onClick = { onFilterSelected(option) },
+                label = { Text(stringResource(label)) },
+                leadingIcon = if (selected) ({ Icon(Icons.Filled.Check, contentDescription = null) }) else null,
+                modifier = Modifier.testTag("activity_filter_${option.name.lowercase()}"),
             )
         }
     }
@@ -252,7 +320,7 @@ fun MentionsScreen(
  * real viewport remains authoritative until Paging presents rows again.
  */
 @Composable
-internal fun ReportMentionsViewportAtNewest(
+internal fun ReportActivityViewportAtNewest(
     listState: LazyListState,
     onAtNewestChanged: (Boolean) -> Unit,
 ) {
@@ -276,7 +344,7 @@ internal fun GlobalFeedContent(
     showNetwork: Boolean,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     modifier: Modifier = Modifier,
-    mentions: Boolean = false,
+    activityFilter: ActivityFilter? = null,
     listState: LazyListState = rememberLazyListState(),
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     visibilitySpec: MessageVisibilitySpec = MessageVisibilitySpec(),
@@ -287,7 +355,7 @@ internal fun GlobalFeedContent(
         refresh is LoadState.Error && rows.itemCount == 0 -> {
             EmptyState(
                 icon = Icons.Outlined.CloudOff,
-                title = stringResource(R.string.feed_error_title),
+                title = stringResource(if (activityFilter == null) R.string.feed_error_title else R.string.activity_error_title),
                 message = stringResource(R.string.feed_error_message),
                 modifier = modifier,
                 actionLabel = stringResource(R.string.feed_retry),
@@ -297,10 +365,17 @@ internal fun GlobalFeedContent(
 
         // NotLoading, so the empty state never flashes over an arriving first page.
         rows.itemCount == 0 && refresh is LoadState.NotLoading -> {
+            val title =
+                when (activityFilter) {
+                    null -> R.string.feed_empty_title
+                    ActivityFilter.ALL -> R.string.activity_empty
+                    ActivityFilter.MENTIONS -> R.string.activity_mentions_empty
+                    ActivityFilter.KEYWORDS -> R.string.activity_keywords_empty
+                }
             EmptyState(
-                icon = if (mentions) Icons.Outlined.AlternateEmail else Icons.Outlined.DynamicFeed,
-                title = stringResource(if (mentions) R.string.mentions_empty_title else R.string.feed_empty_title),
-                message = stringResource(if (mentions) R.string.mentions_empty_message else R.string.feed_empty_message),
+                icon = if (activityFilter == null) Icons.Outlined.DynamicFeed else Icons.Outlined.Bolt,
+                title = stringResource(title),
+                message = stringResource(if (activityFilter == null) R.string.feed_empty_message else R.string.activity_empty_message),
                 modifier = modifier,
                 ghostRows = true,
             )
@@ -312,7 +387,7 @@ internal fun GlobalFeedContent(
                 showNetwork = showNetwork,
                 onOpenMessage = onOpenMessage,
                 modifier = modifier,
-                mentions = mentions,
+                activity = activityFilter != null,
                 listState = listState,
                 onTranslateMessage = onTranslateMessage,
                 visibilitySpec = visibilitySpec,
@@ -327,7 +402,7 @@ private fun GlobalFeedList(
     showNetwork: Boolean,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
     modifier: Modifier = Modifier,
-    mentions: Boolean = false,
+    activity: Boolean,
     listState: LazyListState,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     visibilitySpec: MessageVisibilitySpec = MessageVisibilitySpec(),
@@ -335,9 +410,26 @@ private fun GlobalFeedList(
     // One list-scoped formatter: MessageBubble's per-row fallback ignores the app's timestamp
     // preference.
     val formatTime = rememberMessageTimeFormatter()
+    if (activity) {
+        // Re-pin before measurement can retain the displaced key, but never disturb a parked viewport.
+        val topKey =
+            rows.itemSnapshotList.items
+                .firstOrNull()
+                ?.message
+                ?.id
+        val previousTop = remember(listState) { ActivityTopItemTracker(topKey) }
+        if (topKey != previousTop.key) {
+            val repin =
+                Snapshot.withoutReadObservation {
+                    topKey != null && previousTop.key != null && !listState.canScrollBackward && !listState.isScrollInProgress
+                }
+            previousTop.key = topKey
+            if (repin) listState.requestScrollToItem(0)
+        }
+    }
     LazyColumn(
         state = listState,
-        modifier = modifier.fillMaxSize().then(LocalSurfaceBackdrop.current?.let { Modifier.captureSurfaceBackdrop(it) } ?: Modifier).testTag(if (mentions) "mentions_list" else "feed_list"),
+        modifier = modifier.fillMaxSize().then(LocalSurfaceBackdrop.current?.let { Modifier.captureSurfaceBackdrop(it) } ?: Modifier).testTag(if (activity) "activity_list" else "feed_list"),
     ) {
         items(
             count = rows.itemCount,
@@ -350,11 +442,11 @@ private fun GlobalFeedList(
                     row = row,
                     // Newest first, so the row above is newer. peek, not get: get would report a
                     // second viewport hint.
-                    newer = if (index > 0) rows.peek(index - 1) else null,
+                    newer = if (!activity && index > 0) rows.peek(index - 1) else null,
                     showNetwork = showNetwork,
                     formatTime = formatTime,
                     onOpenMessage = onOpenMessage,
-                    mentions = mentions,
+                    activity = activity,
                     onTranslateMessage = onTranslateMessage,
                     visibilitySpec = visibilitySpec,
                 )
@@ -363,9 +455,13 @@ private fun GlobalFeedList(
     }
 }
 
-/** Adjacent-mention navigation. Holding Up returns to the newest mention. */
+private class ActivityTopItemTracker(
+    var key: Long?,
+)
+
+/** Adjacent-activity navigation. Holding Up returns to the newest event. */
 @Composable
-internal fun MentionsNavigationFab(
+internal fun ActivityNavigationFab(
     listState: LazyListState,
     itemCount: Int,
     modifier: Modifier = Modifier,
@@ -376,11 +472,11 @@ internal fun MentionsNavigationFab(
     if (itemCount == 0 || (!canScrollUp && !canScrollDown)) return
 
     Column(
-        modifier = modifier.testTag("mentions_navigation_fab"),
+        modifier = modifier.testTag("activity_navigation_fab"),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
         if (canScrollUp) {
-            MentionsNavigationFabButton(
+            ActivityNavigationFabButton(
                 icon = {
                     Icon(
                         Icons.Filled.KeyboardArrowUp,
@@ -389,21 +485,21 @@ internal fun MentionsNavigationFab(
                 },
                 onClick = {
                     scope.launch {
-                        listState.animateScrollToItem(listState.navigationTarget(MentionsNavigationDirection.UP, itemCount))
+                        listState.animateScrollToItem(listState.navigationTarget(ActivityNavigationDirection.UP, itemCount))
                     }
                 },
                 onLongClick = { scope.launch { listState.scrollToItem(0) } },
-                modifier = Modifier.testTag("mentions_navigation_up"),
+                modifier = Modifier.testTag("activity_navigation_up"),
             )
         }
         if (canScrollDown) {
             FloatingActionButton(
                 onClick = {
                     scope.launch {
-                        listState.animateScrollToItem(listState.navigationTarget(MentionsNavigationDirection.DOWN, itemCount))
+                        listState.animateScrollToItem(listState.navigationTarget(ActivityNavigationDirection.DOWN, itemCount))
                     }
                 },
-                modifier = Modifier.testTag("mentions_navigation_down"),
+                modifier = Modifier.testTag("activity_navigation_down"),
             ) {
                 Icon(Icons.Filled.KeyboardArrowDown, contentDescription = stringResource(R.string.mentions_scroll_down))
             }
@@ -411,24 +507,24 @@ internal fun MentionsNavigationFab(
     }
 }
 
-private enum class MentionsNavigationDirection { UP, DOWN }
+private enum class ActivityNavigationDirection { UP, DOWN }
 
 private fun LazyListState.navigationTarget(
-    direction: MentionsNavigationDirection,
+    direction: ActivityNavigationDirection,
     itemCount: Int,
 ): Int =
     when (direction) {
-        MentionsNavigationDirection.UP -> {
+        ActivityNavigationDirection.UP -> {
             (firstVisibleItemIndex - 1).coerceAtLeast(0)
         }
 
-        MentionsNavigationDirection.DOWN -> {
+        ActivityNavigationDirection.DOWN -> {
             (firstVisibleItemIndex + 1).coerceAtMost(itemCount - 1)
         }
     }
 
 @Composable
-private fun MentionsNavigationFabButton(
+private fun ActivityNavigationFabButton(
     icon: @Composable () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
@@ -438,7 +534,7 @@ private fun MentionsNavigationFabButton(
     val scope = rememberCoroutineScope()
     val latestOnClick by rememberUpdatedState(onClick)
     val latestOnLongClick by rememberUpdatedState(onLongClick)
-    val jumpToTopLabel = stringResource(R.string.mentions_jump_to_top)
+    val jumpToTopLabel = stringResource(R.string.activity_jump_to_top)
     val holdProgress = remember { Animatable(0f) }
     val ringColor = MaterialTheme.colorScheme.onPrimaryContainer
 
@@ -446,7 +542,7 @@ private fun MentionsNavigationFabButton(
         scope.launch {
             holdProgress.animateTo(
                 targetValue = 0f,
-                animationSpec = tween(durationMillis = MENTIONS_NAVIGATION_FAB_SETTLE_MS, easing = FastOutSlowInEasing),
+                animationSpec = tween(durationMillis = ACTIVITY_NAVIGATION_FAB_SETTLE_MS, easing = FastOutSlowInEasing),
             )
         }
     }
@@ -468,11 +564,11 @@ private fun MentionsNavigationFabButton(
                                 holdProgress.snapTo(0f)
                                 holdProgress.animateTo(
                                     1f,
-                                    tween(durationMillis = MENTIONS_NAVIGATION_FAB_HOLD_MS, easing = LinearEasing),
+                                    tween(durationMillis = ACTIVITY_NAVIGATION_FAB_HOLD_MS, easing = LinearEasing),
                                 )
                             }
                         val releaseResult =
-                            withTimeoutOrNull(MENTIONS_NAVIGATION_FAB_HOLD_MS.toLong()) {
+                            withTimeoutOrNull(ACTIVITY_NAVIGATION_FAB_HOLD_MS.toLong()) {
                                 Result.success(waitForUpOrCancellation(PointerEventPass.Initial))
                             }
                         holdJob.cancel()
@@ -542,7 +638,7 @@ private fun GlobalFeedLineRow(
     showNetwork: Boolean,
     formatTime: (Long) -> String,
     onOpenMessage: (bufferId: Long, eventId: Long, serverTime: Long) -> Unit,
-    mentions: Boolean,
+    activity: Boolean,
     onTranslateMessage: ((MessageEntity) -> Unit)? = null,
     visibilitySpec: MessageVisibilitySpec,
 ) {
@@ -556,15 +652,15 @@ private fun GlobalFeedLineRow(
             IrcIdentityRules.from(row.caseMapping, row.chanTypes)
         }
     val policy = remember(visibilitySpec, identityRules) { MessageVisibilityPolicy(visibilitySpec, identityRules) }
-    val foolMode = if (mentions) policy.foolPreferences(message)?.visibility else null
-    if (mentions && foolMode != null && !policy.mentionAttention(message, row.bufferType == BufferType.QUERY)) return
+    val foolMode = if (activity) policy.foolPreferences(message)?.visibility else null
+    if (foolMode != null && !policy.mentionAttention(message, row.bufferType == BufferType.QUERY)) return
     val newerMessage = newer?.message
-    // Mention rows skip intervening chat lines, so each one needs its own conversation label.
-    val sameBuffer = !mentions && newerMessage?.bufferId == message.bufferId
+    // Activity skips intervening chat lines, so each row needs its own conversation label.
+    val sameBuffer = !activity && newerMessage?.bufferId == message.bufferId
     // Headers are drawn above the bubble, so both are decided against the newer row above.
     // showsSender takes the older of the pair — true means this row opens the group.
     val showSender = newerMessage == null || !sameBuffer || showsSender(newerMessage, message)
-    Column(modifier = Modifier.fillMaxWidth().testTag("${if (mentions) "mentions" else "feed"}_row_${message.id}")) {
+    Column(modifier = Modifier.fillMaxWidth().testTag("${if (activity) "activity" else "feed"}_row_${message.id}")) {
         if (!sameBuffer) {
             Text(
                 text =
@@ -588,7 +684,7 @@ private fun GlobalFeedLineRow(
         io.github.trevarj.motd.ui.components.FoolMessageScope(
             concealed = foolMode == FoolsMode.BLUR && !revealed.value,
             onReveal = { revealed.value = true },
-            tag = "mentions_fool_reveal_${message.id}",
+            tag = "activity_fool_reveal_${message.id}",
         ) {
             MessageBubble(
                 sender = message.sender,
@@ -601,7 +697,7 @@ private fun GlobalFeedLineRow(
                 kind = message.kind,
                 showSender = showSender,
                 isBot = message.isBot,
-                hasMention = if (mentions) policy.mentionAttention(message, row.bufferType == BufferType.QUERY) else message.hasMention,
+                hasMention = message.hasMention,
                 highlightNick = message.highlightNick,
                 highlightCaseMapping = message.highlightCaseMapping,
                 dimmed = foolMode == FoolsMode.DIMMED,
@@ -612,7 +708,7 @@ private fun GlobalFeedLineRow(
                 identityRules = identityRules,
                 formattedTime = remember(message.serverTime, formatTime) { formatTime(message.serverTime) },
                 onClick = { onOpenMessage(message.bufferId, message.id, message.serverTime) },
-                onClickLabel = stringResource(if (mentions) R.string.mentions_open_message else R.string.feed_open_message),
+                onClickLabel = stringResource(if (activity) R.string.activity_open_message else R.string.feed_open_message),
                 onLongPress = { onTranslateMessage?.invoke(message) },
                 onLongPressLabel = onTranslateMessage?.let { stringResource(R.string.ai_text_translate_message) },
             )

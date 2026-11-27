@@ -1,5 +1,7 @@
 package io.github.trevarj.motd.data.repo
 
+import androidx.paging.PagingDataEvent
+import androidx.paging.PagingDataPresenter
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.sqlite.db.SupportSQLiteQuery
@@ -16,11 +18,17 @@ import io.github.trevarj.motd.data.db.message
 import io.github.trevarj.motd.data.db.network
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.KeywordMatch
+import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.GlobalFeedKey
-import io.github.trevarj.motd.data.visibility.GlobalFeedMode
 import io.github.trevarj.motd.data.visibility.GlobalFeedSeek
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.data.visibility.globalFeedPagingQuery
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.test.UnconfinedTestDispatcher
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -77,10 +85,13 @@ class GlobalFeedPagingDbTest {
             for (reveal in listOf(false, true)) {
                 val current = spec.copy(revealHiddenFools = reveal)
                 assertTrue(db.messageDao().globalFeedRows(globalFeedPagingQuery(current)).isEmpty())
-                assertEquals(listOf("b"), db.messageDao().globalFeedRows(globalFeedPagingQuery(current, mode = GlobalFeedMode.MENTIONS)).map { it.message.sender })
+                for (filter in listOf(ActivityFilter.ALL, ActivityFilter.MENTIONS)) {
+                    val rows = db.messageDao().globalFeedRows(globalFeedPagingQuery(current, activityFilter = filter))
+                    assertEquals(listOf("b"), rows.map { it.message.sender })
+                }
             }
             val disabled = spec.copy(foolPreferences = spec.foolPreferences + ("b" to FoolPreferences(FoolsMode.COLLAPSE)))
-            assertTrue(db.messageDao().globalFeedRows(globalFeedPagingQuery(disabled, mode = GlobalFeedMode.MENTIONS)).isEmpty())
+            assertTrue(db.messageDao().globalFeedRows(globalFeedPagingQuery(disabled, activityFilter = ActivityFilter.MENTIONS)).isEmpty())
         }
 
     @Test
@@ -127,7 +138,7 @@ class GlobalFeedPagingDbTest {
                         fools = (if (reverse) configured.reversed() else configured).toSet(),
                         foolPreferences = preferences,
                     )
-                val rows = db.messageDao().globalFeedRows(globalFeedPagingQuery(spec, mode = GlobalFeedMode.MENTIONS))
+                val rows = db.messageDao().globalFeedRows(globalFeedPagingQuery(spec, activityFilter = ActivityFilter.MENTIONS))
                 assertEquals(expected, rows.mapTo(mutableSetOf()) { it.message.text })
             }
         }
@@ -302,6 +313,28 @@ class GlobalFeedPagingDbTest {
             assertTrue(source.invalid)
         }
 
+    @Test
+    fun cancelingAnActivityPagerInvalidatesItsLoadedSourceWithoutADatabaseWrite() =
+        runTest {
+            val source = GlobalFeedPagingSource(db, MessageVisibilitySpec(), ActivityFilter.ALL)
+            val presented = CompletableDeferred<Unit>()
+            val presenter =
+                object : PagingDataPresenter<SearchHit>(mainContext = UnconfinedTestDispatcher(testScheduler)) {
+                    override suspend fun presentPagingDataEvent(event: PagingDataEvent<SearchHit>) {
+                        presented.complete(Unit)
+                    }
+                }
+            val collection =
+                backgroundScope.launch {
+                    globalFeedPager { source }.collectLatest(presenter::collectFrom)
+                }
+
+            presented.await()
+            assertFalse(source.invalid)
+            collection.cancelAndJoin()
+            assertTrue(source.invalid)
+        }
+
     /** The identity table is observed too: a late CASEMAPPING changes which rows a page contains. */
     @Test
     fun anIdentityRowWrittenLaterInvalidatesTheLiveStream() =
@@ -379,7 +412,7 @@ class GlobalFeedPagingDbTest {
                 GlobalFeedPagingSource(
                     db = db,
                     spec = MessageVisibilitySpec(),
-                    mode = GlobalFeedMode.MENTIONS,
+                    activityFilter = ActivityFilter.MENTIONS,
                     isAtNewest = atNewest::get,
                 )
             val loaded = source.refresh(key = null, loadSize = 8)
@@ -409,7 +442,7 @@ class GlobalFeedPagingDbTest {
                 GlobalFeedPagingSource(
                     db = db,
                     spec = MessageVisibilitySpec(),
-                    mode = GlobalFeedMode.MENTIONS,
+                    activityFilter = ActivityFilter.MENTIONS,
                     isAtNewest = atNewest::get,
                 )
             val anchoredRefresh = anchoredSource.refresh(key = anchoredKey, loadSize = 2)
@@ -422,7 +455,7 @@ class GlobalFeedPagingDbTest {
                 GlobalFeedPagingSource(
                     db = db,
                     spec = MessageVisibilitySpec(),
-                    mode = GlobalFeedMode.MENTIONS,
+                    activityFilter = ActivityFilter.MENTIONS,
                     isAtNewest = atNewest::get,
                 )
             val newestRefresh = newestSource.refresh(key = null, loadSize = 2)
@@ -438,7 +471,6 @@ class GlobalFeedPagingDbTest {
                 GlobalFeedPagingSource(
                     db = db,
                     spec = MessageVisibilitySpec(),
-                    mode = GlobalFeedMode.ALL,
                     isAtNewest = atNewest::get,
                 )
             assertEquals(anchoredKey, allSource.getRefreshKey(anchoredState))
@@ -459,7 +491,7 @@ class GlobalFeedPagingDbTest {
                         )
                     },
                 )
-            val source = GlobalFeedPagingSource(db, MessageVisibilitySpec(), GlobalFeedMode.MENTIONS)
+            val source = GlobalFeedPagingSource(db, MessageVisibilitySpec(), ActivityFilter.MENTIONS)
             val first = source.refresh(key = null, loadSize = GLOBAL_FEED_PAGING_CONFIG.initialLoadSize)
             assertEquals((200 downTo 51).map { "mention-$it" }, first.data.map { it.message.text })
             assertNull(first.prevKey)
@@ -588,7 +620,7 @@ class GlobalFeedPagingDbTest {
                 db.messageDao().globalFeedRows(
                     globalFeedPagingQuery(
                         spec = MessageVisibilitySpec(fools = setOf("fool")),
-                        mode = GlobalFeedMode.MENTIONS,
+                        activityFilter = ActivityFilter.MENTIONS,
                     ),
                 )
 
@@ -596,30 +628,75 @@ class GlobalFeedPagingDbTest {
         }
 
     @Test
-    fun mentionsPagingUsesTheCrossBufferMentionIndex() =
+    fun activityFiltersPageStoredMentionAndKeywordProvenanceWithoutRepeatingOverlap() =
         runTest {
-            val plan =
-                db.explainQueryPlan(
-                    globalFeedPagingQuery(
-                        spec = MessageVisibilitySpec(),
-                        key = GlobalFeedKey(serverTime = 400, id = 9),
-                        seek = GlobalFeedSeek.OLDER,
-                        limit = 50,
-                        mode = GlobalFeedMode.MENTIONS,
-                    ).sql,
+            val archived = db.bufferDao().insert(buffer(networkA, "#archived").copy(archived = true))
+            db.messageDao().insertAll(
+                listOf(
+                    message(bufferA, "mention", serverTime = 100, dedupKey = "mention", hasMention = true),
+                    message(archived, "silent", serverTime = 200, dedupKey = "silent", hasMention = true)
+                        .copy(directMention = false, keywordMatch = KeywordMatch.SILENT),
+                    message(bufferB, "alert", serverTime = 200, dedupKey = "alert", hasMention = true)
+                        .copy(directMention = false, keywordMatch = KeywordMatch.ALERT),
+                    message(bufferA, "both", serverTime = 300, dedupKey = "both", hasMention = true)
+                        .copy(keywordMatch = KeywordMatch.ALERT),
+                    message(bufferA, "unclassified", serverTime = 400, dedupKey = "unclassified"),
+                    message(bufferB, "nonmatch", serverTime = 500, dedupKey = "nonmatch")
+                        .copy(keywordMatch = KeywordMatch.NONE),
+                    message(bufferA, "fool", sender = "fool", serverTime = 600, dedupKey = "fool", hasMention = true)
+                        .copy(directMention = false, keywordMatch = KeywordMatch.SILENT),
+                    message(bufferA, "self", serverTime = 700, dedupKey = "self", hasMention = true, isSelf = true)
+                        .copy(keywordMatch = KeywordMatch.ALERT),
+                    message(bufferA, "redacted", serverTime = 800, dedupKey = "redacted", hasMention = true, kind = MessageKind.REDACTED)
+                        .copy(keywordMatch = KeywordMatch.ALERT),
+                ),
+            )
+            val spec = MessageVisibilitySpec(fools = setOf("fool"))
+            val expected =
+                mapOf(
+                    ActivityFilter.ALL to listOf("both", "alert", "silent", "mention"),
+                    ActivityFilter.MENTIONS to listOf("both", "mention"),
+                    ActivityFilter.KEYWORDS to listOf("both", "alert", "silent"),
                 )
+            for ((filter, texts) in expected) {
+                val source = GlobalFeedPagingSource(db, spec, filter)
+                val first = source.refresh(key = null, loadSize = 2)
+                val second = source.append(checkNotNull(first.nextKey), loadSize = 2)
+                assertEquals(texts, (first.data + second.data).map { it.message.text })
+            }
 
-            assertFalse(plan.toString(), plan.any { "USE TEMP B-TREE FOR ORDER BY" in it })
-            assertTrue(plan.toString(), plan.any { "index_messages_hasMention_serverTime_id" in it })
+            val optedIn = spec.copy(foolPreferences = mapOf("fool" to FoolPreferences(notifyMentions = true)))
+            val keywords = GlobalFeedPagingSource(db, optedIn, ActivityFilter.KEYWORDS).refresh(key = null, loadSize = 4)
+            assertEquals(listOf("fool", "both", "alert", "silent"), keywords.data.map { it.message.text })
         }
 
     @Test
-    fun bothFeedModesKeepTheSharedLifecycleFoolAndOrderingClauses() {
-        GlobalFeedMode.entries.forEach { mode ->
+    fun eachActivityFilterUsesTheCrossBufferMentionIndex() =
+        runTest {
+            for (filter in ActivityFilter.entries) {
+                val plan =
+                    db.explainQueryPlan(
+                        globalFeedPagingQuery(
+                            spec = MessageVisibilitySpec(),
+                            key = GlobalFeedKey(serverTime = 400, id = 9),
+                            seek = GlobalFeedSeek.OLDER,
+                            limit = 50,
+                            activityFilter = filter,
+                        ).sql,
+                    )
+
+                assertFalse(plan.toString(), plan.any { "USE TEMP B-TREE FOR ORDER BY" in it })
+                assertTrue(plan.toString(), plan.any { "index_messages_hasMention_serverTime_id" in it })
+            }
+        }
+
+    @Test
+    fun allFeedScopesKeepTheSharedLifecycleFoolAndOrderingClauses() {
+        for (filter in listOf(null) + ActivityFilter.entries) {
             val sql =
                 globalFeedPagingQuery(
                     spec = MessageVisibilitySpec(fools = setOf("fool")),
-                    mode = mode,
+                    activityFilter = filter,
                 ).sql
 
             assertTrue(sql, "b.dismissed = 0" in sql)

@@ -118,6 +118,7 @@ enum class SettingsTarget {
     CHAT_LIST_SWIPE,
     MENTIONS,
     MENTIONS_LOCATION,
+    KEYWORD_HIGHLIGHTS,
     IMAGES,
     LINK_PREVIEWS,
     MEDIA_UNMETERED,
@@ -321,7 +322,7 @@ enum class ChatSoundCue { SEND, RECEIVE }
 // Read-only merged stream of conversation lines from every channel and DM.
 @Serializable data object GlobalFeedRoute
 
-@Serializable data object MentionsRoute
+@Serializable data object ActivityRoute
 
 @Serializable data class ChannelInfoRoute(
     val bufferId: Long,

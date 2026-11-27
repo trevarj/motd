@@ -32,8 +32,11 @@ import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.TimelineAnchor
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.SettingsRepository
 import io.github.trevarj.motd.data.sync.BufferStore
+import io.github.trevarj.motd.data.sync.CanonicalTimelineStore
 import io.github.trevarj.motd.data.sync.EventProcessor
 import io.github.trevarj.motd.data.sync.MessageNotifier
 import io.github.trevarj.motd.data.sync.TypingTrackerImpl
@@ -43,6 +46,7 @@ import io.github.trevarj.motd.diagnostics.DiagnosticLogger
 import io.github.trevarj.motd.dickord.DickordLabsPrefs
 import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.event.MessageContext
+import io.github.trevarj.motd.irc.event.ServerTimeSource
 import io.github.trevarj.motd.irc.proto.Prefix
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
@@ -183,6 +187,7 @@ class MotdNotificationsAlertingTest {
             repo.setFool("alert-fool", false)
             repo.setFool("stable-account", false)
             repo.setFool("earlier-fool", false)
+            repo.setFool("disabled-mention-sender", false)
             db.close()
         }
 
@@ -575,6 +580,202 @@ class MotdNotificationsAlertingTest {
             assertNull(mention.bubbleMetadata)
             assertMessageActions(ordinary, channelId, null, automotiveMessaging = false)
             assertMessageActions(mention, channelId, "channel_mentions", automotiveMessaging = true)
+        }
+
+    @Test
+    fun recoveryUsesPersistedKeywordLanesAfterRuleChanges() =
+        runTest {
+            val channelId = channel()
+            val recorder = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, notificationSettings = allSettings(), settingsRepository = repo)
+            recorder.onRegistered(networkId, "me", emptyMap())
+            val original = repo.keywordHighlightRules.first()
+            try {
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("silent", false), KeywordHighlightRule("alert", true)))
+                recorder.process(networkId, chat("peer", "project silent", "silent-recovery").copy(target = "#chan"))
+                recorder.processPush(networkId, chat("peer", "project alert", "alert-recovery", 2_000).copy(target = "#chan"))
+
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("silent", true), KeywordHighlightRule("alert", false)))
+                notifications.recoverCanonicalNotifications()
+
+                val ordinary = lane(null)
+                val mention = lane("channel_mentions")
+                assertEquals(listOf("project silent"), bodies(ordinary))
+                assertEquals(listOf("project alert"), bodies(mention))
+                assertSilent(ordinary)
+                assertSilent(mention)
+                for (msgid in listOf("silent-recovery", "alert-recovery")) {
+                    val row = requireNotNull(db.messageDao().byMsgid(channelId, msgid))
+                    assertTrue(row.notificationHandled)
+                    assertFalse(row.notificationClaimed)
+                }
+            } finally {
+                repo.setKeywordHighlightRules(original)
+            }
+        }
+
+    @Test
+    fun coalescenceOnlyRetiresDowngradedEventFromSurvivingMentionCard() =
+        runTest {
+            val winnerId = channel()
+            val loserId = channel("#older")
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = allSettings(), settingsRepository = repo)
+            live.onRegistered(networkId, "me", emptyMap())
+            val original = repo.keywordHighlightRules.first()
+            try {
+                val message = chat("peer", "project keyword", serverTime = 2_000).copy(target = "#chan")
+                val tagged = message.copy(ctx = message.ctx.copy(serverTimeSource = ServerTimeSource.TAG))
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", false)))
+                live.process(networkId, IrcEvent.HistoryBatch("#older", listOf(tagged.copy(target = "#older"))))
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", true)))
+                live.process(networkId, chat("peer", "me: already read", "read-mention", 1_250).copy(target = "#chan"))
+                live.process(networkId, chat("peer", "regular", "ordinary", 1_400).copy(target = "#chan"))
+                live.process(networkId, chat("peer", "me: healthy mention", "healthy", 1_500).copy(target = "#chan"))
+                live.process(networkId, chat("disabled-mention-sender", "me: opted out", "disabled", 1_750).copy(target = "#chan"))
+                live.process(networkId, tagged)
+                val ordinary = lane(null)
+                assertEquals(
+                    listOf("me: already read", "me: healthy mention", "me: opted out", "project keyword"),
+                    bodies(lane("channel_mentions")),
+                )
+                val read = requireNotNull(db.messageDao().byMsgid(winnerId, "read-mention"))
+                val winner = requireNotNull(db.bufferDao().observeById(winnerId))
+                db.bufferDao().update(winner.copy(localReadAnchorTime = read.serverTime, localReadAnchorEventId = read.id))
+                notifications.onRead(winnerId, TimelineAnchor(read.serverTime, read.id, read.timelineOrder))
+                repo.setFool("disabled-mention-sender", true)
+                repo.setFoolPreferences("disabled-mention-sender", FoolPreferences(notifyMentions = false))
+
+                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+                BufferStore(db, notifier = notifications).mergeRooms(winnerId, loserId)
+
+                assertSame(ordinary, lane(null))
+                val retained = lane("channel_mentions")
+                assertEquals(listOf("me: healthy mention"), bodies(retained))
+                assertSilent(retained)
+                assertLaneAnchor(retained, requireNotNull(db.messageDao().byMsgid(winnerId, "healthy")))
+            } finally {
+                repo.setKeywordHighlightRules(original)
+            }
+        }
+
+    @Test
+    fun queryDowngradeRebuildsTheNullTagCardWithoutTouchingAnOrdinaryChannelCard() =
+        runTest {
+            val channelId = channel()
+            val otherQuery =
+                db.bufferDao().insert(
+                    BufferEntity(networkId = networkId, name = "older-peer", displayName = "older-peer", type = BufferType.QUERY),
+                )
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = allSettings(), settingsRepository = repo)
+            live.onRegistered(networkId, "me", emptyMap())
+            val original = repo.keywordHighlightRules.first()
+            try {
+                val body = chat("alert-peer", "project keyword", serverTime = 2_000)
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", false)))
+                live.process(networkId, IrcEvent.HistoryBatch("older-peer", listOf(body)))
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", true)))
+                live.process(networkId, chat("regular-peer", "regular", "independent-ordinary").copy(target = "#chan"))
+                live.process(networkId, body)
+
+                fun card(bufferId: Long) = postedNotifications().single { it.id == MotdNotifications.messageNotificationId(bufferId) && it.tag == null }.notification
+
+                val ordinary = card(channelId)
+                assertEquals(MotdNotifications.CHANNEL_MENTIONS, card(dmBufferId).extras.getString("motd.messageChannel"))
+                notifications = MotdNotifications(context, db, ForegroundBufferTrackerImpl(), repo)
+                BufferStore(db, notifier = notifications).mergeRooms(dmBufferId, otherQuery)
+
+                assertSame(ordinary, card(channelId))
+                val query = card(dmBufferId)
+                assertEquals(listOf("project keyword"), bodies(query))
+                assertEquals(MotdNotifications.CHANNEL_MESSAGES, query.extras.getString("motd.messageChannel"))
+                assertSilent(query)
+            } finally {
+                repo.setKeywordHighlightRules(original)
+            }
+        }
+
+    @Test
+    fun watchedKeywordLossRetiresAnIneligibleCardEvenWhenADirectMentionSurvives() =
+        runTest {
+            val channelId = channel()
+            val settings = allSettings()
+            val live = EventProcessor(db, TypingTrackerImpl(), notifications, notificationSettings = settings, settingsRepository = repo)
+            live.onRegistered(networkId, "me", emptyMap())
+            val original = repo.keywordHighlightRules.first()
+            try {
+                live.process(networkId, chat("me", "parent", "watched-parent").copy(target = "#chan", isSelf = true))
+                live.process(networkId, chat("peer", "regular", "watched-ordinary", 1_500).copy(target = "#chan"))
+                val ordinary = lane(null)
+                settings.setChannel(channelId, NotificationMode.OFF)
+                settings.startWatch(channelId, null)
+                val earlier =
+                    chat("peer", "project keyword", "watched-canonical", 80_000).copy(target = "#chan", replyToMsgid = "watched-parent")
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", false)))
+                live.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(earlier)))
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", true)))
+                live.processPush(
+                    networkId,
+                    earlier.copy(
+                        ctx = earlier.ctx.copy(msgid = null, serverTime = 150_000, serverTimeSource = ServerTimeSource.LOCAL),
+                        replyToMsgid = null,
+                    ),
+                )
+                assertEquals(listOf("project keyword"), bodies(lane("channel_mentions")))
+
+                live.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(earlier)))
+
+                val canonical = requireNotNull(db.messageDao().byMsgid(channelId, "watched-canonical"))
+                assertTrue(canonical.directMention)
+                assertEquals(KeywordMatch.SILENT, canonical.keywordMatch)
+                assertFalse(canonical.notificationEligible)
+                assertFalse(canonical.notificationWatched)
+                assertSame(ordinary, postedNotifications().single().notification)
+            } finally {
+                repo.setKeywordHighlightRules(original)
+            }
+        }
+
+    @Test
+    fun redirectedRecoveryCandidateIsNotPostedOrHandledAfterKeywordDowngrade() =
+        runBlocking {
+            resetImmediateFixture()
+            val winnerId = channel()
+            val loserId = channel("#newer")
+            val recorder = EventProcessor(db, TypingTrackerImpl(), interruptedNotifier, settingsRepository = repo)
+            recorder.onRegistered(networkId, "me", emptyMap())
+            val message = chat("peer", "project keyword", serverTime = 2_000).copy(target = "#chan")
+            val tagged = message.copy(ctx = message.ctx.copy(serverTimeSource = ServerTimeSource.TAG))
+            val original = repo.keywordHighlightRules.first()
+            try {
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", false)))
+                recorder.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(tagged)))
+                val first = db.canonicalTimelineDao().eventsForRoom(winnerId).single()
+                repo.setKeywordHighlightRules(listOf(KeywordHighlightRule("keyword", true)))
+                recorder.processPush(networkId, tagged.copy(target = "#newer"))
+                val candidate = db.canonicalTimelineDao().eventsForRoom(loserId).single()
+                val (paused, release) = pauseCanonicalRead(candidate.id)
+                val recovery = async(Dispatchers.Default) { notifications.recoverCanonicalNotifications() }
+                try {
+                    assertTrue(paused.await(10, TimeUnit.SECONDS))
+                    CanonicalTimelineStore(db).moveEventsToRoom(networkId, loserId, winnerId)
+                    release.countDown()
+                    withTimeout(10_000) { recovery.await() }
+
+                    val canonical = requireNotNull(db.messageDao().byCanonicalId(candidate.id))
+                    assertEquals(first.id, canonical.id)
+                    assertEquals(KeywordMatch.SILENT, canonical.keywordMatch)
+                    assertFalse(canonical.notificationEligible)
+                    assertFalse(canonical.notificationHandled)
+                    assertFalse(canonical.notificationClaimed)
+                    assertTrue(postedNotifications().isEmpty())
+                } finally {
+                    beforeBoundDatabaseQuery = null
+                    release.countDown()
+                    recovery.cancel()
+                    recovery.join()
+                }
+            } finally {
+                repo.setKeywordHighlightRules(original)
+            }
         }
 
     @Test
@@ -1585,7 +1786,7 @@ class MotdNotificationsAlertingTest {
                 processor.process(networkId, IrcEvent.HistoryBatch("#chan", listOf(incoming.copy(replyToMsgid = "self-parent"))))
             }
         beforeQuery = { sql, args ->
-            if (sql.contains("hasMention = ?") && (args[args.lastIndex - 1] as? Number)?.toInt() == 1) {
+            if (sql.contains("(directMention = 1 OR keywordMatch IS 'ALERT') = ?") && (args[args.lastIndex - 1] as? Number)?.toInt() == 1) {
                 restoringMentions = true
                 if (!cancelled) {
                     // QueryCallback observes in a separate coroutine; fail the actual Room read.
@@ -1667,7 +1868,7 @@ class MotdNotificationsAlertingTest {
                 processor.process(networkId, incoming)
                 val ordinary = lane(null)
                 val event = requireNotNull(db.messageDao().byMsgid(channelId, suppression))
-                db.messageDao().update(event.copy(hasMention = true))
+                db.messageDao().update(event.copy(hasMention = true, directMention = true))
                 val buffer = requireNotNull(db.bufferDao().observeById(channelId))
                 when (suppression) {
                     "foreground" -> tracker.set(channelId)

@@ -8,6 +8,7 @@ import androidx.room.Index
 import androidx.room.PrimaryKey
 import io.github.trevarj.motd.data.prefs.CompactNickBrackets
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.LayoutDensity
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.irc.proto.IrcIdentityRules
@@ -470,7 +471,7 @@ data class TimelineEventEntity(
     val ircFormattedText: String? = null,
     val isSelf: Boolean = false,
     @ColumnInfo(defaultValue = "0") val isBot: Boolean = false,
-    val hasMention: Boolean = false, // computed at insert by EventProcessor
+    val hasMention: Boolean = false,
     val highlightNick: String? = null,
     val highlightCaseMapping: String? = null,
     val replyToMsgid: String? = null,
@@ -505,10 +506,21 @@ data class TimelineEventEntity(
     /** Process-session owner prevents startup recovery from releasing an active presentation. */
     val notificationClaimOwner: String? = null,
     val soundHandled: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val directMention: Boolean = hasMention,
+    /** Null means no eligible conversation body has yet been classified. */
+    @ColumnInfo(defaultValue = "'NONE'") val keywordMatch: KeywordMatch? = null,
+    /** Monotonic observation id; migration snapshots predate all live classifications. */
+    val keywordClassifiedAtOrder: Long? = null,
+    /** Promotion captured at notification time, conditional on the canonical keyword alert surviving a merge. */
+    @ColumnInfo(defaultValue = "0") val notificationEligibilityFromKeyword: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val notificationWatchFromKeyword: Boolean = false,
 )
 
 /** Compatibility name retained while presentation callers migrate to canonical event ids. */
 typealias MessageEntity = TimelineEventEntity
+
+internal val TimelineEventEntity.alertsAsMention: Boolean
+    get() = directMention || keywordMatch == KeywordMatch.ALERT
 
 @Entity(
     tableName = "dcc_transfers",

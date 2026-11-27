@@ -1,6 +1,7 @@
 package io.github.trevarj.motd.ui.feed
 
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -14,6 +15,8 @@ import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotSelected
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.click
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.longClick
@@ -36,6 +39,7 @@ import androidx.paging.PagingData
 import androidx.paging.PagingSource
 import androidx.paging.PagingState
 import androidx.paging.compose.collectAsLazyPagingItems
+import io.github.trevarj.motd.R
 import io.github.trevarj.motd.UiDispatcherResetRule
 import io.github.trevarj.motd.ai.text.TextTermination
 import io.github.trevarj.motd.ai.text.TextTransformResult
@@ -45,7 +49,9 @@ import io.github.trevarj.motd.data.db.MessageKind
 import io.github.trevarj.motd.data.db.SearchHit
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.KeywordMatch
 import io.github.trevarj.motd.data.prefs.NickMentionStyle
+import io.github.trevarj.motd.data.visibility.ActivityFilter
 import io.github.trevarj.motd.data.visibility.MessageVisibilitySpec
 import io.github.trevarj.motd.dickord.LocalDickordLabsEnabled
 import io.github.trevarj.motd.ui.ai.AiTextSheet
@@ -62,6 +68,7 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.GraphicsMode
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -81,15 +88,15 @@ class GlobalFeedScreenTest {
 
     @Test
     fun feedUsesNicknameStyleWithoutInventingReceiptProvenance() {
-        assertReceiptTriggerRendering(mentions = false)
+        assertReceiptTriggerRendering(activityFilter = null)
     }
 
     @Test
     fun mentionsUsesNicknameStyleWithoutInventingReceiptProvenance() {
-        assertReceiptTriggerRendering(mentions = true)
+        assertReceiptTriggerRendering(activityFilter = ActivityFilter.MENTIONS)
     }
 
-    private fun assertReceiptTriggerRendering(mentions: Boolean) {
+    private fun assertReceiptTriggerRendering(activityFilter: ActivityFilter?) {
         val receipt =
             row(1, text = "Receipt Nick{ then Nick[!").let {
                 it.copy(
@@ -107,7 +114,7 @@ class GlobalFeedScreenTest {
             }
         val stream = flowOf(PagingData.from(listOf(receipt, historical, replyOnly)))
         var style by mutableStateOf(NickMentionStyle.BOLD)
-        setContent(stream, mentions = mentions, nickMentionStyle = { style })
+        setContent(stream, activityFilter = activityFilter, nickMentionStyle = { style })
         awaitText(receipt.message.text)
 
         fun assertSpans(
@@ -146,7 +153,7 @@ class GlobalFeedScreenTest {
         val original = row(42, sender = "fool", text = "Secret mention", kind = MessageKind.ACTION)
         val hit = original.copy(message = original.message.copy(normalizedActor = "fool", hasMention = true))
         val stream = flowOf(PagingData.from(listOf(hit)))
-        setContent(stream, mentions = true, visibilitySpec = {
+        setContent(stream, activityFilter = ActivityFilter.MENTIONS, visibilitySpec = {
             MessageVisibilitySpec(fools = setOf("fool"), foolsMode = FoolsMode.BLUR, foolPreferences = mapOf("fool" to FoolPreferences(notifyMentions = true)))
         })
         compose.onNodeWithText("Secret mention", substring = true, useUnmergedTree = true).assertDoesNotExist()
@@ -202,10 +209,10 @@ class GlobalFeedScreenTest {
 
     @Test
     @org.robolectric.annotation.Config(qualifiers = "w411dp-h891dp")
-    fun feedAndMentionsHoldsTranslateWithoutChangingOriginClicks() {
+    fun feedAndActivityHoldsTranslateWithoutChangingOriginClicks() {
         val hit = row(42, text = "The report is ready.")
         val stream = flowOf(PagingData.from(listOf(hit)))
-        var mentions by mutableStateOf(false)
+        var filter by mutableStateOf<ActivityFilter?>(null)
         var ai by mutableStateOf<AiTextUiState>(AiTextUiState.Closed)
         compose.setContent {
             MotdTheme(dynamicColor = false) {
@@ -213,7 +220,7 @@ class GlobalFeedScreenTest {
                     stream.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
                     false,
                     onOpenMessage = { room, event, time -> opened = Triple(room, event, time) },
-                    mentions = mentions,
+                    activityFilter = filter,
                     onTranslateMessage = { message ->
                         ai = AiTextUiState.Choosing(AiTextSource.StoredMessage(message.bufferId, message.id, message.msgid, message.text))
                     },
@@ -224,8 +231,8 @@ class GlobalFeedScreenTest {
                 }, onTargetSelected = {}, onDismiss = { ai = AiTextUiState.Closed }, onOpenSetup = {}, onManageStyles = {})
             }
         }
-        listOf(false, true).forEach { mentionMode ->
-            compose.runOnIdle { mentions = mentionMode }
+        for (scope in listOf(null) + ActivityFilter.entries) {
+            compose.runOnIdle { filter = scope }
             val text = compose.onNodeWithText(hit.message.text)
             text.performClick()
             compose.runOnIdle { assertEquals(Triple(hit.message.bufferId, 42L, hit.message.serverTime), opened) }
@@ -252,9 +259,9 @@ class GlobalFeedScreenTest {
         stream: Flow<PagingData<SearchHit>>,
         showNetwork: () -> Boolean = { false },
         dickordEnabled: Boolean = false,
-        mentions: Boolean = false,
-        showMentionsNavigation: Boolean = false,
-        onMentionsViewportAtNewest: ((Boolean) -> Unit)? = null,
+        activityFilter: ActivityFilter? = null,
+        showActivityNavigation: Boolean = false,
+        onActivityViewportAtNewest: ((Boolean) -> Unit)? = null,
         visibilitySpec: () -> MessageVisibilitySpec = { MessageVisibilitySpec() },
         nickMentionStyle: () -> NickMentionStyle = { NickMentionStyle.BOLD },
     ) {
@@ -275,18 +282,18 @@ class GlobalFeedScreenTest {
                             onOpenMessage = { bufferId, eventId, serverTime ->
                                 opened = Triple(bufferId, eventId, serverTime)
                             },
-                            mentions = mentions,
+                            activityFilter = activityFilter,
                             listState = listState,
                             visibilitySpec = visibilitySpec(),
                         )
-                        onMentionsViewportAtNewest?.let { callback ->
-                            ReportMentionsViewportAtNewest(
+                        onActivityViewportAtNewest?.let { callback ->
+                            ReportActivityViewportAtNewest(
                                 listState = listState,
                                 onAtNewestChanged = callback,
                             )
                         }
-                        if (showMentionsNavigation) {
-                            MentionsNavigationFab(
+                        if (showActivityNavigation) {
+                            ActivityNavigationFab(
                                 listState = listState,
                                 itemCount = rows.itemCount,
                                 modifier = Modifier.align(Alignment.BottomEnd),
@@ -332,24 +339,28 @@ class GlobalFeedScreenTest {
     }
 
     @Test
-    fun mentionsModeOpensTheExactStoredMessage() {
-        setContent(flowOf(PagingData.from(listOf(row(id = 21L, text = "hey nick")))), mentions = true)
+    fun keywordModeOpensTheExactStoredMessage() {
+        val hit =
+            row(id = 21L, text = "daily build").let {
+                it.copy(message = it.message.copy(hasMention = true, keywordMatch = KeywordMatch.SILENT))
+            }
+        setContent(flowOf(PagingData.from(listOf(hit))), activityFilter = ActivityFilter.KEYWORDS)
 
-        awaitTag("mentions_row_21")
-        compose.onNodeWithTag("mentions_list").assertIsDisplayed()
-        compose.onNodeWithText("hey nick").performClick()
+        awaitTag("activity_row_21")
+        compose.onNodeWithTag("activity_list").assertIsDisplayed()
+        compose.onNodeWithText("daily build").performClick()
 
         compose.runOnIdle { assertEquals(Triple(7L, 21L, 1_700_000_000_000L), opened) }
     }
 
     @Test
-    fun mentionsModeLabelsEveryRowEvenWhenTwoMentionsShareAChat() {
+    fun activityLabelsEveryRowEvenWhenTwoEventsShareAChat() {
         setContent(
             flowOf(PagingData.from(listOf(row(id = 22L, text = "later"), row(id = 21L, text = "earlier")))),
-            mentions = true,
+            activityFilter = ActivityFilter.ALL,
         )
 
-        awaitTag("mentions_row_21")
+        awaitTag("activity_row_21")
         assertEquals(2, compose.onAllNodesWithText("#kotlin").fetchSemanticsNodes().size)
     }
 
@@ -372,12 +383,12 @@ class GlobalFeedScreenTest {
                     it.copy(message = it.message.copy(normalizedActor = nick, hasMention = true))
                 }
             }
-        setContent(flowOf(PagingData.from(rows)), mentions = true, visibilitySpec = { spec })
-        awaitTag("mentions_row_31")
+        setContent(flowOf(PagingData.from(rows)), activityFilter = ActivityFilter.MENTIONS, visibilitySpec = { spec })
+        awaitTag("activity_row_31")
         compose.onNodeWithText("a private body").assertIsDisplayed()
         compose.onNodeWithText("b private body", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("c private body", useUnmergedTree = true).assertDoesNotExist()
-        compose.onNodeWithTag("mentions_row_33", useUnmergedTree = true).assertDoesNotExist()
+        compose.onNodeWithTag("activity_row_33", useUnmergedTree = true).assertDoesNotExist()
         compose.onNodeWithText("b · hidden").assertIsDisplayed().performClick()
         compose.runOnIdle { assertEquals(Triple(7L, 32L, 1_700_000_000_000L), opened) }
         compose.runOnIdle {
@@ -388,52 +399,75 @@ class GlobalFeedScreenTest {
     }
 
     @Test
-    fun mentionsNavigationMovesToAdjacentRowsAndHoldingUpReturnsToTheNewestMention() {
+    fun activityNavigationMovesToAdjacentRowsAndHoldingUpReturnsToNewest() {
         setContent(
             flowOf(PagingData.from((1L..80L).map { row(id = it, text = "mention $it") })),
-            mentions = true,
-            showMentionsNavigation = true,
+            activityFilter = ActivityFilter.ALL,
+            showActivityNavigation = true,
         )
 
-        awaitTag("mentions_navigation_down")
-        compose.onNodeWithTag("mentions_navigation_down").assertIsDisplayed().performClick()
+        awaitTag("activity_navigation_down")
+        compose.onNodeWithTag("activity_navigation_down").assertIsDisplayed().performClick()
         compose.waitUntil(timeoutMillis = 10_000) { (navigationListState?.firstVisibleItemIndex ?: 0) > 0 }
         val afterDown = checkNotNull(navigationListState).firstVisibleItemIndex
 
-        compose.onNodeWithTag("mentions_navigation_up").assertIsDisplayed().performClick()
+        compose.onNodeWithTag("activity_navigation_up").assertIsDisplayed().performClick()
         compose.waitUntil(timeoutMillis = 10_000) {
             navigationListState?.firstVisibleItemIndex == afterDown - 1
         }
 
-        compose.onNodeWithTag("mentions_navigation_down").performClick()
+        compose.onNodeWithTag("activity_navigation_down").performClick()
         compose.waitUntil(timeoutMillis = 10_000) { (navigationListState?.firstVisibleItemIndex ?: 0) > 0 }
-        compose.onNodeWithTag("mentions_navigation_up").performTouchInput { longClick() }
+        compose.onNodeWithTag("activity_navigation_up").performTouchInput { longClick() }
         compose.waitUntil(timeoutMillis = 10_000) { navigationListState?.firstVisibleItemIndex == 0 }
     }
 
     @Test
-    fun mentionsViewportReportsNewestOnlyAfterRowsArePresentedAndClearsOnScroll() {
+    fun activityViewportReportsNewestOnlyAfterRowsArePresentedAndClearsOnScroll() {
         val viewportStates = mutableListOf<Boolean>()
         setContent(
             flowOf(PagingData.from((1L..80L).map { row(id = it, text = "mention $it") })),
-            mentions = true,
-            showMentionsNavigation = true,
-            onMentionsViewportAtNewest = viewportStates::add,
+            activityFilter = ActivityFilter.ALL,
+            showActivityNavigation = true,
+            onActivityViewportAtNewest = viewportStates::add,
         )
 
-        awaitTag("mentions_row_1")
+        awaitTag("activity_row_1")
         compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == true }
-        compose.onNodeWithTag("mentions_navigation_down").performClick()
+        compose.onNodeWithTag("activity_navigation_down").performClick()
         compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == false }
     }
 
     @Test
-    fun mentionsRefreshKeepsTheVisibleMessageAndOffsetAcrossLiveAndHistoryInsertions() {
+    fun activityRefreshPinsTheFirstItemWhenReadingAtNewest() {
         val original = (1L..80L).map { row(id = it, text = "mention $it") }
         val stream = MutableStateFlow(PagingData.from(original))
-        setContent(stream, mentions = true)
-        awaitTag("mentions_row_1")
-        compose.onNodeWithTag("mentions_list").performScrollToIndex(30)
+        val viewportStates = mutableListOf<Boolean>()
+        setContent(stream, activityFilter = ActivityFilter.ALL, onActivityViewportAtNewest = viewportStates::add)
+        awaitTag("activity_row_1")
+        compose.waitUntil(timeoutMillis = 10_000) { viewportStates.lastOrNull() == true }
+
+        compose.runOnIdle {
+            stream.value = PagingData.from(listOf(row(100, text = "new activity")) + original)
+        }
+
+        awaitTag("activity_row_100")
+        compose.onNodeWithTag("activity_row_100").assertIsDisplayed()
+        compose.runOnIdle {
+            val state = checkNotNull(navigationListState)
+            assertEquals(0, state.firstVisibleItemIndex)
+            assertEquals(0, state.firstVisibleItemScrollOffset)
+            assertEquals(listOf(true), viewportStates)
+        }
+    }
+
+    @Test
+    fun activityRefreshKeepsTheVisibleMessageAndOffsetAcrossLiveAndHistoryInsertions() {
+        val original = (1L..80L).map { row(id = it, text = "mention $it") }
+        val stream = MutableStateFlow(PagingData.from(original))
+        setContent(stream, activityFilter = ActivityFilter.ALL)
+        awaitTag("activity_row_1")
+        compose.onNodeWithTag("activity_list").performScrollToIndex(30)
         compose.waitUntil(timeoutMillis = 10_000) { navigationListState?.firstVisibleItemIndex == 30 }
         var anchor: Any? = null
         var offset = 0
@@ -466,7 +500,7 @@ class GlobalFeedScreenTest {
             )
             assertEquals(offset, state.firstVisibleItemScrollOffset)
         }
-        compose.onNodeWithTag("mentions_row_31").assertIsDisplayed()
+        compose.onNodeWithTag("activity_row_31").assertIsDisplayed()
     }
 
     @Test
@@ -550,6 +584,94 @@ class GlobalFeedScreenTest {
         awaitTag("empty_state_ghost_rows")
         compose.onNodeWithTag("feed_list").assertDoesNotExist()
         compose.onNodeWithText("Nothing here yet").assertIsDisplayed()
+    }
+
+    @Test
+    fun activityChipsExposeSelectionAndChangeTheScopedEmptyMessage() {
+        var filter by mutableStateOf(ActivityFilter.ALL)
+        val empty = flowOf(PagingData.from<SearchHit>(emptyList(), settled(LoadState.NotLoading(endOfPaginationReached = true))))
+        compose.setContent {
+            CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
+                MotdTheme(dynamicColor = false) {
+                    Column {
+                        ActivityFilterChips(filter) { filter = it }
+                        GlobalFeedContent(
+                            rows = empty.collectAsLazyPagingItems(context = Dispatchers.Unconfined),
+                            showNetwork = false,
+                            onOpenMessage = { _, _, _ -> },
+                            activityFilter = filter,
+                        )
+                    }
+                }
+            }
+        }
+
+        val resources = RuntimeEnvironment.getApplication().resources
+        awaitText(resources.getString(R.string.activity_empty))
+        val all = compose.onNodeWithTag("activity_filter_all")
+        val mentions = compose.onNodeWithTag("activity_filter_mentions")
+        val keywords = compose.onNodeWithTag("activity_filter_keywords")
+        all.assertIsSelected()
+        mentions.assertIsNotSelected().performClick()
+        all.assertIsNotSelected()
+        mentions.assertIsSelected()
+        compose.onNodeWithText(resources.getString(R.string.activity_mentions_empty)).assertIsDisplayed()
+        keywords.assertIsNotSelected().performClick()
+        mentions.assertIsNotSelected()
+        keywords.assertIsSelected()
+        compose.onNodeWithText(resources.getString(R.string.activity_keywords_empty)).assertIsDisplayed()
+    }
+
+    @Test
+    fun switchingActivityFilterClearsPreviousRowsDuringLoadingAndFailure() {
+        val allPage = ActivityPage(ActivityFilter.ALL, flowOf(PagingData.from((1L..80L).map { row(it) }))) {}
+        // Hold the replacement presenter on its first load until the old rows are checked.
+        val keywordPages = MutableStateFlow(PagingData.from<SearchHit>(emptyList(), sourceLoadStates = settled(LoadState.Loading)))
+        val keywordsPage = ActivityPage(ActivityFilter.KEYWORDS, keywordPages) {}
+        var page by mutableStateOf(allPage)
+        compose.setContent {
+            CompositionLocalProvider(LocalLottieMotionEnabled provides false) {
+                MotdTheme(dynamicColor = false) {
+                    ActivityFeed(
+                        page = page,
+                        onFilterSelected = { if (it == ActivityFilter.KEYWORDS) page = keywordsPage },
+                        showNetwork = false,
+                        visibilitySpec = MessageVisibilitySpec(),
+                        onBack = {},
+                        onOpenMessage = { _, _, _ -> },
+                    )
+                }
+            }
+        }
+
+        awaitTag("activity_row_1")
+        awaitTag("activity_navigation_down")
+        val keywords = compose.onNodeWithTag("activity_filter_keywords")
+        keywords.performClick()
+        keywords.assertIsSelected()
+        compose.onNodeWithTag("activity_row_1").assertDoesNotExist()
+        compose.onNodeWithTag("activity_navigation_down").assertDoesNotExist()
+
+        compose.runOnIdle {
+            keywordPages.value =
+                PagingData.from(emptyList(), sourceLoadStates = settled(LoadState.Error(IllegalStateException("Keywords load failed"))))
+        }
+        val resources = RuntimeEnvironment.getApplication().resources
+        awaitText(resources.getString(R.string.activity_error_title))
+        compose.onNodeWithTag("activity_row_1").assertDoesNotExist()
+        compose.onNodeWithTag("activity_navigation_down").assertDoesNotExist()
+        compose.onNodeWithText(resources.getString(R.string.feed_retry)).assertIsEnabled()
+        compose.runOnIdle {
+            keywordPages.value =
+                PagingData.from(
+                    listOf(row(100, text = "new keyword")),
+                    sourceLoadStates = settled(LoadState.NotLoading(endOfPaginationReached = true)),
+                )
+        }
+        awaitTag("activity_row_100")
+        compose.onNodeWithTag("activity_row_100").assertIsDisplayed()
+        compose.onNodeWithText(resources.getString(R.string.activity_error_title)).assertDoesNotExist()
+        keywords.assertIsSelected()
     }
 
     @Test

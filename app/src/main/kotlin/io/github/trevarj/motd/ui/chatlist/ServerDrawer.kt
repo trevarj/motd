@@ -29,7 +29,7 @@ import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.QrCode2
 import androidx.compose.material.icons.filled.QrCodeScanner
-import androidx.compose.material.icons.outlined.AlternateEmail
+import androidx.compose.material.icons.outlined.Bolt
 import androidx.compose.material.icons.outlined.Cloud
 import androidx.compose.material.icons.outlined.CloudOff
 import androidx.compose.material.icons.outlined.Dns
@@ -139,8 +139,8 @@ fun ServerDrawerContent(
     onToggleOffline: () -> Unit,
     onOpenSettings: () -> Unit,
     onOpenFeed: () -> Unit = {},
-    onOpenMentions: () -> Unit = {},
-    mentionsEnabled: Boolean = true,
+    onOpenActivity: () -> Unit = {},
+    activityEnabled: Boolean = true,
     /** Global Feed lab flag; its shortcut exists only while the lab is on. */
     globalFeedEnabled: Boolean = false,
     onMarkAllRead: () -> Unit,
@@ -240,14 +240,14 @@ fun ServerDrawerContent(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
                 maxItemsInEachRow = 4,
             ) {
-                if (mentionsEnabled) {
-                    val label = stringResource(R.string.mentions_title)
+                if (activityEnabled) {
+                    val label = stringResource(R.string.activity_title)
                     DrawerActionTile(
-                        icon = Icons.Outlined.AlternateEmail,
+                        icon = Icons.Outlined.Bolt,
                         visibleLabel = label,
                         accessibilityLabel = label,
-                        onClick = onOpenMentions,
-                        modifier = Modifier.weight(1f).testTag("drawer_open_mentions"),
+                        onClick = onOpenActivity,
+                        modifier = Modifier.weight(1f).testTag("drawer_open_activity"),
                     )
                 }
                 if (globalFeedEnabled) {
@@ -284,7 +284,7 @@ fun ServerDrawerContent(
                     modifier = Modifier.weight(1f).testTag("drawer_open_settings"),
                 )
                 // Weighted blanks keep a partial last row in quarter-width cells.
-                val actionCount = 3 + (if (mentionsEnabled) 1 else 0) + (if (globalFeedEnabled) 1 else 0)
+                val actionCount = 3 + (if (activityEnabled) 1 else 0) + (if (globalFeedEnabled) 1 else 0)
                 val missingSlots = (4 - actionCount % 4) % 4
                 repeat(missingSlots) { Spacer(Modifier.weight(1f)) }
             }

@@ -15,14 +15,15 @@ import io.github.trevarj.motd.avatar.AvatarPrefs
 import io.github.trevarj.motd.data.prefs.ChatListSwipeAction
 import io.github.trevarj.motd.data.prefs.ContentPreviewConfig
 import io.github.trevarj.motd.data.prefs.ContentPreviewPrefs
+import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.KeywordHighlightRule
 import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.NicknameTapAction
 import io.github.trevarj.motd.data.prefs.PresenceMode
 import io.github.trevarj.motd.data.prefs.ReplyConfig
 import io.github.trevarj.motd.data.prefs.ReplyPrefs
 import io.github.trevarj.motd.data.prefs.Settings
-import io.github.trevarj.motd.data.prefs.SettingsRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -56,7 +57,7 @@ internal suspend fun audioCacheClearEvent(clear: suspend () -> Unit): AudioCache
 class ChatSettingsViewModel
     @Inject
     constructor(
-        private val settingsRepository: SettingsRepository,
+        private val settingsRepository: DataStoreSettingsRepository,
         private val replyPrefs: ReplyPrefs,
         private val contentPreviewPrefs: ContentPreviewPrefs,
         private val voicePrefs: VoicePrefs,
@@ -99,6 +100,11 @@ class ChatSettingsViewModel
         fun setMentionsEnabled(enabled: Boolean) = launch { settingsRepository.setMentionsEnabled(enabled) }
 
         fun setMentionsPlacement(placement: MentionsPlacement) = launch { settingsRepository.setMentionsPlacement(placement) }
+
+        internal suspend fun editKeywordHighlightRule(
+            previous: KeywordHighlightRule?,
+            replacement: KeywordHighlightRule?,
+        ): Boolean = settingsRepository.editKeywordHighlightRule(previous, replacement)
 
         fun setShowRedactedMessages(value: Boolean) = launch { settingsRepository.setShowRedactedMessages(value) }
 

@@ -16,6 +16,7 @@ import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertIsNotDisplayed
 import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.click
@@ -28,6 +29,7 @@ import androidx.compose.ui.test.junit4.v2.createEmptyComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performScrollToNode
@@ -59,6 +61,7 @@ import io.github.trevarj.motd.data.prefs.ContentPreviewPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.FoolPreferences
 import io.github.trevarj.motd.data.prefs.FoolsMode
+import io.github.trevarj.motd.data.prefs.MentionsPlacement
 import io.github.trevarj.motd.data.prefs.PaletteChoice
 import io.github.trevarj.motd.data.prefs.PaletteMode
 import io.github.trevarj.motd.data.prefs.WallpaperChatChoice
@@ -876,6 +879,91 @@ class RequiredHeadlessE2eTest {
         milestones.record("notification_restore_stable", "buffer=$bufferId event=${firstUnread.id}")
     }
 
+    private fun exerciseKeywordActivity(
+        bootstrap: E2eBootstrap,
+        network: BootstrappedNetwork,
+        bufferId: Long,
+    ) {
+        val preferences = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
+        val original = runBlocking { preferences.settings.first() }
+        val settings = SettingsRobot(compose)
+        val timeline = TimelineRobot(compose)
+        val chats = ChatListRobot(compose)
+        val word = "activity${bootstrap.args.runId.filter(Char::isLetterOrDigit).takeLast(12)}"
+        try {
+            runBlocking {
+                preferences.setMentionsEnabled(true)
+                preferences.setMentionsPlacement(MentionsPlacement.DRAWER)
+            }
+            settings.open()
+            settings.chat()
+            settings.scrollToAndClick("keyword_highlight_settings")
+            settings.click("keyword_highlight_add")
+            settings.replace("keyword_highlight_phrase", word)
+            settings.click("keyword_highlight_save")
+            settings.awaitTagGone("keyword_highlight_phrase")
+            runBlocking { withTimeout(10_000) { preferences.settings.first { it.keywordHighlightRules.any { rule -> rule.phrase == word } } } }
+            settings.click("settings_back")
+            settings.returnToRoot()
+            settings.click("settings_back")
+            chats.awaitTag("chatlist_row_$bufferId")
+
+            val ready = requireNotNull(bootstrap.seams.connections().clientFor(network.childId)).state.value as IrcClientState.Ready
+            val keywordText = "$word report arrived"
+            val mentionText = "${ready.nick}: direct mention"
+            val tailText = "activity viewport tail ${bootstrap.args.runId}"
+            FixtureIrcClient.connect(bootstrap.args).use { peer ->
+                peer.sendMessage(bootstrap.args.channel, keywordText)
+                peer.sendMessage(bootstrap.args.channel, mentionText)
+                repeat(36) { index -> peer.sendMessage(bootstrap.args.channel, "Filler line $index for the normal chat viewport") }
+                peer.sendMessage(bootstrap.args.channel, tailText)
+                peer.flushThroughServer(word)
+            }
+            val probe = MessageLifecycleProbe(bootstrap.seams.search(), milestones)
+            val keyword = runBlocking { probe.awaitCanonicalFromAnySender(keywordText, bufferId) }
+            val mention = runBlocking { probe.awaitCanonicalFromAnySender(mentionText, bufferId) }
+            val tail = runBlocking { probe.awaitCanonicalFromAnySender(tailText, bufferId) }
+            chats.open(bufferId)
+            timeline.awaitTag("chat_timeline")
+            timeline.awaitEntryVeilLifted()
+            if (timeline.isPresent("chat_scroll_to_bottom_fab")) timeline.scrollToBottom()
+            timeline.assertMessageVisible(tail.tag())
+            compose.onNodeWithTag(keyword.tag(), useUnmergedTree = true).assertIsNotDisplayed()
+            awaitWhileComposing("baseline chat read through tail for buffer=$bufferId", probeTimeoutMs = 20_000) {
+                awaitMarkerAtLeast(bootstrap, bufferId, tail.anchor())
+            }
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            chats.awaitTag("chatlist_row_$bufferId")
+            val keywordRow = "activity_row_${keyword.id}"
+            val mentionRow = "activity_row_${mention.id}"
+            chats.click("chatlist_selection_close")
+            chats.click("drawer_open_activity")
+            chats.awaitTag(keywordRow)
+            chats.awaitTag(mentionRow)
+            chats.click("activity_filter_mentions")
+            chats.awaitTag(mentionRow)
+            chats.awaitTagGone(keywordRow)
+            chats.click("activity_filter_keywords")
+            chats.awaitTag(keywordRow)
+            chats.awaitTagGone(mentionRow)
+            compose.onNodeWithText(keywordText).assertIsDisplayed().performClick()
+            timeline.awaitTag("chat_timeline")
+            timeline.awaitEntryVeilLifted()
+            timeline.assertMessageVisible(keyword.tag())
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            chats.awaitTag("activity_filter_keywords")
+            requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
+            chats.awaitTag("chatlist_row_$bufferId")
+            milestones.record("activity_keyword_origin_visible", "buffer=$bufferId event=${keyword.id}")
+        } finally {
+            runBlocking {
+                preferences.setKeywordHighlightRules(original.keywordHighlightRules)
+                preferences.setMentionsPlacement(original.mentionsPlacement)
+                preferences.setMentionsEnabled(original.mentionsEnabled)
+            }
+        }
+    }
+
     @Test
     fun bootstrappedNavigationSettingsAndBouncerSmoke() {
         val (bootstrap, network) = launchBootstrapped()
@@ -883,6 +971,7 @@ class RequiredHeadlessE2eTest {
             requireNotNull(scenario.scenario).onActivity { it.onBackPressedDispatcher.onBackPressed() }
         }
         val roomId = runBlocking { BufferProbe(bootstrap.seams.buffers(), milestones).awaitJoinedChannel(network.childId, bootstrap.args.channel) }
+        exerciseKeywordActivity(bootstrap, network, roomId)
         val settings = DataStoreSettingsRepository(InstrumentationRegistry.getInstrumentation().targetContext)
         val originalSettings = runBlocking { settings.settings.first() }
         val originalAppearance =
