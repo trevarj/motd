@@ -8,13 +8,14 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
 import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
-import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
@@ -57,11 +58,25 @@ class AttachmentPrefsImpl
 
         override suspend fun addUpload(record: UploadRecord) {
             store.edit { prefs ->
-                val records =
-                    (prefs[HISTORY]?.let(::decodeHistory).orEmpty())
-                        .filterNot { it.url == record.url }
-                        .let { listOf(record) + it }
-                        .take(MAX_UPLOAD_HISTORY)
+                val records = prefs[HISTORY]?.let(::decodeHistory) ?: mutableListOf()
+                val index = records.indexOfFirst { it.url == record.url }
+                val favorite = if (index < 0) record.favorite else records.removeAt(index).favorite
+                records.add(0, if (record.favorite == favorite) record else record.copy(favorite = favorite))
+                if (!favorite) records.trimRecents()
+                prefs[HISTORY] = encodeHistory(records)
+            }
+        }
+
+        override suspend fun setUploadFavorite(
+            url: String,
+            favorite: Boolean,
+        ) {
+            store.edit { prefs ->
+                val records = prefs[HISTORY]?.let(::decodeHistory) ?: return@edit
+                val index = records.indexOfFirst { it.url == url }
+                if (index < 0 || records[index].favorite == favorite) return@edit
+                records[index] = records[index].copy(favorite = favorite)
+                if (!favorite) records.trimRecents()
                 prefs[HISTORY] = encodeHistory(records)
             }
         }
@@ -75,18 +90,24 @@ class AttachmentPrefsImpl
                 val records = prefs[HISTORY]?.let(::decodeHistory) ?: return@edit
                 val index = records.indexOfFirst { it.url == record.url && it.receiptId == receiptId }
                 if (index == -1) return@edit
-                val updated = records.toMutableList()
-                updated[index] = records[index].copy(preview = preview)
-                prefs[HISTORY] = encodeHistory(updated)
+                records[index] = records[index].copy(preview = preview)
+                prefs[HISTORY] = encodeHistory(records)
             }
         }
 
         override suspend fun removeUpload(url: String) {
-            store.edit { prefs -> prefs[HISTORY] = encodeHistory(prefs[HISTORY]?.let(::decodeHistory).orEmpty().filterNot { it.url == url }) }
+            store.edit { prefs ->
+                val records = prefs[HISTORY]?.let(::decodeHistory) ?: return@edit
+                if (records.removeAll { it.url == url }) prefs[HISTORY] = encodeHistory(records)
+            }
         }
 
         override suspend fun clearUploadHistory() {
-            store.edit { it.remove(HISTORY) }
+            store.edit { prefs ->
+                val records = prefs[HISTORY]?.let(::decodeHistory) ?: return@edit
+                records.removeAll { !it.favorite }
+                if (records.isEmpty()) prefs.remove(HISTORY) else prefs[HISTORY] = encodeHistory(records)
+            }
         }
 
         private fun encodeConfig(c: PasteBackendConfig) =
@@ -156,6 +177,7 @@ class AttachmentPrefsImpl
                             put("token", r.deletionToken)
                             put("endpoint", r.endpoint)
                             r.receiptId?.let { put("receiptId", it) }
+                            if (r.favorite) put("favorite", true)
                             r.preview?.takeIf { it.isBounded() }?.let {
                                 put("preview", json.encodeToJsonElement(LocalUploadPreview.serializer(), it))
                             }
@@ -164,37 +186,51 @@ class AttachmentPrefsImpl
                 }
             }.toString()
 
-        private fun decodeHistory(raw: String): List<UploadRecord> =
-            runCatching {
-                json
-                    .parseToJsonElement(raw)
-                    .jsonArray
-                    .mapNotNull { element ->
-                        val o = element.jsonObject
-                        val url = o["url"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                        val endpoint = o["endpoint"]?.jsonPrimitive?.contentOrNull
-                        val backendValue = o["backend"]?.jsonPrimitive?.content
-                        val backend =
-                            backendValue?.let { runCatching { AttachmentBackend.valueOf(it) }.getOrNull() }
-                                ?: legacyAttachmentBackend(backendValue, endpoint)
-                        UploadRecord(
-                            url,
-                            backend,
-                            o["name"]?.jsonPrimitive?.content ?: url,
-                            o["mime"]?.jsonPrimitive?.contentOrNull,
-                            o["size"]?.jsonPrimitive?.longOrNull,
-                            o["at"]?.jsonPrimitive?.longOrNull ?: 0,
-                            o["token"]?.jsonPrimitive?.contentOrNull,
-                            endpoint,
-                            o["preview"]?.let { encoded ->
-                                runCatching { json.decodeFromJsonElement(LocalUploadPreview.serializer(), encoded) }
-                                    .getOrNull()
-                                    ?.takeIf { it.isBounded() }
-                            },
-                            receiptId = (o["receiptId"] as? JsonPrimitive)?.contentOrNull,
-                        )
-                    }.take(MAX_UPLOAD_HISTORY)
-            }.getOrDefault(emptyList())
+        private fun decodeHistory(raw: String): MutableList<UploadRecord>? {
+            val elements = runCatching { json.parseToJsonElement(raw) as? JsonArray }.getOrNull() ?: return null
+            val byUrl = linkedMapOf<String, UploadRecord>()
+            for (element in elements) {
+                val row = element as? JsonObject ?: continue
+                val url = (row["url"] as? JsonPrimitive)?.contentOrNull ?: continue
+                val favorite = (row["favorite"] as? JsonPrimitive)?.takeUnless { it.isString }?.booleanOrNull == true
+                val newest = byUrl[url]
+                // Keep the newest receipt, but do not lose a star from an older duplicate.
+                if (newest != null) {
+                    if (favorite && !newest.favorite) byUrl[url] = newest.copy(favorite = true)
+                    continue
+                }
+                val endpoint = (row["endpoint"] as? JsonPrimitive)?.contentOrNull
+                val backendValue = (row["backend"] as? JsonPrimitive)?.contentOrNull
+                val backend =
+                    backendValue?.let { runCatching { AttachmentBackend.valueOf(it) }.getOrNull() }
+                        ?: legacyAttachmentBackend(backendValue, endpoint)
+                byUrl[url] =
+                    UploadRecord(
+                        url,
+                        backend,
+                        (row["name"] as? JsonPrimitive)?.contentOrNull ?: url,
+                        (row["mime"] as? JsonPrimitive)?.contentOrNull,
+                        (row["size"] as? JsonPrimitive)?.longOrNull,
+                        (row["at"] as? JsonPrimitive)?.longOrNull ?: 0,
+                        (row["token"] as? JsonPrimitive)?.contentOrNull,
+                        endpoint,
+                        row["preview"]?.let { encoded ->
+                            runCatching { json.decodeFromJsonElement(LocalUploadPreview.serializer(), encoded) }
+                                .getOrNull()
+                                ?.takeIf { it.isBounded() }
+                        },
+                        receiptId = (row["receiptId"] as? JsonPrimitive)?.contentOrNull,
+                        favorite = favorite,
+                    )
+            }
+            if (elements.isNotEmpty() && byUrl.isEmpty()) return null
+            return byUrl.values.toMutableList().apply { trimRecents() }
+        }
+
+        private fun MutableList<UploadRecord>.trimRecents() {
+            var recents = 0
+            removeAll { !it.favorite && ++recents > MAX_UPLOAD_HISTORY }
+        }
     }
 
 internal fun legacyAttachmentBackend(

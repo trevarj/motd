@@ -30,19 +30,24 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.assertIsEnabled
 import androidx.compose.ui.test.assertIsNotEnabled
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
+import androidx.compose.ui.test.assertIsSelected
 import androidx.compose.ui.test.assertTextEquals
 import androidx.compose.ui.test.doubleClick
 import androidx.compose.ui.test.hasAnyAncestor
 import androidx.compose.ui.test.hasAnyDescendant
 import androidx.compose.ui.test.hasClickAction
+import androidx.compose.ui.test.hasContentDescription
 import androidx.compose.ui.test.hasSetTextAction
 import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isNotEnabled
+import androidx.compose.ui.test.isOn
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onAllNodesWithText
@@ -51,8 +56,10 @@ import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performScrollToNode
 import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTextInput
+import androidx.compose.ui.test.performTextReplacement
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
 import androidx.compose.ui.text.TextRange
@@ -388,35 +395,153 @@ class AttachmentConfirmationSheetUiTest {
     }
 
     @Test
-    fun clearHistoryRequiresConfirmationAndClearsPersistedRecentsWithoutRemoteDeletion() {
-        val prefs = AttachmentPrefsImpl(context)
-        val records =
-            listOf(
-                UploadRecord("https://files.example/photo", AttachmentBackend.CRAFTERBIN, "photo.png", "image/png", deletionToken = "token"),
-                UploadRecord("https://files.example/text", AttachmentBackend.X0_AT, "text.txt", "text/plain"),
-            )
-        runBlocking {
-            prefs.clearUploadHistory()
-            records.forEach { prefs.addUpload(it) }
-        }
-        showConditionalAttachments(prefs = prefs)
+    fun clearRecentsRequiresConfirmationAndPreservesFavoritesInAnActiveFilter() {
+        val kept = UploadRecord("https://files.example/starred", AttachmentBackend.CRAFTERBIN, "photo.png", "image/png", deletionToken = "kept-token", favorite = true)
+        val removed = UploadRecord("https://files.example/photo", AttachmentBackend.CRAFTERBIN, "photo-copy.png", "image/png", deletionToken = "removed-token")
+        val hidden = UploadRecord("https://files.example/text", AttachmentBackend.X0_AT, "text.txt", "text/plain")
+        val prefs = saveUploadRecords(listOf(kept, removed, hidden))
+        var remoteDeletes = 0
+        awaitUploadRecords(showConditionalAttachments(prefs = prefs, onDeleteAttempt = { remoteDeletes++ }))
 
-        compose.onNodeWithTag("attachment_clear_history").performScrollTo().performClick()
+        showUploadControl("attachment_upload_search").performTextReplacement("  PHOTO ")
+        showUploadControl("attachment_upload_favorites").performClick().assertIsSelected()
+        showUploadRow(kept)
+        compose.onNode(uploadRow(removed), useUnmergedTree = true).assertDoesNotExist()
+        showUploadControl("attachment_clear_history").assertIsEnabled().performClick()
         compose.onNodeWithTag("attachment_clear_history_confirm").assertIsDisplayed()
-        assertEquals(records.reversed(), runBlocking { prefs.recentUploads.first() })
         compose.onNodeWithText(context.getString(R.string.action_cancel)).performClick()
         compose.onNodeWithTag("attachment_clear_history_confirm").assertDoesNotExist()
-        assertEquals(records.reversed(), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+        assertEquals(listOf(hidden, removed, kept), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
 
-        compose.onNodeWithTag("attachment_clear_history").performScrollTo().performClick()
+        showUploadControl("attachment_clear_history").performClick()
         compose.onNodeWithTag("attachment_clear_history_confirm").performClick()
         compose.waitUntil(5_000) {
-            compose.onAllNodesWithTag("attachment_clear_history").fetchSemanticsNodes().isEmpty()
+            compose.onAllNodes(hasTestTag("attachment_clear_history") and isNotEnabled()).fetchSemanticsNodes().isNotEmpty()
         }
-        compose.onNodeWithText("photo.png").assertDoesNotExist()
-        compose.onNodeWithText("text.txt").assertDoesNotExist()
-        assertEquals(emptyList<UploadRecord>(), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+        showUploadRow(kept)
+        assertEquals(listOf(kept), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+        compose.runOnIdle { assertEquals(0, remoteDeletes) }
     }
+
+    @Test
+    fun librarySearchMatchesNamesAndUrlsButNotDeletionCredentials() {
+        val image =
+            UploadRecord(
+                url = "https://files.example/image-one",
+                backend = AttachmentBackend.CUSTOM_0X0,
+                displayName = "Straße.png",
+                deletionToken = "private-delete-token",
+                endpoint = "https://private-delete-endpoint.example/upload",
+            )
+        val notes = UploadRecord("https://files.example/meeting-two", AttachmentBackend.X0_AT, "notes.txt", "text/plain")
+        val credentials = listOf("private-delete-token", "private-delete-endpoint")
+        awaitUploadRecords(showConditionalAttachments(prefs = saveUploadRecords(listOf(image, notes))))
+
+        showUploadControl("attachment_upload_library")
+        showUploadControl("attachment_upload_search").performTextReplacement("  STRASSE ")
+        showUploadRow(image)
+        compose.onNode(uploadRow(notes), useUnmergedTree = true).assertDoesNotExist()
+        credentials.forEach { compose.onNodeWithText(it, substring = true).assertDoesNotExist() }
+
+        showUploadControl("attachment_upload_search").performTextReplacement("  MEETING-TWO ")
+        showUploadRow(notes)
+        compose.onNode(uploadRow(image), useUnmergedTree = true).assertDoesNotExist()
+
+        credentials.forEach { credential ->
+            showUploadControl("attachment_upload_search").performTextReplacement(credential)
+            showUploadControl("attachment_upload_empty").assertTextEquals(context.getString(R.string.upload_library_no_results))
+            compose.onNode(uploadRow(image), useUnmergedTree = true).assertDoesNotExist()
+        }
+    }
+
+    @Test
+    fun selectedFavoritesFilterDropsARecordWhenUnstarredWithoutRemovingItsLink() {
+        val photo = UploadRecord("https://files.example/photo", AttachmentBackend.CRAFTERBIN, "photo.png", "image/png")
+        val notes = UploadRecord("https://files.example/text", AttachmentBackend.X0_AT, "notes.txt", "text/plain")
+        val prefs = saveUploadRecords(listOf(photo, notes))
+        awaitUploadRecords(showConditionalAttachments(prefs = prefs))
+        showUploadRow(photo)
+
+        val photoLabel = context.getString(R.string.upload_library_favorite, photo.displayName)
+        val star = hasTestTag("attachment_recent_favorite") and hasContentDescription(photoLabel)
+        compose.onNode(star, useUnmergedTree = true).assertIsOff().performClick()
+        val checked = star and isOn()
+        compose.waitUntil(5_000) {
+            compose.onAllNodes(checked, useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+        }
+        showUploadControl("attachment_upload_favorites").performClick().assertIsSelected()
+        showUploadRow(photo)
+        compose.onNode(uploadRow(notes), useUnmergedTree = true).assertDoesNotExist()
+
+        compose.onNode(star, useUnmergedTree = true).assertIsOn().performClick()
+        compose.waitUntil(5_000) {
+            compose.onAllNodesWithTag("attachment_upload_empty").fetchSemanticsNodes().isNotEmpty()
+        }
+        compose.onNode(uploadRow(photo), useUnmergedTree = true).assertDoesNotExist()
+        showUploadControl("attachment_upload_favorites").performClick()
+        showUploadRow(photo)
+        compose.onNode(star, useUnmergedTree = true).assertIsOff()
+        assertEquals(listOf(notes, photo), runBlocking { AttachmentPrefsImpl(context).recentUploads.first() })
+    }
+
+    @Test
+    fun avatarSourcesKeepImageRecentsWithoutComposerLibraryControls() {
+        val photo = UploadRecord("https://files.example/photo", AttachmentBackend.CRAFTERBIN, "photo.png", "image/png")
+        val notes = UploadRecord("https://files.example/text", AttachmentBackend.X0_AT, "notes.txt", "text/plain")
+        var selected: String? = null
+        awaitUploadRecords(
+            showConditionalAttachments(
+                prefs = saveUploadRecords(listOf(photo, notes)),
+                imageOnly = true,
+                onInsertUrl = { selected = it },
+            ),
+        )
+        compose.onNodeWithText(context.getString(R.string.avatar_image_file)).assertIsDisplayed()
+        showUploadRow(photo)
+        compose.onNodeWithTag("attachment_upload_library").assertDoesNotExist()
+        compose.onNodeWithTag("attachment_upload_search").assertDoesNotExist()
+        compose.onNodeWithTag("attachment_upload_favorites").assertDoesNotExist()
+        compose.onNodeWithTag("attachment_recent_favorite").assertDoesNotExist()
+        compose.onNode(uploadRow(notes), useUnmergedTree = true).assertDoesNotExist()
+        showUploadRow(photo).performClick()
+        compose.runOnIdle { assertEquals(photo.url, selected) }
+    }
+
+    private fun saveUploadRecords(records: List<UploadRecord>) =
+        AttachmentPrefsImpl(context).also { prefs ->
+            runBlocking {
+                prefs.recentUploads.first().forEach { prefs.removeUpload(it.url) }
+                records.forEach { prefs.addUpload(it) }
+            }
+        }
+
+    private fun awaitUploadRecords(viewModel: AttachmentViewModel) {
+        compose.waitUntil(5_000) { viewModel.recent.value.isNotEmpty() }
+    }
+
+    private fun uploadRow(record: UploadRecord) = hasTestTag("attachment_recent_row") and hasAnyDescendant(hasText(record.displayName))
+
+    private fun scrollUploadSourceTo(target: SemanticsMatcher) {
+        val sheet = hasTestTag("attachment_source_sheet")
+        val expand = SemanticsMatcher.keyIsDefined(SemanticsActions.Expand) and (sheet or hasAnyAncestor(sheet))
+        val expandActions = compose.onAllNodes(expand, useUnmergedTree = true)
+        if (expandActions.fetchSemanticsNodes().isNotEmpty()) {
+            expandActions[0].performSemanticsAction(SemanticsActions.Expand)
+        }
+        compose.onNodeWithTag("attachment_source_list", useUnmergedTree = true).performScrollToNode(target)
+    }
+
+    private fun showUploadRow(record: UploadRecord) =
+        uploadRow(record).let { row ->
+            scrollUploadSourceTo(row)
+            compose.onNode(row, useUnmergedTree = true).assertIsDisplayed()
+        }
+
+    private fun showUploadControl(tag: String) =
+        compose.onNodeWithTag(tag).also {
+            scrollUploadSourceTo(hasTestTag(tag))
+            it.assertIsDisplayed()
+        }
 
     @Test
     fun recentUploadsRenderLocalMediaTextAndLegacyMetadata() {
@@ -442,38 +567,46 @@ class AttachmentConfirmationSheetUiTest {
         val text = upload("paste.txt", "text/plain", LocalUploadPreview(textSnippet = "Local preview ✓"))
         val pdf = upload("notes.pdf", "application/pdf", LocalUploadPreview(thumbnailBase64 = thumbnail))
         val legacy = upload("old.zip", "application/zip")
-        val prefs = AttachmentPrefsImpl(context)
-        runBlocking {
-            prefs.clearUploadHistory()
-            listOf(image, video, audio, text, pdf, legacy).forEach { prefs.addUpload(it) }
-        }
+        val records = listOf(image, video, audio, text, pdf, legacy)
+        val prefs = saveUploadRecords(records)
         var insertedUrl: String? = null
         var completed: UploadRecord? = null
-        showConditionalAttachments(prefs = prefs, onInsertUrl = { insertedUrl = it }, onUploaded = { completed = it })
+        awaitUploadRecords(showConditionalAttachments(prefs = prefs, onInsertUrl = { insertedUrl = it }, onUploaded = { completed = it }))
 
-        compose.waitUntil(5_000) {
-            compose.onAllNodesWithTag("attachment_record_thumbnail", useUnmergedTree = true).fetchSemanticsNodes().size == 3
-        }
-
-        fun row(record: UploadRecord) = hasTestTag("attachment_recent_row") and hasAnyDescendant(hasText(record.displayName))
+        fun descendant(
+            record: UploadRecord,
+            tag: String,
+        ) = hasTestTag(tag) and hasAnyAncestor(uploadRow(record))
 
         fun view(
             record: UploadRecord,
             tag: String,
-        ) = compose.onNode(hasTestTag(tag) and hasAnyAncestor(row(record)), useUnmergedTree = true)
+        ) = compose.onNode(descendant(record, tag), useUnmergedTree = true)
 
-        listOf(image, video, audio, text, pdf, legacy).forEach { record ->
-            compose.onNode(row(record), useUnmergedTree = true).performScrollTo()
+        records.forEach { record ->
+            showUploadRow(record)
             compose.onNodeWithText("${record.mimeType} • 2.0 KiB", useUnmergedTree = true).assertIsDisplayed()
             when (record) {
-                image, video, pdf -> view(record, "attachment_record_thumbnail").assertIsDisplayed()
-                else -> view(record, "attachment_record_fallback").assertIsDisplayed()
+                image, video, pdf -> {
+                    val thumbnailTag = "attachment_record_thumbnail"
+                    compose.waitUntil(5_000) {
+                        compose.onAllNodes(descendant(record, thumbnailTag), useUnmergedTree = true).fetchSemanticsNodes().isNotEmpty()
+                    }
+                    view(record, thumbnailTag).assertIsDisplayed()
+                }
+
+                else -> {
+                    view(record, "attachment_record_fallback").assertIsDisplayed()
+                }
             }
         }
-        view(video, "attachment_recent_duration").performScrollTo().assertTextEquals("0:12")
-        view(audio, "attachment_recent_duration").performScrollTo().assertTextEquals("1:05")
-        view(text, "attachment_recent_text").performScrollTo().assertTextEquals("Local preview ✓")
-        view(text, "attachment_recent_more").performScrollTo().performClick()
+        showUploadRow(video)
+        view(video, "attachment_recent_duration").assertTextEquals("0:12")
+        showUploadRow(audio)
+        view(audio, "attachment_recent_duration").assertTextEquals("1:05")
+        showUploadRow(text)
+        view(text, "attachment_recent_text").assertTextEquals("Local preview ✓")
+        view(text, "attachment_recent_more").performClick()
         compose.onNodeWithText(context.getString(R.string.upload_copy_link)).performClick()
         compose.runOnIdle {
             val clipboard = context.getSystemService(ClipboardManager::class.java)
@@ -481,7 +614,7 @@ class AttachmentConfirmationSheetUiTest {
             assertEquals(text.url, clip.getItemAt(0).text.toString())
             assertNull(insertedUrl)
         }
-        compose.onNode(row(pdf), useUnmergedTree = true).performScrollTo().performClick()
+        showUploadRow(pdf).performClick()
         compose.runOnIdle {
             assertEquals(pdf.url, insertedUrl)
             assertNull(completed)
@@ -1409,6 +1542,8 @@ class AttachmentConfirmationSheetUiTest {
         onInsertUrl: (String) -> Unit = {},
         onUploaded: ((UploadRecord) -> Unit)? = null,
         testUploader: AttachmentUploader? = null,
+        imageOnly: Boolean = false,
+        onDeleteAttempt: () -> Unit = {},
     ): AttachmentViewModel {
         val viewModel =
             AttachmentViewModel(
@@ -1426,6 +1561,11 @@ class AttachmentConfirmationSheetUiTest {
                         override suspend fun updateUploadPreview(
                             record: UploadRecord,
                             preview: LocalUploadPreview,
+                        ) = Unit
+
+                        override suspend fun setUploadFavorite(
+                            url: String,
+                            favorite: Boolean,
                         ) = Unit
 
                         override suspend fun removeUpload(url: String) = Unit
@@ -1451,7 +1591,10 @@ class AttachmentConfirmationSheetUiTest {
                             }
                         }
 
-                        override suspend fun delete(record: UploadRecord): Unit = error("Source selection must not delete uploads")
+                        override suspend fun delete(record: UploadRecord) {
+                            onDeleteAttempt()
+                            error("Source selection must not delete uploads")
+                        }
                     },
             )
         val registryOwner =
@@ -1492,6 +1635,7 @@ class AttachmentConfirmationSheetUiTest {
                                 preferSojuFileHost = preferSojuFileHost,
                                 sharedFile = pastedFile,
                                 directFileTransferAvailable = directFileTransferAvailable,
+                                imageOnly = imageOnly,
                                 onDismiss = { open = false },
                                 onInsertUrl = onInsertUrl,
                                 onReplaceDraft = {},

@@ -200,6 +200,11 @@ class VoiceMessageSenderMetadataTest {
 
         override suspend fun addUpload(record: UploadRecord) = Unit
 
+        override suspend fun setUploadFavorite(
+            url: String,
+            favorite: Boolean,
+        ) = Unit
+
         override suspend fun updateUploadPreview(
             record: UploadRecord,
             preview: LocalUploadPreview,

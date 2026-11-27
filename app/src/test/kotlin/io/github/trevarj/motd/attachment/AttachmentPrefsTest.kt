@@ -18,6 +18,8 @@ import org.robolectric.RobolectricTestRunner
 
 @RunWith(RobolectricTestRunner::class)
 class AttachmentPrefsTest {
+    private val history = stringPreferencesKey("history_v1")
+
     @Test
     fun atomicUpdatesPersistUsernameAndPasswordTogether() =
         runTest {
@@ -42,14 +44,16 @@ class AttachmentPrefsTest {
         }
 
     @Test
-    fun clearUploadHistoryPersistsWithoutChangingConfigurationOrFutureUploads() =
+    fun clearUploadHistoryKeepsFavoritesConfigurationAndFutureUploads() =
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val prefs = AttachmentPrefsImpl(context)
             val config = PasteBackendConfig(username = "keep-user", password = "keep-secret")
             prefs.setConfig(config)
-            prefs.clearUploadHistory()
-            prefs.addUpload(UploadRecord("https://files.example/one", AttachmentBackend.CRAFTERBIN, "one", deletionToken = "token"))
+            store(prefs).edit { it.remove(history) }
+            val saved = UploadRecord("https://files.example/one", AttachmentBackend.CRAFTERBIN, "one", deletionToken = "token")
+            prefs.addUpload(saved)
+            prefs.setUploadFavorite(saved.url, true)
             prefs.addUpload(UploadRecord("https://files.example/two", AttachmentBackend.X0_AT, "two"))
             assertEquals(2, prefs.recentUploads.first().size)
 
@@ -57,11 +61,152 @@ class AttachmentPrefsTest {
             prefs.clearUploadHistory()
 
             val reopened = AttachmentPrefsImpl(context)
-            assertEquals(emptyList<UploadRecord>(), reopened.recentUploads.first())
+            val favorite = saved.copy(favorite = true)
+            assertEquals(listOf(favorite), reopened.recentUploads.first())
             assertEquals(config, reopened.config.first())
             val completed = UploadRecord("https://files.example/three", AttachmentBackend.CRAFTERBIN, "three")
             reopened.addUpload(completed)
+            assertEquals(listOf(completed, favorite), prefs.recentUploads.first())
+            reopened.removeUpload(favorite.url)
             assertEquals(listOf(completed), prefs.recentUploads.first())
+        }
+
+    @Test
+    fun favoritesDoNotCountAgainstRecentsAndUnstarUsesOriginalUploadOrder() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            store(prefs).edit { it.remove(history) }
+            val older = UploadRecord("https://files.example/older", AttachmentBackend.CRAFTERBIN, "older")
+            val newer = UploadRecord("https://files.example/newer", AttachmentBackend.CRAFTERBIN, "newer")
+            prefs.addUpload(older)
+            prefs.addUpload(newer)
+            prefs.setUploadFavorite(newer.url, true)
+            prefs.setUploadFavorite(older.url, true)
+            assertEquals(listOf(newer.copy(favorite = true), older.copy(favorite = true)), prefs.recentUploads.first())
+
+            prefs.setUploadFavorite(newer.url, false)
+            assertEquals(listOf(newer, older.copy(favorite = true)), prefs.recentUploads.first())
+
+            val uploads =
+                List(MAX_UPLOAD_HISTORY + 1) { index ->
+                    UploadRecord("https://files.example/$index", AttachmentBackend.CRAFTERBIN, "$index")
+                }
+            uploads.forEach { prefs.addUpload(it) }
+            val ordinary = uploads.takeLast(MAX_UPLOAD_HISTORY).asReversed()
+            assertEquals(ordinary + older.copy(favorite = true), prefs.recentUploads.first())
+            assertFalse(store(prefs).data.first()[history]!!.contains(newer.url))
+
+            prefs.setUploadFavorite(older.url, false)
+            assertEquals(ordinary, prefs.recentUploads.first())
+            assertFalse(store(prefs).data.first()[history]!!.contains(older.url))
+        }
+
+    @Test
+    fun decodingKeepsFavoritesPastTheOrdinaryLimitAndDefaultsMalformedFlagsOff() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            val ordinary =
+                List(MAX_UPLOAD_HISTORY + 1) { index ->
+                    val field =
+                        when (index) {
+                            1 -> ""","favorite":false"""
+                            2 -> ",\"favorite\":\"true\""
+                            3 -> ""","favorite":{}"""
+                            4 -> ""","favorite":null"""
+                            else -> ""
+                        }
+                    """{"url":"https://files.example/$index"$field}"""
+                }
+            val favoriteUrl = "https://files.example/favorite"
+            try {
+                store(prefs).edit {
+                    it[history] = (ordinary + """{"url":"$favoriteUrl","favorite":true}""").joinToString(",", "[", "]")
+                }
+                val records = prefs.recentUploads.first()
+                assertEquals(List(MAX_UPLOAD_HISTORY) { "https://files.example/$it" } + favoriteUrl, records.map { it.url })
+                assertEquals(listOf(favoriteUrl), records.filter { it.favorite }.map { it.url })
+            } finally {
+                store(prefs).edit { it.remove(history) }
+            }
+        }
+
+    @Test
+    fun reuploadCollapsesDuplicateUrlsAndKeepsAnyExistingFavorite() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            val url = "https://files.example/duplicate"
+            val receipt = UploadRecord(url, AttachmentBackend.X0_AT, "replacement", receiptId = "new")
+            try {
+                store(prefs).edit {
+                    it[history] = """[{"url":"$url","name":"old"},{"url":"$url","name":"older","favorite":true}]"""
+                }
+                prefs.addUpload(receipt)
+                assertEquals(listOf(receipt.copy(favorite = true)), prefs.recentUploads.first())
+            } finally {
+                store(prefs).edit { it.remove(history) }
+            }
+        }
+
+    @Test
+    fun legacyDuplicateDoesNotConsumeARecentSlotAfterTogglingFavorite() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            val url = "https://files.example/duplicate"
+            val olderUrls = List(MAX_UPLOAD_HISTORY - 2) { "https://files.example/older-$it" }
+            val rows =
+                listOf("""{"url":"$url","name":"newest"}""", """{"url":"$url","name":"stale"}""") +
+                    olderUrls.map { """{"url":"$it"}""" }
+            try {
+                store(prefs).edit { it[history] = rows.joinToString(",", "[", "]") }
+                val initial = prefs.recentUploads.first()
+                assertEquals(listOf(url) + olderUrls, initial.map { it.url })
+                assertEquals("newest", initial.first().displayName)
+
+                prefs.setUploadFavorite(url, true)
+                val incoming = UploadRecord("https://files.example/incoming", AttachmentBackend.CRAFTERBIN, "incoming")
+                prefs.addUpload(incoming)
+                prefs.setUploadFavorite(url, false)
+
+                val records = prefs.recentUploads.first()
+                assertEquals(listOf(incoming.url, url) + olderUrls, records.map { it.url })
+                assertFalse(records[1].favorite)
+            } finally {
+                store(prefs).edit { it.remove(history) }
+            }
+        }
+
+    @Test
+    fun clearRecentsKeepsFavoriteAlongsideMalformedOrdinaryRow() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            val favoriteUrl = "https://files.example/kept"
+            try {
+                store(prefs).edit {
+                    it[history] =
+                        """[{"url":"https://files.example/malformed","size":{}},{"url":"$favoriteUrl","favorite":true}]"""
+                }
+                prefs.clearUploadHistory()
+                val saved = prefs.recentUploads.first().single()
+                assertEquals(favoriteUrl, saved.url)
+                assertTrue(saved.favorite)
+            } finally {
+                store(prefs).edit { it.remove(history) }
+            }
+        }
+
+    @Test
+    fun clearRecentsLeavesUnreadableHistoryUntouched() =
+        runTest {
+            val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
+            try {
+                for (raw in listOf("{", """[{"url":{}}]""")) {
+                    store(prefs).edit { it[history] = raw }
+                    prefs.clearUploadHistory()
+                    assertEquals(raw, store(prefs).data.first()[history])
+                }
+            } finally {
+                store(prefs).edit { it.remove(history) }
+            }
         }
 
     @Test
@@ -110,7 +255,6 @@ class AttachmentPrefsTest {
         runTest {
             val context = ApplicationProvider.getApplicationContext<Context>()
             val prefs = AttachmentPrefsImpl(context)
-            val history = stringPreferencesKey("history_v1")
             val script = java.io.File.createTempFile("preview-", ".sh", context.cacheDir)
             try {
                 // The last emoji straddles the byte scan; a partial code point does not discard the snippet.
@@ -119,7 +263,7 @@ class AttachmentPrefsTest {
                 val preview = checkNotNull(localUploadPreview(AttachmentSource.LocalFile(script, "short.sh", "application/x-shellscript")))
                 assertEquals(LocalUploadPreview(textSnippet = "echo café 😀 next"), preview)
                 val record = UploadRecord("https://files.example/snippet", AttachmentBackend.CRAFTERBIN, "short.sh", preview = preview)
-                prefs.clearUploadHistory()
+                store(prefs).edit { it.remove(history) }
                 prefs.addUpload(record)
                 assertEquals(listOf(record), AttachmentPrefsImpl(context).recentUploads.first())
                 assertTrue(store(prefs).data.first()[history]!!.contains("echo café 😀 next"))
@@ -148,7 +292,7 @@ class AttachmentPrefsTest {
     fun latePreviewUpdatesOnlyItsExistingReceipt() =
         runTest {
             val prefs = AttachmentPrefsImpl(ApplicationProvider.getApplicationContext<Context>())
-            prefs.clearUploadHistory()
+            store(prefs).edit { it.remove(history) }
             val receipt = UploadRecord("https://files.example/one", AttachmentBackend.CRAFTERBIN, "one", receiptId = "first")
             val preview = LocalUploadPreview(textSnippet = "local text")
             prefs.addUpload(receipt)
@@ -164,10 +308,17 @@ class AttachmentPrefsTest {
             prefs.updateUploadPreview(receipt, preview)
             assertEquals(emptyList<UploadRecord>(), prefs.recentUploads.first())
 
-            val replacement = receipt.copy(receiptId = "second")
+            prefs.addUpload(receipt)
+            prefs.setUploadFavorite(receipt.url, true)
+            val replacement = receipt.copy(displayName = "replacement", receiptId = "second")
+            val other = UploadRecord("https://files.example/other", AttachmentBackend.CRAFTERBIN, "other")
+            prefs.addUpload(other)
             prefs.addUpload(replacement)
             prefs.updateUploadPreview(receipt, preview)
-            assertEquals(listOf(replacement), prefs.recentUploads.first())
+            assertEquals(listOf(replacement.copy(favorite = true), other), prefs.recentUploads.first())
+            prefs.updateUploadPreview(replacement, preview)
+            assertEquals(listOf(replacement.copy(favorite = true, preview = preview), other), prefs.recentUploads.first())
+            prefs.removeUpload(replacement.url)
         }
 
     @Test
@@ -177,7 +328,7 @@ class AttachmentPrefsTest {
             val prefs = AttachmentPrefsImpl(context)
             try {
                 store(prefs).edit {
-                    it[stringPreferencesKey("history_v1")] =
+                    it[history] =
                         """[{"url":"https://files.example/legacy"},{"url":"https://files.example/malformed","preview":{"thumbnailBase64":[]}}]"""
                 }
                 val records = prefs.recentUploads.first()

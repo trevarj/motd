@@ -558,6 +558,20 @@ class AttachmentViewModel
                 }
             }
 
+        internal fun setUploadFavorite(
+            url: String,
+            favorite: Boolean,
+            errorMessage: String,
+        ) = viewModelScope.launch {
+            try {
+                prefs.setUploadFavorite(url, favorite)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                _error.value = AttachmentError(errorMessage)
+            }
+        }
+
         fun delete(record: UploadRecord) =
             viewModelScope.launch {
                 runCatching {

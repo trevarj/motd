@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.database.Cursor
+import android.icu.lang.UCharacter
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -27,6 +28,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -37,16 +39,21 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.CloudUpload
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -59,13 +66,17 @@ import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PhotoCamera
 import androidx.compose.material.icons.outlined.Public
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconToggleButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.ListItem
 import androidx.compose.material3.MaterialTheme
@@ -78,7 +89,6 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
@@ -98,6 +108,8 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTagsAsResourceId
 import androidx.compose.ui.text.font.FontWeight
@@ -554,7 +566,7 @@ fun AttachmentSheets(
         AttachmentFlow.Sources -> {
             SourceSheet(
                 currentDraft = currentDraft,
-                recent = if (imageOnly) recent.filter { it.mimeType?.startsWith("image/") == true } else recent,
+                recent = recent,
                 imageOnly = imageOnly,
                 onDismiss = ::closeSourceSheet,
                 onPhoto = { flow = AttachmentFlow.Photos },
@@ -584,6 +596,9 @@ fun AttachmentSheets(
                         ?.setPrimaryClip(ClipData.newPlainText(record.displayName, record.url))
                 },
                 onDeleteRecent = { deleteTarget = it },
+                onFavoriteRecent = { record, favorite ->
+                    viewModel.setUploadFavorite(record.url, favorite, context.getString(R.string.upload_library_favorite_failed))
+                },
                 onClearHistory = viewModel::clearHistory,
             )
         }
@@ -1288,24 +1303,46 @@ private fun SourceSheet(
     onInsertRecent: (UploadRecord) -> Unit,
     onCopyRecent: (UploadRecord) -> Unit,
     onDeleteRecent: (UploadRecord) -> Unit,
+    onFavoriteRecent: (UploadRecord, Boolean) -> Unit,
     onClearHistory: () -> Unit,
 ) {
+    var query by rememberSaveable { mutableStateOf("") }
+    var favoritesOnly by rememberSaveable { mutableStateOf(false) }
+    val displayedUploads =
+        remember(recent, query, favoritesOnly, imageOnly) {
+            if (imageOnly) {
+                recent.filter { it.mimeType?.startsWith("image/") == true }
+            } else {
+                val term = UCharacter.foldCase(query.trim(), true)
+                if (term.isEmpty() && !favoritesOnly) {
+                    recent
+                } else {
+                    recent.filter { record ->
+                        if (favoritesOnly && !record.favorite) return@filter false
+                        term.isEmpty() ||
+                            UCharacter.foldCase(record.displayName, true).contains(term) ||
+                            UCharacter.foldCase(record.url, true).contains(term)
+                    }
+                }
+            }
+        }
+    val canClearRecents = remember(recent) { recent.any { !it.favorite } }
     var confirmClearHistory by remember { mutableStateOf(false) }
     if (confirmClearHistory) {
         AlertDialog(
             onDismissRequest = { confirmClearHistory = false },
             icon = { Icon(Icons.Filled.Delete, null) },
-            title = { Text(stringResource(R.string.upload_clear_history_title)) },
-            text = { Text(stringResource(R.string.upload_clear_history_body)) },
+            title = { Text(stringResource(R.string.upload_clear_recents_title)) },
+            text = { Text(stringResource(R.string.upload_clear_recents_body)) },
             confirmButton = {
                 Button(
                     onClick = {
                         onClearHistory()
                         confirmClearHistory = false
                     },
-                    modifier = Modifier.testTag("attachment_clear_history_confirm"),
+                    modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("attachment_clear_history_confirm"),
                 ) {
-                    Text(stringResource(R.string.upload_clear_history))
+                    Text(stringResource(R.string.upload_clear_recents))
                 }
             },
             dismissButton = {
@@ -1315,67 +1352,133 @@ private fun SourceSheet(
     }
     ModalBottomSheet(
         onDismissRequest = onDismiss,
+        sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = !imageOnly),
         containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
         contentColor = MaterialTheme.colorScheme.onSurface,
         modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("attachment_source_sheet"),
     ) {
         SheetSystemBars()
-        Column(Modifier.fillMaxWidth().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp, vertical = 8.dp)) {
-            Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
-            Text(stringResource(R.string.upload_add_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Spacer(Modifier.height(16.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                SourceCard(Icons.Outlined.Image, stringResource(R.string.upload_photo), stringResource(R.string.upload_photo_desc), true, onPhoto, Modifier.weight(1f))
-                SourceCard(
-                    Icons.Outlined.AttachFile,
-                    stringResource(if (imageOnly) R.string.avatar_image_file else R.string.upload_file),
-                    stringResource(if (imageOnly) R.string.avatar_image_file_desc else R.string.upload_file_desc),
-                    true,
-                    onFile,
-                    Modifier.weight(1f),
-                )
+        LazyColumn(
+            modifier = Modifier.fillMaxWidth().testTag("attachment_source_list"),
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+        ) {
+            item {
+                Column {
+                    Text(stringResource(R.string.upload_add_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.readableForeground(MaterialTheme.colorScheme.primary))
+                    Text(stringResource(R.string.upload_add_subtitle), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Spacer(Modifier.height(16.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                        SourceCard(Icons.Outlined.Image, stringResource(R.string.upload_photo), stringResource(R.string.upload_photo_desc), true, onPhoto, Modifier.weight(1f))
+                        SourceCard(
+                            Icons.Outlined.AttachFile,
+                            stringResource(if (imageOnly) R.string.avatar_image_file else R.string.upload_file),
+                            stringResource(if (imageOnly) R.string.avatar_image_file_desc else R.string.upload_file_desc),
+                            true,
+                            onFile,
+                            Modifier.weight(1f),
+                        )
+                    }
+                    if (directFileTransferAvailable && !imageOnly) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SourceCard(
+                                Icons.Outlined.Lock,
+                                stringResource(R.string.dcc_send_file),
+                                stringResource(R.string.dcc_send_file_desc),
+                                true,
+                                onDirectFile,
+                                Modifier.weight(1f),
+                            )
+                            Spacer(Modifier.weight(1f))
+                        }
+                    }
+                    if (!imageOnly) {
+                        Spacer(Modifier.height(12.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            SourceCard(Icons.Outlined.Description, stringResource(R.string.upload_draft), stringResource(R.string.upload_draft_desc), currentDraft.isNotBlank(), onCurrentDraft, Modifier.weight(1f))
+                            SourceCard(Icons.Outlined.Edit, stringResource(R.string.upload_text), stringResource(R.string.upload_text_desc), true, onNewText, Modifier.weight(1f))
+                        }
+                    }
+                }
             }
-            if (directFileTransferAvailable && !imageOnly) {
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SourceCard(
-                        Icons.Outlined.Lock,
-                        stringResource(R.string.dcc_send_file),
-                        stringResource(R.string.dcc_send_file_desc),
-                        true,
-                        onDirectFile,
-                        Modifier.weight(1f),
-                    )
-                    Spacer(Modifier.weight(1f))
+            if (!imageOnly || displayedUploads.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.padding(top = 24.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(if (imageOnly) Icons.Outlined.History else Icons.Outlined.Search, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            stringResource(if (imageOnly) R.string.upload_recent else R.string.upload_library),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier =
+                                Modifier
+                                    .semantics { heading() }
+                                    .then(if (imageOnly) Modifier else Modifier.testTag("attachment_upload_library")),
+                        )
+                    }
                 }
             }
             if (!imageOnly) {
-                Spacer(Modifier.height(12.dp))
-                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                    SourceCard(Icons.Outlined.Description, stringResource(R.string.upload_draft), stringResource(R.string.upload_draft_desc), currentDraft.isNotBlank(), onCurrentDraft, Modifier.weight(1f))
-                    SourceCard(Icons.Outlined.Edit, stringResource(R.string.upload_text), stringResource(R.string.upload_text_desc), true, onNewText, Modifier.weight(1f))
+                item {
+                    OutlinedTextField(
+                        value = query,
+                        onValueChange = { query = it },
+                        modifier = Modifier.fillMaxWidth().testTag("attachment_upload_search"),
+                        label = { Text(stringResource(R.string.upload_library_search)) },
+                        singleLine = true,
+                    )
                 }
             }
-            if (recent.isNotEmpty()) {
-                Spacer(Modifier.height(24.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Outlined.History, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.width(8.dp))
-                    Text(stringResource(R.string.upload_recent), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            if (!imageOnly || displayedUploads.isNotEmpty()) {
+                item {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 8.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        if (!imageOnly) {
+                            FilterChip(
+                                selected = favoritesOnly,
+                                onClick = { favoritesOnly = !favoritesOnly },
+                                label = { Text(stringResource(R.string.upload_library_favorites)) },
+                                modifier = Modifier.heightIn(min = 48.dp).testTag("attachment_upload_favorites"),
+                            )
+                        }
+                        TextButton(
+                            colors = readableTextButtonColors(),
+                            enabled = canClearRecents,
+                            onClick = { confirmClearHistory = true },
+                            modifier = Modifier.heightIn(min = 48.dp).testTag("attachment_clear_history"),
+                        ) {
+                            Text(stringResource(R.string.upload_clear_recents))
+                        }
+                    }
                 }
-                TextButton(
-                    colors = readableTextButtonColors(),
-                    onClick = { confirmClearHistory = true },
-                    modifier = Modifier.testTag("attachment_clear_history"),
-                ) {
-                    Text(stringResource(R.string.upload_clear_history))
-                }
-                Spacer(Modifier.height(8.dp))
-                recent.forEach { record ->
-                    key(record.url) { RecentUploadRow(record, onInsertRecent, onCopyRecent, onDeleteRecent) }
+                if (!imageOnly && displayedUploads.isEmpty()) {
+                    item {
+                        Text(
+                            stringResource(if (recent.isEmpty()) R.string.upload_library_empty else R.string.upload_library_no_results),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(vertical = 8.dp).testTag("attachment_upload_empty"),
+                        )
+                    }
                 }
             }
-            Spacer(Modifier.height(24.dp))
+            items(displayedUploads, key = { it.url }) { record ->
+                RecentUploadRow(
+                    record = record,
+                    insertLabel = stringResource(if (imageOnly) R.string.avatar_url_save else R.string.upload_insert_link),
+                    onInsert = onInsertRecent,
+                    onCopy = onCopyRecent,
+                    onDelete = onDeleteRecent,
+                    onFavorite = if (imageOnly) null else onFavoriteRecent,
+                )
+            }
+            item { Spacer(Modifier.height(16.dp)) }
         }
     }
 }
@@ -1407,9 +1510,11 @@ private fun SourceCard(
 @Composable
 private fun RecentUploadRow(
     record: UploadRecord,
+    insertLabel: String,
     onInsert: (UploadRecord) -> Unit,
     onCopy: (UploadRecord) -> Unit,
     onDelete: (UploadRecord) -> Unit,
+    onFavorite: ((UploadRecord, Boolean) -> Unit)?,
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     ListItem(
@@ -1447,29 +1552,60 @@ private fun RecentUploadRow(
         },
         leadingContent = { UploadRecordPreview(record, Modifier.size(56.dp).clip(RoundedCornerShape(10.dp))) },
         trailingContent = {
-            Box {
-                IconButton(onClick = { menuOpen = true }, modifier = Modifier.testTag("attachment_recent_more")) {
-                    Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                if (onFavorite != null) {
+                    val favoriteLabel = stringResource(R.string.upload_library_favorite, record.displayName)
+                    IconToggleButton(
+                        checked = record.favorite,
+                        onCheckedChange = { onFavorite(record, it) },
+                        modifier =
+                            Modifier
+                                .size(48.dp)
+                                .semantics { contentDescription = favoriteLabel }
+                                .testTag("attachment_recent_favorite"),
+                    ) {
+                        Box(Modifier.size(32.dp), contentAlignment = Alignment.Center) {
+                            Icon(if (record.favorite) Icons.Filled.Star else Icons.Outlined.StarBorder, null)
+                            if (record.favorite) {
+                                Icon(
+                                    Icons.Filled.Check,
+                                    contentDescription = null,
+                                    modifier =
+                                        Modifier
+                                            .align(Alignment.BottomEnd)
+                                            .size(16.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                                )
+                            }
+                        }
+                    }
                 }
-                DropdownMenu(menuOpen, { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
-                    DropdownMenuItem({ Text(stringResource(R.string.upload_insert_link)) }, {
-                        menuOpen = false
-                        onInsert(record)
-                    }, leadingIcon = { Icon(Icons.Outlined.InsertLink, null) })
-                    DropdownMenuItem({ Text(stringResource(R.string.upload_copy_link)) }, {
-                        menuOpen = false
-                        onCopy(record)
-                    }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) })
-                    if (record.deletionToken != null) {
-                        DropdownMenuItem({ Text(stringResource(R.string.action_delete)) }, {
+                Box {
+                    IconButton(onClick = { menuOpen = true }, modifier = Modifier.size(48.dp).testTag("attachment_recent_more")) {
+                        Icon(Icons.Filled.MoreVert, stringResource(R.string.action_more))
+                    }
+                    DropdownMenu(menuOpen, { menuOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow) {
+                        DropdownMenuItem({ Text(insertLabel) }, {
                             menuOpen = false
-                            onDelete(record)
-                        }, leadingIcon = { Icon(Icons.Filled.Delete, null) })
+                            onInsert(record)
+                        }, leadingIcon = { Icon(Icons.Outlined.InsertLink, null) })
+                        DropdownMenuItem({ Text(stringResource(R.string.upload_copy_link)) }, {
+                            menuOpen = false
+                            onCopy(record)
+                        }, leadingIcon = { Icon(Icons.Outlined.ContentCopy, null) })
+                        if (record.deletionToken != null) {
+                            DropdownMenuItem({ Text(stringResource(R.string.action_delete)) }, {
+                                menuOpen = false
+                                onDelete(record)
+                            }, leadingIcon = { Icon(Icons.Filled.Delete, null) })
+                        }
                     }
                 }
             }
         },
-        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable { onInsert(record) }.testTag("attachment_recent_row"),
+        modifier = Modifier.clip(RoundedCornerShape(16.dp)).clickable(onClickLabel = insertLabel) { onInsert(record) }.testTag("attachment_recent_row"),
     )
 }
 

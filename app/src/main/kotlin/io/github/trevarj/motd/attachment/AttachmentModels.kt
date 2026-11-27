@@ -130,6 +130,7 @@ data class UploadRecord(
     val endpoint: String? = null,
     val preview: LocalUploadPreview? = null,
     internal val receiptId: String? = null,
+    val favorite: Boolean = false,
 )
 
 @Serializable
@@ -167,6 +168,11 @@ interface AttachmentPrefs {
 
     suspend fun addUpload(record: UploadRecord)
 
+    suspend fun setUploadFavorite(
+        url: String,
+        favorite: Boolean,
+    )
+
     suspend fun updateUploadPreview(
         record: UploadRecord,
         preview: LocalUploadPreview,
@@ -174,6 +180,7 @@ interface AttachmentPrefs {
 
     suspend fun removeUpload(url: String)
 
+    /** Clears ordinary recents locally; favorites remain. */
     suspend fun clearUploadHistory()
 }
 

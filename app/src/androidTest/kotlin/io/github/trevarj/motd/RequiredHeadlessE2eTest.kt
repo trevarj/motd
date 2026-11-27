@@ -585,6 +585,8 @@ class RequiredHeadlessE2eTest {
             chat.awaitTagGone("attachment-batch-review")
             field.assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString((listOf(draft) + links).joinToString("\n"))))
             milestones.record("ordered_shared_files_inserted", "buffer=$bufferId count=${links.size}")
+            exerciseUploadLibrary(chat, prefs, names, links)
+            field.assert(SemanticsMatcher.expectValue(SemanticsProperties.EditableText, AnnotatedString((listOf(draft) + links).joinToString("\n"))))
         } finally {
             runBlocking {
                 val names = fixtures.map(File::getName)
@@ -597,6 +599,52 @@ class RequiredHeadlessE2eTest {
             fixtures.forEach { it.delete() }
         }
         chat.replace("chat_composer_field", "")
+    }
+
+    private fun exerciseUploadLibrary(
+        chat: ChatRobot,
+        prefs: AttachmentPrefsImpl,
+        names: List<String>,
+        links: List<String>,
+    ) {
+        val list = "attachment_source_list"
+        val search = "attachment_upload_search"
+        val favorites = "attachment_upload_favorites"
+        val sheet = hasTestTag("attachment_source_sheet")
+        val inSheet = sheet or hasAnyAncestor(sheet)
+        if (!chat.isPresent("chat_composer_attachment")) chat.click("chat_composer_tools")
+        chat.click("chat_composer_attachment")
+        chat.awaitTag("attachment_source_sheet")
+        val expand = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Expand) and inSheet, useUnmergedTree = true)
+        if (expand.fetchSemanticsNodes().isNotEmpty()) expand[0].performSemanticsAction(SemanticsActions.Expand)
+        chat.scrollContainerTo(list, search)
+        chat.replace(search, links.last())
+        chat.scrollContainerTo(list, hasText(names.last()))
+        compose.onNodeWithText(names.last()).assertIsDisplayed()
+        assertTrue("URL search dropped the other upload", !chat.tryScrollContainerToKey(list, links.first()))
+
+        chat.scrollContainerTo(list, search)
+        chat.replace(search, names.first().uppercase())
+        chat.scrollContainerTo(list, "attachment_recent_favorite")
+        compose.onNodeWithText(names.first()).assertIsDisplayed()
+        chat.click("attachment_recent_favorite")
+        awaitWhileComposing("favorite flag persisted for the uploaded receipt", 5_000) {
+            prefs.recentUploads.first { rows -> rows.any { it.url == links.first() && it.favorite } }
+        }
+
+        chat.scrollContainerTo(list, favorites)
+        chat.click(favorites)
+        compose.onNodeWithTag(favorites).assertIsSelected()
+        chat.scrollContainerTo(list, hasText(names.first()))
+        compose.onNodeWithText(names.first()).assertIsDisplayed()
+        chat.scrollContainerTo(list, search)
+        chat.replace(search, links.last())
+        chat.scrollContainerTo(list, "attachment_upload_empty")
+        assertTrue("Favorites hid the unstarred URL match", !chat.tryScrollContainerToKey(list, links.last()))
+        milestones.record("upload_library_favorite_found")
+        val dismiss = compose.onAllNodes(SemanticsMatcher.keyIsDefined(SemanticsActions.Dismiss) and inSheet, useUnmergedTree = true)
+        dismiss[0].performSemanticsAction(SemanticsActions.Dismiss)
+        chat.awaitTagGone("attachment_source_sheet")
     }
 
     @Test
