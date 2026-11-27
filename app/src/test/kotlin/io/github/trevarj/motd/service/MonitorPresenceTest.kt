@@ -1,38 +1,68 @@
 package io.github.trevarj.motd.service
 
 import io.github.trevarj.motd.data.db.MonitorQueryRow
+import io.github.trevarj.motd.data.db.NetworkEntity
+import io.github.trevarj.motd.data.db.NetworkRole
+import io.github.trevarj.motd.irc.event.IrcClientState
+import io.github.trevarj.motd.irc.proto.IrcIdentityRules
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
-import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MonitorPresenceTest {
     @Test
-    fun `runtime ISUPPORT initializes monitor only when registration gained support`() {
-        assertTrue(
-            shouldInitializeMonitorFromRegistration(
-                isupport = mapOf("MONITOR" to "10"),
-                hasBaseline = false,
-            ),
-        )
-        assertFalse(
-            shouldInitializeMonitorFromRegistration(
-                isupport = emptyMap(),
-                hasBaseline = false,
-            ),
-        )
-        assertFalse(
-            shouldInitializeMonitorFromRegistration(
-                isupport = mapOf("MONITOR" to "10"),
-                hasBaseline = true,
-            ),
-        )
+    fun `only a matching opted-in direct fallback can reserve a supported slot`() {
+        val row =
+            NetworkEntity(
+                name = "test",
+                role = NetworkRole.DIRECT,
+                host = "localhost",
+                port = 6667,
+                nick = "N[ck",
+                username = "u",
+                realname = "r",
+                autoRegainPreferredNick = true,
+            )
+        val ready = IrcClientState.Ready("N[ck_", emptySet(), mapOf("MONITOR" to "1"), preferredNickToRegain = "n{ck")
+
+        fun candidate(
+            network: NetworkEntity = row,
+            state: IrcClientState.Ready = ready,
+            znc: Set<Long>? = emptySet(),
+        ) = preferredMonitorNick(network, state, znc, IrcIdentityRules()::normalize)
+
+        assertEquals("n{ck", candidate())
+        assertNull(candidate(row.copy(autoRegainPreferredNick = false)))
+        assertNull(candidate(row.copy(nick = "changed")))
+        assertNull(candidate(row.copy(role = NetworkRole.BOUNCER_CHILD)))
+        assertNull(candidate(row.copy(role = NetworkRole.BOUNCER_ROOT)))
+        assertNull(candidate(znc = setOf(row.id)))
+        assertNull(candidate(znc = null))
+        assertNull(candidate(state = ready.copy(preferredNickToRegain = null)))
+        assertNull(candidate(state = ready.copy(isupport = ready.isupport + ("BOUNCER_NETID" to ""))))
+        assertNull(candidate(state = ready.copy(isupport = emptyMap())))
+        assertNull(candidate(state = ready.copy(isupport = mapOf("MONITOR" to "bad"))))
+    }
+
+    @Test
+    fun `preferred identity takes one bounded slot across friend and query casemap aliases`() {
+        val selection =
+            selectMonitorTargets(
+                preferredNick = "N[ck",
+                friends = setOf("alice", "n{ck"),
+                queryRows = listOf(query("N{CK", pinned = true, activity = 123)),
+                limit = 1,
+                normalize = IrcIdentityRules()::normalize,
+            )
+        assertEquals(listOf("N[ck"), selection.selected)
+        assertEquals(listOf("N[ck", "alice"), selection.allDesired)
     }
 
     @Test fun `friends win bounded slots before ordered query peers`() {
         val selection =
             selectMonitorTargets(
+                preferredNick = null,
                 friends = setOf("Zed", "alice"),
                 queryRows =
                     listOf(

@@ -60,6 +60,11 @@ class NetworkRepositoryImpl
             networkDao.update(n.copy(ordering = stored))
         }
 
+        override suspend fun setAutoRegainPreferredNick(
+            id: Long,
+            enabled: Boolean,
+        ) = networkDao.setAutoRegainPreferredNick(id, enabled)
+
         override suspend fun reorderNetworks(orderedIds: List<Long>) = networkDao.applyOrder(orderedIds)
 
         override suspend fun deleteNetwork(id: Long) {

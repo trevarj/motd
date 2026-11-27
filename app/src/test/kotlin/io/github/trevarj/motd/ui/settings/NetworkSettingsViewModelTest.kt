@@ -409,6 +409,35 @@ class NetworkSettingsViewModelTest {
         }
 
     @Test
+    fun preferredNickRegain_isOffByDefaultAndPersistsOnSave() =
+        runTest {
+            val original =
+                root().copy(
+                    role = NetworkRole.DIRECT,
+                    autoConnect = false,
+                    restoreAutoConnect = true,
+                    pendingCredentialRequirements = "serverPassword",
+                    serverIconUrl = "https://example.org/old-icon.png",
+                )
+            val repo = FakeNetworkRepository(listOf(original))
+            val vm = loadedVm(repo)
+            assertFalse(vm.state.value.autoRegainPreferredNick)
+            vm.setAutoRegainPreferredNick(true)
+            assertTrue(vm.state.value.hasUnsavedChanges)
+            assertFalse(repo.networks.getValue(1).autoRegainPreferredNick)
+            val latest = original.copy(serverIconUrl = "https://example.org/new-icon.png")
+            repo.networks[1] = latest
+
+            vm.save {}
+            runCurrent()
+            assertEquals(latest.copy(autoRegainPreferredNick = true), repo.networks.getValue(1))
+
+            val reopened = loadedVm(repo)
+            assertTrue(reopened.state.value.autoRegainPreferredNick)
+            assertFalse(reopened.state.value.hasUnsavedChanges)
+        }
+
+    @Test
     fun changing_a_direct_libera_endpoint_saves_the_new_host() =
         runTest {
             val directLibera =

@@ -128,7 +128,7 @@ class ConnectionActor(
     private val scope: CoroutineScope,
     private val connectionFactory: suspend () -> ManagedConnection,
     private val onState: suspend (Long, IrcClientState) -> Unit,
-    private val onEvents: suspend (Long, List<IrcEvent>) -> Unit,
+    private val onEvents: suspend (Long, ManagedConnection, List<IrcEvent>) -> Unit,
     private val onReady: suspend (ManagedConnection) -> Unit,
     private val onConnectionChanged: (Long, ManagedConnection?) -> Unit = { _, _ -> },
     private val onLag: (Long, Long?) -> Unit = { _, _ -> },
@@ -248,7 +248,7 @@ class ConnectionActor(
 
             val attemptScope = CoroutineScope(currentCoroutineContext())
             val collector =
-                attemptScope.launch { collectCriticalEvents(conn.criticalEvents) }
+                attemptScope.launch { collectCriticalEvents(conn) }
             // Forward latency readings for this connection's lifetime; cancelled with the attempt
             // scope so a replaced/destroyed actor never reports a stale measurement.
             val lagCollector =
@@ -329,10 +329,11 @@ class ConnectionActor(
     }
 
     @OptIn(ExperimentalCoroutinesApi::class)
-    private suspend fun collectCriticalEvents(events: ReceiveChannel<IrcEvent>) {
+    private suspend fun collectCriticalEvents(conn: ManagedConnection) {
+        val events = conn.criticalEvents
         for (event in events) {
             if (!event.isPeerPresence()) {
-                onEvents(networkId, listOf(event))
+                onEvents(networkId, conn, listOf(event))
                 continue
             }
             val batch = ArrayList<IrcEvent>(64)
@@ -349,18 +350,18 @@ class ConnectionActor(
                             onTimeout(250) { false to null }
                         }
                     if (next == null) {
-                        onEvents(networkId, batch)
+                        onEvents(networkId, conn, batch)
                         if (received) return // Closed: drain the final batch before reconnecting.
                         break
                     }
                     if (!next.isPeerPresence()) {
-                        onEvents(networkId, batch)
-                        onEvents(networkId, listOf(next))
+                        onEvents(networkId, conn, batch)
+                        onEvents(networkId, conn, listOf(next))
                         break
                     }
                     batch.add(next)
                 }
-                if (batch.size == 64) onEvents(networkId, batch)
+                if (batch.size == 64) onEvents(networkId, conn, batch)
             } finally {
                 deadline.cancel()
             }

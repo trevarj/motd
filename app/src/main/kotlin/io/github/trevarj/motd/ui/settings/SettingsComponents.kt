@@ -346,6 +346,7 @@ internal fun SwitchRow(
     disabledExplanation: String? = null,
     requestedTarget: String? = null,
     targetName: String? = null,
+    icon: ImageVector? = null,
 ) {
     val row: @Composable (Modifier) -> Unit = { targetModifier ->
         Row(
@@ -359,6 +360,10 @@ internal fun SwitchRow(
                     .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            if (icon != null) {
+                Icon(icon, contentDescription = null)
+                Spacer(Modifier.width(16.dp))
+            }
             Column(Modifier.weight(1f)) {
                 Text(title, color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (enabled) 1f else 0.38f))
                 Text(

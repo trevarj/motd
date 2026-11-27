@@ -18,6 +18,7 @@ import io.github.trevarj.motd.data.db.MotdDatabase
 import io.github.trevarj.motd.data.db.NetworkEntity
 import io.github.trevarj.motd.data.db.NetworkRole
 import io.github.trevarj.motd.data.db.ircTarget
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefsImpl
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.InviteEnrollmentStore
 import io.github.trevarj.motd.data.prefs.ReplyPrefsImpl
@@ -637,6 +638,94 @@ class NotificationReplyReadinessTest {
         }
 
     @Test
+    fun liveNickRegainRequiresAnAcceptedWatchOnTheSameFallbackConnection() =
+        runBlocking {
+            val holdingEvents = CompletableDeferred<Unit>()
+            val releaseEvents = CompletableDeferred<Unit>()
+            val notifier =
+                object : MessageNotifier {
+                    override suspend fun onIncoming(
+                        networkId: Long,
+                        bufferId: Long,
+                        type: BufferType,
+                        hasMention: Boolean,
+                        message: IrcEvent.ChatMessage,
+                    ) {
+                        if (message.text == "hold the old rejection") {
+                            holdingEvents.complete(Unit)
+                            releaseEvents.await()
+                        }
+                    }
+                }
+            val fixture = managerFixture(notifier)
+            try {
+                val room = fixture.room(BufferType.CHANNEL, "#room")
+                fixture.room(BufferType.QUERY, "bob")
+                val id = fixture.networkId
+                val networks = fixture.db.networkDao()
+                fixture.manager.startAll()
+                val peer = fixture.peer.accept()
+                peer.awaitLine { it == "NICK me" }
+                peer.feed(":srv 433 * me :Nickname in use")
+                peer.awaitLine { it == "NICK me_" }
+                peer.feed(":srv CAP * LS :batch")
+                peer.awaitLine { it.startsWith("CAP REQ ") }
+                peer.feed(":srv CAP me_ ACK :batch")
+                peer.feed(":srv 001 me_ :Welcome")
+                peer.feed(":srv 005 me_ MONITOR=1 :supported")
+                peer.awaitLine { it == "MONITOR S" }
+
+                suspend fun optIn(enabled: Boolean) {
+                    networks.update(checkNotNull(networks.byId(id)).copy(autoRegainPreferredNick = enabled))
+                    peer.awaitLine { it == if (enabled) "MONITOR + me" else "MONITOR + bob" }
+                }
+
+                suspend fun offlineWithoutWrite(marker: String) {
+                    peer.feed(":srv 731 me_ :me")
+                    peer.feed(":alice!a@host PRIVMSG #room :$marker")
+                    awaitStoredText(fixture, room.id, marker)
+                    peer.barrier()
+                    assertEquals(1, peer.preferredNickWrites())
+                }
+
+                optIn(true)
+                optIn(false)
+                offlineWithoutWrite("disabled watch")
+                optIn(true)
+                peer.feed(":srv 005 me_ -MONITOR :removed")
+                peer.feed(":srv 731 me_ :me")
+                peer.feed(":srv 005 me_ MONITOR=1 :restored")
+                peer.awaitLine { it == "MONITOR C" }
+                peer.awaitLine { it == "MONITOR + me" }
+                peer.awaitLine { it == "MONITOR S" }
+                assertEquals(1, peer.preferredNickWrites())
+                peer.feed(":srv 734 me_ 1 me :Monitor list is full")
+                offlineWithoutWrite("rejected watch")
+                peer.feed(":srv 005 me_ MONITOR=2 :supported")
+                peer.awaitLine { it == "MONITOR + me,bob" }
+                peer.feed(":bob!u@host PRIVMSG me_ :hold the old rejection")
+                withTimeout(10_000) { holdingEvents.await() }
+                peer.feed(":srv 734 me_ 2 me :Older watch rejected")
+                peer.feed(":srv 734 me_ 2 me :Duplicate older rejection")
+                peer.barrier()
+                networks.update(checkNotNull(networks.byId(id)).copy(autoRegainPreferredNick = false))
+                peer.awaitLine { it == "MONITOR - me" }
+                optIn(true)
+                releaseEvents.complete(Unit)
+                peer.feed(":srv 730 me_ :me!u@host")
+                peer.feed(":srv 731 me_ :me")
+                peer.awaitLine { it == "NICK me" }
+                peer.feed(":me_!u@host NICK :me")
+                peer.awaitLine { it == "MONITOR - me" }
+                assertEquals(2, peer.preferredNickWrites())
+                assertEquals(1, fixture.peer.connections.size)
+            } finally {
+                releaseEvents.complete(Unit)
+                fixture.close()
+            }
+        }
+
+    @Test
     fun startedManagerStillWaitsForTheReplacementSocketToBecomeReadyBeforePersistence() =
         runBlocking {
             val fixture = managerFixture()
@@ -888,6 +977,7 @@ class NotificationReplyReadinessTest {
                 db = db,
                 eventProcessor = processor,
                 settings = settings,
+                bouncerKindPrefs = BouncerKindPrefsImpl(context),
                 pushPrefs = settings,
                 replyPrefs = ReplyPrefsImpl(context),
                 certStore = settings,
@@ -1064,6 +1154,8 @@ class NotificationReplyReadinessTest {
         }
 
         fun messages(): List<String> = recorded.filter { it.startsWith("PRIVMSG ") }
+
+        fun preferredNickWrites(): Int = recorded.count { it == "NICK me" }
 
         override fun close() {
             socket.close()

@@ -7,11 +7,6 @@ internal data class MonitorReconciliation(
     val status: Boolean,
 )
 
-internal fun shouldInitializeMonitorFromRegistration(
-    isupport: Map<String, String>,
-    hasBaseline: Boolean,
-): Boolean = "MONITOR" in isupport && !hasBaseline
-
 internal fun monitorReconciliation(
     previous: Map<String, String>,
     desired: Map<String, String>,

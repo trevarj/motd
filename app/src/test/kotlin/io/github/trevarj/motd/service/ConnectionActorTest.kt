@@ -78,7 +78,7 @@ class ConnectionActorTest {
                 scope = TestScope(),
                 connectionFactory = { FakeConnection() },
                 onState = { _, _ -> },
-                onEvents = { _, _ -> },
+                onEvents = { _, _, _ -> },
                 onReady = {},
                 random = { 0.0 }, // jitter = 0.7
             )
@@ -96,7 +96,7 @@ class ConnectionActorTest {
                 TestScope(),
                 { FakeConnection() },
                 { _, _ -> },
-                { _, _ -> },
+                { _, _, _ -> },
                 {},
                 random = { 1.0 }, // jitter 1.3
             )
@@ -116,7 +116,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -142,7 +142,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -179,7 +179,8 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also(conns::addLast) },
                     onState = { _, _ -> },
-                    onEvents = { _, events ->
+                    onEvents = { _, origin, events ->
+                        assertTrue(origin === conns.last())
                         val code = (events.single() as IrcEvent.ServerError).code
                         if (code == "first") {
                             firstEventStarted.complete(Unit)
@@ -207,6 +208,12 @@ class ConnectionActorTest {
 
             assertEquals(listOf("first", "second"), processed)
             assertEquals(1, conns.size)
+            scope.testScheduler.advanceTimeBy(2_500)
+            scope.testScheduler.runCurrent()
+            assertEquals(2, conns.size)
+            conns.last().emit(IrcEvent.ServerError("replacement", emptyList(), ""))
+            scope.testScheduler.runCurrent()
+            assertEquals(listOf("first", "second", "replacement"), processed)
             actor.stop()
         }
 
@@ -223,7 +230,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -255,7 +262,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -282,7 +289,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 1.0 }, // jitter 1.3, longer wait
                 )
@@ -319,7 +326,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -348,7 +355,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection() },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { draw },
                 )
@@ -369,7 +376,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -427,7 +434,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -475,7 +482,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0
                 )
@@ -547,7 +554,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { FakeConnection().also { conns.addLast(it) } },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 }, // jitter 1.0, so the delay is exactly the nominal schedule
                 )
@@ -592,7 +599,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {
                         setupStarted = true
                         try {
@@ -629,7 +636,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {
                         setupCount++
                         awaitCancellation()
@@ -670,7 +677,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                 )
             actor.start()
@@ -706,7 +713,7 @@ class ConnectionActorTest {
                         }
                     },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                     random = { 0.5 },
                 )
@@ -740,7 +747,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, state -> states += state },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = {},
                 )
             actor.start()
@@ -771,7 +778,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> awaitCancellation() },
+                    onEvents = { _, _, _ -> awaitCancellation() },
                     onReady = {
                         try {
                             awaitCancellation()
@@ -804,7 +811,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvents = { _, events -> batches += events },
+                    onEvents = { _, _, events -> batches += events },
                     onReady = {},
                 )
             val peers =
@@ -859,7 +866,7 @@ class ConnectionActorTest {
                     scope = scope,
                     connectionFactory = { conn },
                     onState = { _, _ -> },
-                    onEvents = { _, events -> batches += events },
+                    onEvents = { _, _, events -> batches += events },
                     onReady = {},
                 )
             actor.start()

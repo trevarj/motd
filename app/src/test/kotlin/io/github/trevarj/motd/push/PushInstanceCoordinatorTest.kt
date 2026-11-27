@@ -303,6 +303,13 @@ class PushInstanceCoordinatorTest {
             url: String?,
         ) = Unit
 
+        override suspend fun setAutoRegainPreferredNick(
+            id: Long,
+            enabled: Boolean,
+        ) {
+            flow.value = flow.value.map { if (it.id == id) it.copy(autoRegainPreferredNick = enabled) else it }
+        }
+
         override suspend fun setOrdering(
             id: Long,
             ordering: Int,

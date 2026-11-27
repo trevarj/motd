@@ -80,6 +80,13 @@ class NetworkDedupTest {
             rows[id]?.let { rows[id] = it.copy(serverIconUrl = url) }
         }
 
+        override suspend fun setAutoRegainPreferredNick(
+            id: Long,
+            enabled: Boolean,
+        ) {
+            rows[id]?.let { rows[id] = it.copy(autoRegainPreferredNick = enabled) }
+        }
+
         override suspend fun setOrdering(
             id: Long,
             ordering: Int,

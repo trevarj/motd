@@ -667,6 +667,8 @@
     <string name="network_settings_on_connect_commands_root">Root bouncer session only</string>
     <string name="network_settings_on_connect_commands_child">This bouncer network only.</string>
     <string name="network_settings_identity_section">Identity and authentication</string>
+    <string name="network_auto_regain_preferred_nick">Switch back to preferred nickname</string>
+    <string name="network_auto_regain_preferred_nick_desc">If you sign in with a fallback nickname, switch back when your preferred nickname becomes available. Requires IRC MONITOR; no polling.</string>
     <string name="network_settings_presence_section">Presence</string>
     <string name="network_settings_initial_away">Initial away message</string>
     <string name="network_settings_initial_away_desc">Optional. Set this away message whenever this network connects; leave blank to stay available.</string>

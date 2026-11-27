@@ -4,6 +4,16 @@ import io.github.trevarj.motd.irc.event.IrcEvent
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.Isupport
 
+internal fun IrcMessage.isLiveNickReply(): Boolean = "batch" !in tags && "draft/chathistory-context" !in tags && source?.user == null && source?.host == null
+
+internal fun IrcMessage.addressesNick(
+    nick: String,
+    isupport: Isupport,
+): Boolean {
+    val recipient = params.firstOrNull() ?: return false
+    return recipient == "*" || isupport.normalize(recipient) == isupport.normalize(nick)
+}
+
 /**
  * Drives IRC registration (steps 1-11): optional PASS → CAP LS 302 → CAP REQ/ACK → SASL →
  * optional BOUNCER BIND → CAP END → 001/005 → Ready. Message-driven and side-effect free:
@@ -52,6 +62,7 @@ internal class RegistrationStateMachine(
             val assumeDefaultTargetClassification: Boolean = false,
             /** Capabilities requested after Ready whose ACK/NAK decision is still outstanding. */
             val deferredCaps: Set<String> = emptySet(),
+            val registrationFallbackNick: String? = null,
         ) : Action {
             val caps = CapNegotiator.usableCaps(ackedCaps)
         }
@@ -109,6 +120,7 @@ internal class RegistrationStateMachine(
         actions += Action.Send("CAP LS 302")
         actions += Action.Send("NICK $nick")
         actions += Action.Send("USER ${config.username} 0 * :${config.realname}")
+        phase = Phase.CAP_LS
         return actions
     }
 
@@ -277,7 +289,10 @@ internal class RegistrationStateMachine(
     }
 
     private fun onNickError(msg: IrcMessage): List<Action> {
-        if (phase == Phase.WELCOME || phase == Phase.DONE) return emptyList()
+        if (phase == Phase.INIT || phase == Phase.DONE || phase == Phase.FAILED) return emptyList()
+        if (!msg.isLiveNickReply() || !msg.addressesNick(nick, isupport)) return emptyList()
+        val rejected = msg.params.getOrNull(1) ?: return emptyList()
+        if (isupport.normalize(rejected) != isupport.normalize(nick)) return emptyList()
         if (nickTries >= 3) {
             return fail("nick unavailable after retries: $nick", fatal = false)
         }
@@ -287,7 +302,13 @@ internal class RegistrationStateMachine(
     }
 
     private fun onWelcome(msg: IrcMessage): List<Action> {
+        if (phase == Phase.DONE || phase == Phase.FAILED || !msg.isLiveNickReply()) return emptyList()
         // 001 <nick> :Welcome — server's canonical nick wins.
+        val fallback =
+            msg.params.firstOrNull()?.takeIf {
+                nickTries > 0 && isupport.normalize(it) == isupport.normalize(nick) &&
+                    isupport.normalize(it) != isupport.normalize(config.nick)
+            }
         nick = msg.params.firstOrNull() ?: nick
         phase = Phase.DONE
         val actions = mutableListOf<Action>(Action.SetNick(nick))
@@ -305,6 +326,7 @@ internal class RegistrationStateMachine(
                 acked.toSet(),
                 isupport,
                 deferredCaps = deferredCaps,
+                registrationFallbackNick = fallback,
             )
         val fallbackAwayLine = initialAwayLine()
         if (fallbackAwayLine != null && (!preAwayAttempted || preAwayRejected)) {
@@ -434,6 +456,7 @@ internal class RegistrationStateMachine(
     }
 
     private fun onIsupport(msg: IrcMessage) {
+        if (!msg.isLiveNickReply() || !msg.addressesNick(nick, isupport)) return
         // params: <nick> <token...> :are supported... — drop first (nick) and last (text).
         val tokens = msg.params.drop(1).dropLast(1)
         isupport.update(tokens)

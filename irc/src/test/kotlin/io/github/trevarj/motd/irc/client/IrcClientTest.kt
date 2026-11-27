@@ -1144,6 +1144,274 @@ class IrcClientTest {
             assertTrue(client.hasCap("echo-message"))
         }
 
+    private suspend fun TestScope.registerFallback(
+        ft: FakeTransport,
+        nick: String = "motd",
+    ): IrcClient {
+        val client = IrcClient(config().copy(nick = nick), ft.factory(), clientScope())
+        client.start()
+        ft.feed(":srv CAP * LS :")
+        ft.feed(":srv 433 * $nick :Nickname in use")
+        ft.feed(":srv 001 ${nick}_ :Welcome")
+        ft.feed(":srv 005 ${nick}_ MONITOR=1 :supported")
+        runCurrent()
+        assertEquals(nick, (client.state.value as IrcClientState.Ready).preferredNickToRegain)
+        client.send(IrcMessage.parse("MONITOR + $nick"))
+        return client
+    }
+
+    private suspend fun TestScope.offlineOpportunity(
+        client: IrcClient,
+        ft: FakeTransport,
+        line: String = ":srv 731 motd_ :motd",
+    ): Long {
+        val offline = async(UnconfinedTestDispatcher(testScheduler)) { client.broadcastEvents.filterIsInstance<IrcEvent.MonitorOffline>().first() }
+        ft.feed(line)
+        return offline.await().regainOpportunity
+    }
+
+    @Test
+    fun `assigned nick and failed registration retry never arm regain`() =
+        runTest {
+            for (failedRetry in listOf(false, true)) {
+                val ft = FakeTransport()
+                val client = IrcClient(config(), ft.factory(), clientScope())
+                client.start()
+                ft.feed(":srv CAP * LS :")
+                runCurrent()
+                if (failedRetry) {
+                    ft.sendFailure = IOException("registration write failed")
+                    ft.feed(":srv 433 * motd :Unavailable")
+                    runCurrent()
+                    ft.sendFailure = null
+                }
+                ft.feed(":srv 001 motd_ :Welcome")
+                ft.feed(":srv 005 motd_ MONITOR=1 :supported")
+                runCurrent()
+                assertNull((client.state.value as IrcClientState.Ready).preferredNickToRegain)
+                assertEquals(0L, offlineOpportunity(client, ft))
+                client.stop()
+            }
+        }
+
+    @Test
+    fun `live offline cycle allows one pending nick write and only a matching failure releases it`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft, "mot[d")
+
+            suspend fun offline() = offlineOpportunity(client, ft, ":srv 731 * :MOT{D")
+
+            suspend fun attempt(token: Long) = client.tryRegainPreferredNick("mot[d", token) { true }
+            assertEquals(0L, offlineOpportunity(client, ft, ":srv 731 bystander :MOT{D"))
+            val first = offline()
+            assertTrue(first > 0)
+            assertEquals(first, offline())
+            assertFalse(client.tryRegainPreferredNick("mot[d", first) { false })
+            assertFalse(client.tryRegainPreferredNick("changed", first) { true })
+            assertTrue(attempt(first))
+            assertFalse(attempt(first))
+            assertFalse(attempt(offline()))
+            ft.feed(":srv 433 mot[d_ unrelated :Busy")
+            ft.feed(":srv FAIL NICK UNAVAILABLE unrelated :Busy")
+            ft.feed(":srv 730 mot[d_ :MOT{D!u@h")
+            assertFalse(attempt(offline()))
+            ft.feed(":srv 438 mot[d_ MOT{D :Too fast")
+            assertFalse(attempt(offline()))
+            ft.feed(":srv 730 * :MOT{D!u@h")
+            val second = offline()
+            assertTrue(second > first)
+            assertFalse(attempt(first))
+            assertTrue(attempt(second))
+            ft.feed(":srv FAIL NICK UNAVAILABLE mot[d :Busy")
+            assertFalse(attempt(offline()))
+            ft.feed(":srv 730 mot[d_ :MOT{D!u@h")
+            assertTrue(attempt(offline()))
+            ft.feed(":MOT{D_!u@h NICK MOT{D")
+            runCurrent()
+            val ready = client.state.value as IrcClientState.Ready
+            assertEquals("MOT{D", ready.nick)
+            assertNull(ready.preferredNickToRegain)
+            assertEquals(4, ft.sent.count { it == "NICK mot[d" })
+        }
+
+    @Test
+    fun `manual raw nick disarms before acknowledgement and 005 never rearms`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft)
+            val token = offlineOpportunity(client, ft)
+            ft.beforeSend = { if (it == "@label=manual NICK chosen") assertNull((client.state.value as IrcClientState.Ready).preferredNickToRegain) }
+            assertTrue(client.sendIfConnected(IrcMessage.parse("@label=manual nIcK chosen")))
+            ft.feed(":srv 005 motd_ CASEMAPPING=ascii MONITOR=2 :supported")
+            assertFalse(client.tryRegainPreferredNick("motd", token) { true })
+            assertEquals(0L, offlineOpportunity(client, ft))
+            assertEquals("motd_", (client.state.value as IrcClientState.Ready).nick)
+            assertNull((client.state.value as IrcClientState.Ready).preferredNickToRegain)
+            assertEquals(1, ft.sent.count { it == "NICK motd" })
+            assertTrue(ft.sent.contains("@label=manual NICK chosen"))
+        }
+
+    @Test
+    fun `replay and stale offline reports cannot authorize nick writes`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft)
+            val stale = offlineOpportunity(client, ft)
+            ft.feed(":srv 730 motd_ :motd!u@h")
+            ft.feed(":srv BATCH +history chathistory motd")
+            ft.feed("@batch=history :srv 731 motd_ :motd")
+            ft.feed(":srv BATCH -history")
+            assertEquals(0L, offlineOpportunity(client, ft, "@batch=unknown :srv 731 motd_ :motd"))
+            assertEquals(0L, offlineOpportunity(client, ft, "@draft/chathistory-context :srv 731 motd_ :motd"))
+            assertFalse(client.tryRegainPreferredNick("motd", stale) { true })
+            val fresh = offlineOpportunity(client, ft)
+            ft.feed(":srv BATCH +history znc.in/playback motd")
+            ft.feed("@batch=history :srv 730 motd_ :motd!u@h")
+            ft.feed("@batch=history :motd_!u@h NICK chosen")
+            ft.feed(":srv BATCH -history")
+            runCurrent()
+            assertTrue(client.tryRegainPreferredNick("motd", fresh) { true })
+            client.stop()
+            assertFalse(client.tryRegainPreferredNick("motd", fresh) { true })
+        }
+
+    @Test
+    fun `new watch and limit rejection invalidate queued offline opportunity without resetting a consumed one`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft)
+
+            suspend fun attempt(token: Long) = client.tryRegainPreferredNick("motd", token) { true }
+            val beforeWatch = offlineOpportunity(client, ft)
+            client.send(IrcMessage.parse("MONITOR - MOTD"))
+            assertEquals(0L, offlineOpportunity(client, ft))
+            client.send(IrcMessage.parse("MONITOR C"))
+            assertEquals(0L, offlineOpportunity(client, ft))
+            client.send(IrcMessage.parse("MONITOR + other,MOTD"))
+            assertFalse(attempt(beforeWatch))
+            val rejected = offlineOpportunity(client, ft)
+            ft.feed(":srv 734 motd_ 1 MOTD :Monitor list full")
+            runCurrent()
+            assertFalse(attempt(rejected))
+            assertEquals(0L, offlineOpportunity(client, ft))
+            client.send(IrcMessage.parse("MONITOR + MOTD"))
+            val current = offlineOpportunity(client, ft)
+            client.send(IrcMessage.parse("MONITOR + other"))
+            assertTrue(attempt(current))
+            ft.feed(":srv 433 motd_ motd :Busy")
+            client.send(IrcMessage.parse("MONITOR C"))
+            client.send(IrcMessage.parse("MONITOR + motd"))
+            assertFalse(attempt(offlineOpportunity(client, ft)))
+        }
+
+    @Test
+    fun `queued preferred rejection applies only to the watch that received it`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft)
+            val replies = mutableListOf<IrcEvent.MonitorLimitExceeded>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.MonitorLimitExceeded>().toList(replies)
+            }
+            repeat(2) { ft.feed(":srv 734 * 1 motd,friend :Full") }
+            runCurrent()
+            val (rejection, duplicate) = replies
+            assertEquals(-rejection.regainWatchRevision, duplicate.regainWatchRevision)
+            assertFalse(client.isCurrentRegainWatch(duplicate))
+            client.send(IrcMessage.parse("NICK chosen"))
+            assertNull((client.state.value as IrcClientState.Ready).preferredNickToRegain)
+            client.send(IrcMessage.parse("MONITOR + unrelated"))
+            assertTrue(client.isCurrentRegainWatch(rejection))
+            client.send(IrcMessage.parse("MONITOR - motd"))
+            client.send(IrcMessage.parse("MONITOR + MOTD"))
+            assertFalse(client.isCurrentRegainWatch(rejection))
+            assertFalse(client.isCurrentRegainWatch(duplicate))
+        }
+
+    @Test
+    fun `only live self addressed monitor limit replies confirm rejections`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registeredNoCaps(ft)
+            val limits = mutableListOf<IrcEvent.MonitorLimitExceeded>()
+            backgroundScope.launch(UnconfinedTestDispatcher(testScheduler)) {
+                client.broadcastEvents.filterIsInstance<IrcEvent.MonitorLimitExceeded>().toList(limits)
+            }
+            ft.feed(":srv 734 other 1 peer :Full")
+            ft.feed(":peer!u@h 734 motd 1 peer :Full")
+            ft.feed("@draft/chathistory-context :srv 734 motd 1 peer :Full")
+            ft.feed("@batch=missing :srv 734 motd 1 peer :Full")
+            ft.feed(":srv BATCH +old example.net/replay")
+            ft.feed("@batch=old :srv 734 motd 1 peer :Full")
+            ft.feed(":srv BATCH -old")
+            ft.feed(":srv 734 MOTD 1 peer :Full")
+            ft.feed(":srv 734 * 1 peer :Full")
+            runCurrent()
+            assertEquals(listOf(false, false, false, false, false, true, true), limits.map { it.confirmedForSelf })
+        }
+
+    @Test
+    fun `loss and readvertisement of MONITOR invalidate old opportunity without disarming`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft)
+            val old = offlineOpportunity(client, ft)
+            ft.feed(":srv 005 bystander -MONITOR :Misdirected")
+            ft.feed("@batch=old :srv 005 motd_ -MONITOR :Replay")
+            ft.feed(":intruder!u@h 005 * -MONITOR :Not a server")
+            assertEquals(old, offlineOpportunity(client, ft))
+            ft.feed(":srv 005 motd_ -MONITOR :removed")
+            assertEquals(0L, offlineOpportunity(client, ft))
+            ft.feed(":srv 005 motd_ MONITOR=invalid :unsupported")
+            assertEquals(0L, offlineOpportunity(client, ft))
+            ft.feed(":srv 005 motd_ MONITOR=1 :restored")
+            runCurrent()
+            assertFalse(client.tryRegainPreferredNick("motd", old) { true })
+            assertEquals(0L, offlineOpportunity(client, ft))
+            client.send(IrcMessage.parse("MONITOR + motd"))
+            assertTrue(client.tryRegainPreferredNick("motd", offlineOpportunity(client, ft)) { true })
+        }
+
+    @Test
+    fun `restarted socket ignores tokens issued before disconnect`() =
+        runTest {
+            var ft = FakeTransport()
+            val client = IrcClient(config(), TransportFactory { _, _, _, _, _ -> ft }, clientScope())
+
+            suspend fun fallback(): Long {
+                client.start()
+                ft.feed(":srv 433 * motd :Unavailable")
+                ft.feed(":srv CAP * LS :")
+                ft.feed(":srv 001 motd_ :Welcome")
+                ft.feed(":srv 005 motd_ MONITOR=1 :supported")
+                runCurrent()
+                client.send(IrcMessage.parse("MONITOR + motd"))
+                return offlineOpportunity(client, ft)
+            }
+            val stale = fallback()
+            client.stop()
+            ft = FakeTransport()
+            val fresh = fallback()
+            assertFalse(client.tryRegainPreferredNick("motd", stale) { true })
+            assertTrue(client.tryRegainPreferredNick("motd", fresh) { true })
+        }
+
+    @Test
+    fun `uncertain nick write disarms even after another online cycle`() =
+        runTest {
+            val ft = FakeTransport()
+            val client = registerFallback(ft)
+            val token = offlineOpportunity(client, ft)
+            ft.sendFailure = IOException("lost acknowledgement")
+            assertFalse(client.tryRegainPreferredNick("motd", token) { true })
+            ft.sendFailure = null
+            ft.feed(":srv 730 motd_ :motd!u@h")
+            assertEquals(0L, offlineOpportunity(client, ft))
+            assertNull((client.state.value as IrcClientState.Ready).preferredNickToRegain)
+            assertEquals(2, ft.sent.count { it == "NICK motd" })
+        }
+
     @Test
     fun `live self nick change updates Ready and runs one recovery sequence`() =
         runTest {
@@ -1226,6 +1494,7 @@ class IrcClientTest {
 
             assertTrue(second.state.value is IrcClientState.Ready)
             assertEquals("motd_", (second.state.value as IrcClientState.Ready).nick)
+            assertNull((second.state.value as IrcClientState.Ready).preferredNickToRegain)
             assertEquals(1, secondTransport.sent.count { it == "NICK motd" })
             assertTrue(secondTransport.sent.none { it.contains("REGAIN") })
         }
@@ -2605,6 +2874,7 @@ class IrcClientTest {
             runCurrent()
             val fallback = client.state.value as IrcClientState.Ready
             assertEquals("quaff", fallback.nick)
+            assertNull(fallback.preferredNickToRegain)
             assertEquals("quaff", events.filterIsInstance<IrcEvent.Registered>().single().nick)
             events.clear()
 
@@ -2614,6 +2884,7 @@ class IrcClientTest {
             ft.feed(":$actual!user@host JOIN #room")
             ft.feed(":quaff!peer@host JOIN #peer")
             runCurrent()
+            assertNull((client.state.value as IrcClientState.Ready).preferredNickToRegain)
 
             val corrected = IrcEvent.Registered(actual, fallback.caps, fallback.isupport, startsSession = false)
             assertEquals(fallback.copy(nick = actual), client.state.value)

@@ -71,6 +71,7 @@ data class NetworkSettingsUiState(
     // Round 5: live status + autoConnect editing.
     val connState: IrcClientState = IrcClientState.Disconnected,
     val autoConnect: Boolean = true,
+    val autoRegainPreferredNick: Boolean = false,
     val parentName: String? = null, // root name for a BOUNCER_CHILD's "Managed by" row
     /** A bouncer transport/login change can invalidate all locally imported child mirrors. */
     val pendingBouncerIdentityChange: BouncerIdentityChange? = null,
@@ -81,7 +82,8 @@ data class NetworkSettingsUiState(
 ) {
     val vlessLinkError: String?
         get() = if (obfsMode == ObfsMode.EMBEDDED_REALITY) vlessLinkValidationError(obfsLink) else null
-    val hasUnsavedChanges: Boolean get() {
+    val hasUnsavedChanges: Boolean get() = hasNetworkFormChanges || (entity != null && autoRegainPreferredNick != entity.autoRegainPreferredNick)
+    internal val hasNetworkFormChanges: Boolean get() {
         val current = entity ?: return false
         return displayName.trim().ifBlank { current.name } != current.name ||
             wsUrl.trim().ifBlank { null } != current.wsUrl?.trim()?.ifBlank { null } ||
@@ -238,6 +240,7 @@ class NetworkSettingsViewModel
                                 parseZncLogin(it.saslUser.orEmpty(), it.saslPassword.orEmpty())
                             } ?: ZncLoginForm(),
                         autoConnect = n?.autoConnect ?: true,
+                        autoRegainPreferredNick = n?.autoRegainPreferredNick ?: false,
                         parentName = parentName,
                     )
                 }
@@ -326,6 +329,10 @@ class NetworkSettingsViewModel
             _state.value = _state.value.copy(autoConnect = enabled)
         }
 
+        fun setAutoRegainPreferredNick(enabled: Boolean) {
+            _state.value = _state.value.copy(autoRegainPreferredNick = enabled)
+        }
+
         fun saveAvatar(url: String?) =
             updateAvatar {
                 if (url != null && validateAvatarUrl(url) == null) false else avatarController.setSelfAvatar(networkId, url)
@@ -358,7 +365,13 @@ class NetworkSettingsViewModel
 
         fun save(onDone: () -> Unit) =
             viewModelScope.launch {
-                val current = _state.value.entity ?: return@launch
+                val state = _state.value
+                val current = state.entity ?: return@launch
+                if (state.autoRegainPreferredNick != current.autoRegainPreferredNick && !state.hasNetworkFormChanges) {
+                    networkRepository.setAutoRegainPreferredNick(current.id, state.autoRegainPreferredNick)
+                    onDone()
+                    return@launch
+                }
                 val updated = updatedNetwork(current)
                 val children =
                     if (current.role == NetworkRole.BOUNCER_ROOT && bouncerIdentityChanged(current, updated)) {
@@ -455,6 +468,7 @@ class NetworkSettingsViewModel
                 // Persist the current autoConnect value alongside the form fields.
             ).copy(
                 autoConnect = _state.value.autoConnect,
+                autoRegainPreferredNick = state.autoRegainPreferredNick,
                 trustedFileHost = normalizeTrustedFileHost(_state.value.trustedFileHost),
                 onConnectCommands = state.onConnectCommands,
                 initialAwayMessage =

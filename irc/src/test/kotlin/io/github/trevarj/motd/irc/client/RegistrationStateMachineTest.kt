@@ -177,6 +177,54 @@ class RegistrationStateMachineTest {
     }
 
     @Test
+    fun `targeted collisions before and after CAP END confirm only the last fallback`() {
+        val config = IrcClientConfig("irc.example", 6697, true, "mot[d", "motd", "motd")
+        for (error in listOf("432", "433", "436")) {
+            val machine = RegistrationStateMachine(config)
+            machine.start()
+
+            fun line(raw: String) = machine.onMessage(IrcMessage.parse(raw))
+            line(":srv 005 bystander CASEMAPPING=ascii :Misdirected")
+            line("@batch=old :srv 005 * CASEMAPPING=ascii :Replay")
+            line(":intruder!u@h 005 * CASEMAPPING=ascii :Not a server")
+            assertTrue(line(":srv $error * other :Unavailable").isEmpty())
+            assertEquals(listOf("NICK mot[d_"), line(":srv $error * MOT{D :Unavailable").sentLines())
+            assertEquals(listOf("CAP END"), machine.onMessage(cap("LS", "")).sentLines())
+            assertTrue(line(":srv $error * mot[d :Stale").isEmpty())
+            assertTrue(line(":srv $error other mot[d_ :Misdirected").isEmpty())
+            assertEquals(listOf("NICK mot[d__"), line(":srv $error * MOT{D_ :Unavailable").sentLines())
+            val ready = line(":srv 001 MOT{D__ :Welcome").filterIsInstance<RegistrationStateMachine.Action.Complete>().single()
+            assertEquals("MOT{D__", ready.registrationFallbackNick)
+            assertTrue(line(":srv $error * MOT{D__ :Too late").isEmpty())
+        }
+    }
+
+    @Test
+    fun `collisions after CAP END still exhaust the registration retry budget`() {
+        val machine = RegistrationStateMachine(IrcClientConfig("irc.example", 6697, true, "motd", "motd", "motd"))
+        machine.start()
+        machine.onMessage(cap("LS", ""))
+        for (nick in listOf("motd", "motd_", "motd__")) {
+            assertEquals(listOf("NICK ${nick}_"), machine.onMessage(IrcMessage.parse(":srv 433 * $nick :Busy")).sentLines())
+        }
+        assertTrue(machine.onMessage(IrcMessage.parse(":srv 433 * motd___ :Busy")).single() is RegistrationStateMachine.Action.Fail)
+    }
+
+    @Test
+    fun `assigned and casemap mismatched welcome nicks are not fallback provenance`() {
+        val config = IrcClientConfig("irc.example", 6697, true, "mot[d", "motd", "motd")
+        for (welcome in listOf("guest", "mot{d_", "mot[d")) {
+            val machine = RegistrationStateMachine(config)
+            machine.start()
+            machine.onMessage(cap("LS", ""))
+            machine.onMessage(IrcMessage.parse(":srv 005 * CASEMAPPING=ascii :supported"))
+            assertEquals(listOf("NICK mot[d_"), machine.onMessage(IrcMessage.parse(":srv 433 * mot[d :Unavailable")).sentLines())
+            val ready = machine.onMessage(IrcMessage.parse(":srv 001 $welcome :Welcome"))
+            assertEquals(null, ready.filterIsInstance<RegistrationStateMachine.Action.Complete>().single().registrationFallbackNick)
+        }
+    }
+
+    @Test
     fun `alternate nick runs configured recovery then requests preferred nick`() {
         val machine =
             RegistrationStateMachine(

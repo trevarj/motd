@@ -34,6 +34,7 @@ import io.github.trevarj.motd.data.db.identityRules
 import io.github.trevarj.motd.data.db.ircTarget
 import io.github.trevarj.motd.data.db.isSchedulableMessage
 import io.github.trevarj.motd.data.db.suppressesUnread
+import io.github.trevarj.motd.data.prefs.BouncerKindPrefs
 import io.github.trevarj.motd.data.prefs.CertTrustStore
 import io.github.trevarj.motd.data.prefs.DataStoreSettingsRepository
 import io.github.trevarj.motd.data.prefs.HistorySyncMode
@@ -106,6 +107,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -119,6 +121,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -847,6 +850,7 @@ class ConnectionManagerImpl
         private val db: MotdDatabase,
         private val eventProcessor: EventProcessor,
         private val settings: DataStoreSettingsRepository,
+        bouncerKindPrefs: BouncerKindPrefs,
         private val pushPrefs: PushPrefs,
         private val replyPrefs: ReplyPrefs,
         private val certStore: CertTrustStore,
@@ -958,10 +962,17 @@ class ConnectionManagerImpl
 
         /** Away text this device last wrote, attached to the state once the server confirms with 306. */
         private val pendingAwayMessages = java.util.concurrent.ConcurrentHashMap<Long, String>()
-        private val monitoredTargets = java.util.concurrent.ConcurrentHashMap<Long, Map<String, String>>()
-        private val monitorInitialized =
-            java.util.concurrent.ConcurrentHashMap
-                .newKeySet<Long>()
+
+        private data class MonitorBaseline(
+            val client: IrcClient,
+            val caseMapping: String?,
+            val limit: Int?,
+            val requested: Map<String, String>,
+            val rejected: Set<String>,
+        )
+
+        private val zncIds = bouncerKindPrefs.zncNetworkIds.stateIn(scope, SharingStarted.Eagerly, null)
+        private val monitoredTargets = ConcurrentHashMap<Long, MonitorBaseline>()
         private val monitorLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
         private val sendLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
         private val retryLocks = java.util.concurrent.ConcurrentHashMap<Long, Mutex>()
@@ -1081,15 +1092,14 @@ class ConnectionManagerImpl
                         // distinctUntilChanged: every messages write invalidates the projection, but the
                         // desired MONITOR set only changes when the rows themselves do.
                         combine(
-                            settings.settings,
+                            settings.settings.map { it.friends }.distinctUntilChanged(),
                             bufferDao.observeMonitorQueryRows().distinctUntilChanged(),
-                        ) { currentSettings, rows ->
-                            currentSettings.friends to rows
-                        }.collect { (friends, rows) ->
+                            zncIds,
+                        ) { friends, rows, _ -> friends to rows }.collect { (friends, rows) ->
                             registry.snapshot.value.actors.keys.forEach { networkId ->
                                 val client = clientFor(networkId) ?: return@forEach
-                                if (client.state.value is IrcClientState.Ready && networkId in monitorInitialized) {
-                                    reconcileMonitor(networkId, client, friends, rows, fresh = false)
+                                if (client.state.value is IrcClientState.Ready) {
+                                    reconcileMonitor(networkId, client, friends, rows)
                                 }
                             }
                         }
@@ -1462,7 +1472,6 @@ class ConnectionManagerImpl
                     rosterRequests.clear()
                     _rosterStates.value = emptyMap()
                     monitoredTargets.clear()
-                    monitorInitialized.clear()
                     monitorLocks.clear()
                     _presenceStates.value = emptyMap()
                     _lagStates.value = emptyMap()
@@ -1504,6 +1513,7 @@ class ConnectionManagerImpl
                     val current = clientFor(networkId)
                     completedCatchUps.remove(networkId)
                     registry.disconnect(networkId)
+                    invalidatePresence(networkId, current)
                     scopedActorIds.remove(networkId)
                     processedMembershipEvents.remove(networkId)
                     current
@@ -1515,7 +1525,6 @@ class ConnectionManagerImpl
             // is coming. Backgrounding and Doze deliberately keep those entries.
             historyResyncCoordinator.retireNetwork(networkId, client)
             invalidateRosters(networkId)
-            invalidatePresence(networkId)
         }
 
         override suspend fun reconnectStale() {
@@ -1535,9 +1544,11 @@ class ConnectionManagerImpl
 
         /** Add/remove/restart actors so the live set matches the wanted set derived from [all] rows
          *  and the sticky user-intent map. */
-        private suspend fun reconcile(all: List<NetworkEntity>) =
+        private suspend fun reconcile(all: List<NetworkEntity>) {
+            val monitorChanges = mutableListOf<Long>()
             actorIntentLock.withLock {
-                val deletedIds = networksById.keys - all.mapTo(mutableSetOf()) { it.id }
+                val previous = networksById
+                val deletedIds = previous.keys - all.mapTo(mutableSetOf()) { it.id }
                 // Keep a synchronous lookup so buildClient can resolve a child's root bouncer row.
                 networksById = all.associateBy { it.id }
                 val suspended = notificationReplySuspensions(pushSuspendedIds, notificationRepliesInFlight)
@@ -1566,7 +1577,10 @@ class ConnectionManagerImpl
                     eventProcessor.evictNetwork(it)
                     _lagStates.update { states -> states - it }
                 }
+                all.forEach { if (previous[it.id]?.autoRegainPreferredNick != it.autoRegainPreferredNick) monitorChanges.add(it.id) }
             }
+            monitorChanges.forEach { id -> clientFor(id)?.let { refreshMonitor(id, it) } }
+        }
 
         private fun createActor(
             row: NetworkEntity,
@@ -1574,6 +1588,8 @@ class ConnectionManagerImpl
         ): ConnectionLifecycleActor {
             val fp = fingerprint(row)
             val nickRecoveryGuard = NickRecoveryGuard()
+            var previousReady: IrcClientState.Ready? = null
+            var registeredIsupport: Map<String, String> = emptyMap()
             return ConnectionActor(
                 networkId = row.id,
                 scope = scope,
@@ -1598,6 +1614,14 @@ class ConnectionManagerImpl
                         }
                     }
                     registry.actorState(id, generation, fp, state)
+                    val previous = previousReady
+                    previousReady = state as? IrcClientState.Ready
+                    if (previous != null && state is IrcClientState.Ready &&
+                        previous.preferredNickToRegain != state.preferredNickToRegain &&
+                        registry.isCurrent(id, generation)
+                    ) {
+                        clientFor(id)?.let { refreshMonitor(id, it) }
+                    }
                     // Startup step 3A: a root reaching Registering has already proven the bouncer
                     // endpoint reachable (tunnel + TCP + TLS done), which is all a dead child was
                     // waiting for — its own SASL bind needs nothing from the root's session. Launched
@@ -1610,12 +1634,20 @@ class ConnectionManagerImpl
                         }
                     }
                 },
-                onEvents = { id, events ->
+                onEvents = { id, origin, events ->
                     registry.runIfCurrent(id, generation) {
+                        val client = (origin as IrcClientConnection).client
+                        if (clientFor(id) !== client) return@runIfCurrent
                         if (events.size == 1) {
-                            handleConnectionEvent(id, events.single())
+                            val event = events.single()
+                            if (event is IrcEvent.Registered) {
+                                val previous = registeredIsupport
+                                registeredIsupport = event.isupport
+                                if (!event.startsSession) onMonitorIsupport(id, client, previous, event.isupport)
+                            }
+                            handleConnectionEvent(id, client, generation, event)
                         } else {
-                            clientFor(id)?.let { client -> events.forEach { profiles.onEvent(id, client, it) } }
+                            events.forEach { profiles.onEvent(id, client, it) }
                             eventProcessor.processPeerPresenceBatch(id, events)
                         }
                     }
@@ -1661,6 +1693,8 @@ class ConnectionManagerImpl
 
         private suspend fun handleConnectionEvent(
             networkId: Long,
+            origin: IrcClient,
+            generation: Long,
             event: IrcEvent,
         ) {
             val metadataRouting =
@@ -1724,7 +1758,7 @@ class ConnectionManagerImpl
 
                 is IrcEvent.Disconnected -> {
                     invalidateRosters(networkId)
-                    invalidatePresence(networkId)
+                    invalidatePresence(networkId, origin)
                 }
 
                 is IrcEvent.MultilineRejected -> {
@@ -1737,33 +1771,33 @@ class ConnectionManagerImpl
 
                 is IrcEvent.MonitorOffline -> {
                     updatePresence(networkId, event.nicks, PresenceState.OFFLINE)
+                    tryRegainOnOffline(networkId, origin, generation, event)
                 }
 
                 is IrcEvent.MonitorLimitExceeded -> {
-                    val normalize = clientFor(networkId)?.isupport?.let { it::normalize }
-                    if (normalize != null) {
-                        val rejected = event.targets.mapTo(HashSet(), normalize)
-                        monitoredTargets.computeIfPresent(networkId) { _, accepted ->
-                            accepted.filterKeys { it !in rejected }
+                    if (!event.confirmedForSelf) return
+                    monitorLocks.getOrPut(networkId) { Mutex() }.withLock {
+                        val baseline = monitoredTargets[networkId] ?: return@withLock
+                        if (baseline.client !== origin) return@withLock
+                        val armed = (origin.state.value as? IrcClientState.Ready)?.preferredNickToRegain != null
+                        val stalePreferred =
+                            if ((armed || event.regainWatchRevision != 0L) && !origin.isCurrentRegainWatch(event)) {
+                                origin.isupport.normalize(origin.config.nick)
+                            } else {
+                                null
+                            }
+                        val rejected = HashSet<String>()
+                        for (target in event.targets) {
+                            val key = origin.isupport.normalize(target)
+                            if (key == stalePreferred) continue
+                            if (key in baseline.requested) rejected += key
+                            setPresence(networkId, target, PresenceState.UNKNOWN)
                         }
-                    }
-                    event.targets.forEach { target ->
-                        setPresence(networkId, target, PresenceState.UNKNOWN)
-                    }
-                }
-
-                is IrcEvent.Registered -> {
-                    // Registration reaches Ready on 001, while servers commonly advertise ISUPPORT
-                    // later in 005. The client republishes Registered when that runtime snapshot
-                    // changes; initialize MONITOR here if the first Ready-time pass saw it as absent.
-                    if (shouldInitializeMonitorFromRegistration(event.isupport, monitoredTargets.containsKey(networkId))) {
-                        clientFor(networkId)?.let { client ->
-                            reconcileMonitor(
+                        if (rejected.isNotEmpty()) {
+                            monitoredTargets.replace(
                                 networkId,
-                                client,
-                                settings.settings.first().friends,
-                                bufferDao.observeMonitorQueryRows().first(),
-                                fresh = true,
+                                baseline,
+                                baseline.copy(requested = baseline.requested - rejected, rejected = baseline.rejected + rejected),
                             )
                         }
                     }
@@ -1793,16 +1827,7 @@ class ConnectionManagerImpl
                         event.added.any { it.substringBefore('=') in io.github.trevarj.motd.irc.client.EXTENDED_MONITOR_ALIASES } ||
                         event.removed.any { it in io.github.trevarj.motd.irc.client.EXTENDED_MONITOR_ALIASES }
                     ) {
-                        clientFor(networkId)?.let { client ->
-                            val currentSettings = settings.settings.first()
-                            reconcileMonitor(
-                                networkId,
-                                client,
-                                currentSettings.friends,
-                                bufferDao.observeMonitorQueryRows().first(),
-                                fresh = false,
-                            )
-                        }
+                        refreshMonitor(networkId, origin)
                     }
                 }
 
@@ -1850,57 +1875,119 @@ class ConnectionManagerImpl
             }
         }
 
+        private fun preferredMonitorNick(
+            networkId: Long,
+            client: IrcClient,
+        ): String? {
+            if (!registry.snapshot.value.started || networkId in scopedActorIds) return null
+            return preferredMonitorNick(networksById[networkId], client.state.value as? IrcClientState.Ready, zncIds.value, client.isupport::normalize)
+        }
+
+        private suspend fun tryRegainOnOffline(
+            networkId: Long,
+            client: IrcClient,
+            generation: Long,
+            event: IrcEvent.MonitorOffline,
+        ) {
+            if (event.regainOpportunity == 0L) return
+            val preferred = preferredMonitorNick(networkId, client) ?: return
+            val key = client.isupport.normalize(preferred)
+            if (event.nicks.none { client.isupport.normalize(it) == key }) return
+            monitorLocks.getOrPut(networkId) { Mutex() }.withLock {
+                val baseline = monitoredTargets[networkId] ?: return
+                if (baseline.client !== client || key !in baseline.requested) return
+                client.tryRegainPreferredNick(preferred, event.regainOpportunity) {
+                    registry.isCurrent(networkId, generation) && clientFor(networkId) === client &&
+                        monitoredTargets[networkId] === baseline && preferredMonitorNick(networkId, client) == preferred
+                }
+            }
+        }
+
+        private suspend fun onMonitorIsupport(
+            networkId: Long,
+            client: IrcClient,
+            previous: Map<String, String>,
+            current: Map<String, String>,
+        ) {
+            if (previous["MONITOR"] == current["MONITOR"] && previous["CASEMAPPING"] == current["CASEMAPPING"] &&
+                ("BOUNCER_NETID" in previous) == ("BOUNCER_NETID" in current)
+            ) {
+                return
+            }
+            val support = monitorSupport(current)
+            if (support == MonitorSupport.Unsupported || support == MonitorSupport.Malformed) {
+                monitorLocks.getOrPut(networkId) { Mutex() }.withLock {
+                    monitoredTargets.computeIfPresent(networkId) { _, baseline -> baseline.takeUnless { it.client === client } }
+                }
+                val ready = client.state.value as? IrcClientState.Ready ?: return
+                if (ready.isupport["MONITOR"] != current["MONITOR"]) return
+            }
+            refreshMonitor(networkId, client)
+        }
+
+        private suspend fun refreshMonitor(
+            networkId: Long,
+            client: IrcClient,
+        ) {
+            if (client.state.value !is IrcClientState.Ready) return
+            reconcileMonitor(networkId, client, settings.settings.first().friends, bufferDao.observeMonitorQueryRows().first())
+        }
+
         private suspend fun reconcileMonitor(
             networkId: Long,
             client: IrcClient,
             friends: Set<String>,
             rows: List<io.github.trevarj.motd.data.db.MonitorQueryRow>,
-            fresh: Boolean,
-        ) {
-            if (networksById[networkId]?.role == NetworkRole.BOUNCER_ROOT) return
-            val ready = client.state.value as? IrcClientState.Ready ?: return
+            reportMalformed: Boolean = false,
+        ) = monitorLocks.getOrPut(networkId) { Mutex() }.withLock {
+            if (clientFor(networkId) !== client || networksById[networkId]?.role == NetworkRole.BOUNCER_ROOT) return@withLock
+            val ready = client.state.value as? IrcClientState.Ready ?: return@withLock
             val support = monitorSupport(ready.isupport)
+            val limit = (support as? MonitorSupport.Limited)?.limit
             val selection =
                 selectMonitorTargets(
+                    preferredNick = preferredMonitorNick(networkId, client),
                     friends = friends,
                     queryRows = rows.filter { it.networkId == networkId },
-                    limit = (support as? MonitorSupport.Limited)?.limit,
+                    limit = limit,
                     normalize = client.isupport::normalize,
                 )
             updateDesiredPresence(networkId, selection.allDesired, client.isupport::normalize)
             if (support is MonitorSupport.Unsupported) {
                 monitoredTargets.remove(networkId)
-                if (fresh) monitorInitialized += networkId
-                return
+                return@withLock
             }
             if (support is MonitorSupport.Malformed) {
                 monitoredTargets.remove(networkId)
-                if (fresh) monitorInitialized += networkId
-                if (fresh) {
+                if (reportMalformed) {
                     eventProcessor.process(
                         networkId,
                         IrcEvent.ServerError("MONITOR", emptyList(), "invalid MONITOR ISUPPORT limit"),
                     )
                 }
-                return
+                return@withLock
             }
 
-            monitorLocks.getOrPut(networkId) { Mutex() }.withLock {
-                if (clientFor(networkId) !== client || client.state.value !is IrcClientState.Ready) return@withLock
-                val desired = selection.selected.associateBy(client.isupport::normalize)
-                val previous = if (fresh) emptyMap() else monitoredTargets[networkId].orEmpty()
-                val plan = monitorReconciliation(previous, desired, fresh)
-                runCatching {
-                    if (plan.clear) client.send(MonitorCommands.clear())
-                    MonitorCommands.remove(plan.remove).forEach { client.send(it) }
-                    MonitorCommands.add(plan.add).forEach { client.send(it) }
-                    if (plan.status) client.send(MonitorCommands.status())
-                }.onSuccess {
-                    monitoredTargets[networkId] = desired
-                    if (fresh) monitorInitialized += networkId
-                }.onFailure {
-                    desired.values.forEach { setPresence(networkId, it, PresenceState.UNKNOWN) }
-                }
+            val caseMapping = ready.isupport["CASEMAPPING"]
+            val baseline = monitoredTargets[networkId]?.takeIf { it.client === client && it.caseMapping == caseMapping }
+            val desired = selection.selected.associateBy(client.isupport::normalize)
+            val previousLimit = baseline?.limit
+            val capacityIncreased = previousLimit != null && (limit == null || limit > previousLimit)
+            val rejected = if (capacityIncreased) emptySet() else baseline?.rejected.orEmpty().intersect(desired.keys)
+            val requested = if (rejected.isEmpty()) desired else desired - rejected
+            val plan = monitorReconciliation(baseline?.requested.orEmpty(), requested, fresh = baseline == null)
+            try {
+                if (plan.clear) client.send(MonitorCommands.clear())
+                MonitorCommands.remove(plan.remove).forEach { client.send(it) }
+                MonitorCommands.add(plan.add).forEach { client.send(it) }
+                if (plan.status) client.send(MonitorCommands.status())
+                monitoredTargets[networkId] = MonitorBaseline(client, caseMapping, limit, requested, rejected)
+            } catch (cancelled: CancellationException) {
+                monitoredTargets.remove(networkId)
+                throw cancelled
+            } catch (_: Exception) {
+                monitoredTargets.remove(networkId)
+                desired.values.forEach { setPresence(networkId, it, PresenceState.UNKNOWN) }
             }
         }
 
@@ -1957,9 +2044,12 @@ class ConnectionManagerImpl
             _presenceStates.update { current -> rekeyPresenceState(current, oldKey, newKey) }
         }
 
-        private fun invalidatePresence(networkId: Long) {
-            monitoredTargets.remove(networkId)
-            monitorInitialized.remove(networkId)
+        private fun invalidatePresence(
+            networkId: Long,
+            retiring: IrcClient?,
+        ) {
+            monitoredTargets.computeIfPresent(networkId) { _, baseline -> baseline.takeUnless { retiring == null || it.client === retiring } }
+            if (clientFor(networkId)?.let { it !== retiring } == true) return
             _presenceStates.update { current -> invalidatePresenceState(current, networkId) }
             // Our own away state is server-confirmed; a connection that is gone confirms nothing.
             pendingAwayMessages.remove(networkId)
@@ -2260,7 +2350,7 @@ class ConnectionManagerImpl
                 client,
                 settings.settings.first().friends,
                 bufferDao.observeMonitorQueryRows().first(),
-                fresh = true,
+                reportMalformed = true,
             )
             if (!isCurrent()) return
             // Persist STS policy if the server advertised one.
@@ -2811,8 +2901,9 @@ class ConnectionManagerImpl
                     if (row.role == NetworkRole.BOUNCER_CHILD && parent == null) return@withLock
                     retainNotificationReplyNetwork(scheduledConnectionsInFlight, networkId)
                     leased = true
-                    networksById = networksById + (row.id to row)
-                    if (parent != null) networksById = networksById + (parent.id to parent)
+                    val started = registry.snapshot.value.started
+                    if (!started || row.id !in networksById) networksById = networksById + (row.id to row)
+                    if (parent != null && (!started || parent.id !in networksById)) networksById = networksById + (parent.id to parent)
                     if (networkId !in registry.snapshot.value.actors) scopedActorIds += networkId
                     registry.ensureScoped(
                         row,
@@ -2824,9 +2915,10 @@ class ConnectionManagerImpl
             } finally {
                 if (leased) {
                     withContext(NonCancellable) {
+                        var promoted: IrcClient? = null
                         actorIntentLock.withLock {
                             releaseNotificationReplyNetwork(scheduledConnectionsInFlight, networkId)
-                            if (!scheduledConnectionsInFlight.containsKey(networkId) && scopedActorIds.remove(networkId)) {
+                            if (!scheduledConnectionsInFlight.containsKey(networkId) && networkId in scopedActorIds) {
                                 val suspended =
                                     !appForeground && networkId in pushSuspendedIds && !notificationRepliesInFlight.containsKey(networkId)
                                 val normallyWanted =
@@ -2836,9 +2928,13 @@ class ConnectionManagerImpl
                                     registry.disconnect(networkId)
                                     completedCatchUps.remove(networkId)
                                     processedMembershipEvents.remove(networkId)
+                                } else {
+                                    promoted = clientFor(networkId)
                                 }
+                                scopedActorIds.remove(networkId)
                             }
                         }
+                        promoted?.let { refreshMonitor(networkId, it) }
                         scope.launch { evaluatePushMode() }
                     }
                 }

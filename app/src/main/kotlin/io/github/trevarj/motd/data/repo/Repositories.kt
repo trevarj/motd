@@ -42,6 +42,13 @@ interface NetworkRepository {
 
     suspend fun updateNetwork(n: NetworkEntity)
 
+    suspend fun setAutoRegainPreferredNick(
+        id: Long,
+        enabled: Boolean,
+    ) {
+        networkById(id)?.let { updateNetwork(it.copy(autoRegainPreferredNick = enabled)) }
+    }
+
     suspend fun deleteNetwork(id: Long)
 
     /**

@@ -950,6 +950,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
             assertTrue(imported.nickServRecoveryEnabled)
             assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
+            assertTrue(imported.autoRegainPreferredNick)
             assertNull(imported.obfsLink)
             assertEquals(
                 "saslPassword,serverPassword,nickServPassword,obfsLink,clientCertificate",
@@ -1009,6 +1010,7 @@ class ConfigurationBackupRepositoryTest {
                     .exportToString(BackupExportMode.CREDENTIALS_EXCLUDED, nowEpochMillis = 1_000L)
                     .lineSequence()
                     .filterNot { it.contains("\"onConnectCommands\":") }
+                    .filterNot { it.contains("\"autoRegainPreferredNick\":") }
                     .joinToString("\n")
             assertFalse(legacy.contains("\"onConnectCommands\""))
 
@@ -1026,6 +1028,13 @@ class ConfigurationBackupRepositoryTest {
 
             val newDb = inMemoryDb()
             repository(newDb).import(legacy, importMode = BackupImportMode.MERGE)
+            assertFalse(
+                newDb
+                    .networkDao()
+                    .allNow()
+                    .single()
+                    .autoRegainPreferredNick,
+            )
             assertEquals(
                 "",
                 newDb
@@ -1082,6 +1091,7 @@ class ConfigurationBackupRepositoryTest {
             assertEquals("PASSWORD_NICK", imported.nickServIdentifySyntax)
             assertTrue(imported.nickServRecoveryEnabled)
             assertEquals("GHOST,REGAIN", imported.nickServRecoverySequence)
+            assertTrue(imported.autoRegainPreferredNick)
             assertEquals("vless://secret", imported.obfsLink)
             assertEquals("files.example", imported.trustedFileHost)
             assertEquals(commands, imported.onConnectCommands)
@@ -2820,6 +2830,7 @@ class ConfigurationBackupRepositoryTest {
             nickServIdentifySyntax = "PASSWORD_NICK",
             nickServRecoveryEnabled = true,
             nickServRecoverySequence = "GHOST,REGAIN",
+            autoRegainPreferredNick = true,
             clientCertAlias = clientCertAlias,
             autoConnect = true,
             obfsMode = ObfsMode.EMBEDDED_REALITY,

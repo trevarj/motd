@@ -50,7 +50,7 @@ class OnConnectCommandsTest {
                         )
                     },
                     onState = { _, _ -> },
-                    onEvents = { _, _ -> },
+                    onEvents = { _, _, _ -> },
                     onReady = { connection ->
                         val client = (connection as IrcClientConnection).client
                         runOnConnectCommands(

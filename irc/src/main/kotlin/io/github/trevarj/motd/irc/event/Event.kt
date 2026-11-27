@@ -18,6 +18,7 @@ sealed interface IrcClientState {
         val isupport: Map<String, String>,
         /** Uppercase keys explicitly removed by 005, not merely awaiting advertisement. */
         val removedIsupport: Set<String> = emptySet(),
+        val preferredNickToRegain: String? = null,
     ) : IrcClientState
 
     data class Failed(
@@ -297,6 +298,7 @@ sealed interface IrcEvent {
     data class MonitorOffline(
         val nicks: List<String>,
         val wireSequence: Long = 0L,
+        val regainOpportunity: Long = 0L,
     ) : IrcEvent
 
     data class MonitorList(
@@ -309,6 +311,8 @@ sealed interface IrcEvent {
         val limit: Int?,
         val targets: List<String>,
         val text: String,
+        val confirmedForSelf: Boolean = false,
+        val regainWatchRevision: Long = 0L,
     ) : IrcEvent
 
     // -- channel state

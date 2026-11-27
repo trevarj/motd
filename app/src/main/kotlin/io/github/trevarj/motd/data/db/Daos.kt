@@ -224,6 +224,12 @@ interface NetworkDao {
         url: String?,
     )
 
+    @Query("UPDATE networks SET autoRegainPreferredNick = :enabled WHERE id = :id")
+    suspend fun setAutoRegainPreferredNick(
+        id: Long,
+        enabled: Boolean,
+    )
+
     @Query("UPDATE networks SET ordering = :ordering WHERE id = :id")
     suspend fun setOrdering(
         id: Long,

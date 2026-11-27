@@ -6,12 +6,14 @@ import io.github.trevarj.motd.irc.ext.BatchChild
 import io.github.trevarj.motd.irc.ext.BatchTree
 import io.github.trevarj.motd.irc.ext.BouncerCommands
 import io.github.trevarj.motd.irc.ext.ChatHistoryCommands
+import io.github.trevarj.motd.irc.ext.MonitorSupport
 import io.github.trevarj.motd.irc.ext.ReadMarkerCommands
 import io.github.trevarj.motd.irc.ext.SearchCommands
 import io.github.trevarj.motd.irc.ext.SearchRequest
 import io.github.trevarj.motd.irc.ext.SearchResultMessage
 import io.github.trevarj.motd.irc.ext.TypingOutbox
 import io.github.trevarj.motd.irc.ext.WebPushCommands
+import io.github.trevarj.motd.irc.ext.monitorSupport
 import io.github.trevarj.motd.irc.ext.parseSearchResult
 import io.github.trevarj.motd.irc.proto.IrcMessage
 import io.github.trevarj.motd.irc.proto.IrcParseException
@@ -99,7 +101,10 @@ data class IrcClientConfig(
      * hostname verification, and cert pinning still key on the WS URL's real host/port.
      */
     val wsUrl: String? = null,
-)
+) {
+    internal val hasNickServRecovery: Boolean
+        get() = sasl == SaslMechanism.NONE && !nickServPassword.isNullOrEmpty() && nickServRecoveryCommands.isNotEmpty()
+}
 
 data class ChatHistoryRequest(
     val subcommand: Subcommand,
@@ -344,6 +349,14 @@ class IrcClient(
     private val accountRegistrationLock = Mutex()
     private val sensitiveEchoes = ConcurrentHashMap<String, Int>()
     private val outboundLock = Mutex()
+    private var regainDisarmed = false
+    private var regainPending = false
+    private var regainMonitorSupported = false
+    private var regainWatchRequested = false
+    private var regainOfflineOpportunity = 0L
+    private var nextRegainOpportunity = 0L
+
+    @Volatile private var regainWatchRevision = 0L
     private val batches = BatchAssembler()
     private val typingOutbox = TypingOutbox()
     private val eventMapper =
@@ -469,7 +482,14 @@ class IrcClient(
         joinRejections.set(joinSession)
         val whoisSession = UnlabeledWhoisCorrelator(t)
         unlabeledWhois.set(whoisSession)
-        transport = t
+        outboundLock.withLock {
+            regainDisarmed = false
+            regainPending = false
+            regainWatchRequested = false
+            regainOfflineOpportunity = 0L
+            regainWatchRevision++
+            transport = t
+        }
         val banSession = ChannelBanRequests(t)
         channelBanSession.set(banSession)
         try {
@@ -632,6 +652,9 @@ class IrcClient(
         when (a) {
             is RegistrationStateMachine.Action.Send -> {
                 runCatching { sendSerialized(t, a.line) }
+                    .onFailure {
+                        if (a.line.startsWith("NICK ")) outboundLock.withLock { if (transport === t) regainDisarmed = true }
+                    }
             }
 
             is RegistrationStateMachine.Action.SendDeferred -> {
@@ -688,7 +711,12 @@ class IrcClient(
                 _pendingFeatureCaps.value = a.deferredCaps
                 registered = true
                 val isupportMap = isupportToMap(a.isupport)
-                _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap, removedIsupport)
+                outboundLock.withLock {
+                    if (transport !== t) return
+                    val preferred = config.nick.takeIf { a.registrationFallbackNick != null && !regainDisarmed && !config.hasNickServRecovery }
+                    regainMonitorSupported = preferred != null && supportsRegainMonitor(isupportMap)
+                    _state.value = IrcClientState.Ready(a.nick, a.caps, isupportMap, removedIsupport, preferred)
+                }
                 val sequence = wireSequence.takeIf { hasCap(METADATA_V3_CAP) && hasCap("batch") } ?: 0L
                 publish(criticalEvents, IrcEvent.Registered(a.nick, a.caps, isupportMap, removedIsupport, wireSequence = sequence))
             }
@@ -734,19 +762,22 @@ class IrcClient(
         }
 
         // A bouncer may publish Ready before 001; the upstream's authoritative nick still wins.
-        if (msg.command == "001") {
+        if (msg.command == "001" && msg.isLiveNickReply()) {
             val nick = msg.params.firstOrNull()?.takeIf { it.isNotBlank() }
             val current = _state.value as? IrcClientState.Ready
             if (nick != null && current != null && nick != current.nick) {
-                selfNick.set(nick)
-                _state.value = current.copy(nick = nick)
+                outboundLock.withLock {
+                    if (transport !== t) return
+                    selfNick.set(nick)
+                    _state.update { if (it is IrcClientState.Ready) it.copy(nick = nick, preferredNickToRegain = null) else it }
+                }
                 publish(criticalEvents, IrcEvent.Registered(nick, current.caps, current.isupport, current.removedIsupport, startsSession = false))
             }
         }
 
         // 005 normally arrives after 001. Keep Ready's snapshot current so app-owned feature
         // gates (notably CLIENTTAGDENY) do not operate on the empty registration-time map.
-        if (msg.command == "005") updateRuntimeIsupport(msg, criticalEvents)
+        if (msg.command == "005" && msg.isLiveNickReply()) updateRuntimeIsupport(msg, criticalEvents)
         if (msg.command == "376" || msg.command == "422") {
             _targetClassificationReady.value = true
         }
@@ -771,8 +802,10 @@ class IrcClient(
                         scope.launch { runCatching { sendSerialized(t, reply) } }
                     }
                 if (ev != null) {
-                    applySelfNickChange(ev, t)
-                    emitEvent(if ("batch" in msg.tags) ev else correlateJoinRejection(t, ev), criticalEvents)
+                    val live = "batch" !in msg.tags && "draft/chathistory-context" !in msg.tags
+                    if (live) applySelfNickChange(ev, t)
+                    val event = observeRegainReply(msg, ev, t)
+                    emitEvent(if ("batch" in msg.tags) event else correlateJoinRejection(t, event), criticalEvents)
                 }
             }
         }
@@ -784,17 +817,84 @@ class IrcClient(
         t: IrcTransport,
     ) {
         if (ev !is IrcEvent.NickChanged || !ev.isSelf) return
-        selfNick.set(ev.to)
-        (_state.value as? IrcClientState.Ready)?.let { ready ->
-            _state.value = ready.copy(nick = ev.to)
+        outboundLock.withLock {
+            if (transport !== t) return
+            selfNick.set(ev.to)
+            _state.update { if (it is IrcClientState.Ready) it.copy(nick = ev.to, preferredNickToRegain = null) else it }
         }
         if (_isupport.get().normalize(ev.to) == _isupport.get().normalize(config.nick)) return
-        if (config.sasl != SaslMechanism.NONE || config.nickServPassword.isNullOrEmpty() ||
-            config.nickServRecoveryCommands.isEmpty() || !nickRecoveryGuard.claim()
-        ) {
-            return
-        }
+        if (!config.hasNickServRecovery || !nickRecoveryGuard.claim()) return
         for (line in nickServRecoveryLines(config)) sendSerialized(t, line)
+    }
+
+    private suspend fun observeRegainReply(
+        msg: IrcMessage,
+        event: IrcEvent,
+        t: IrcTransport,
+    ): IrcEvent {
+        if (event !is IrcEvent.MonitorLimitExceeded && (_state.value as? IrcClientState.Ready)?.preferredNickToRegain == null) return event
+        if (!msg.isLiveNickReply()) return event
+        when (msg.command) {
+            "730", "731", "734", "432", "433", "436", "437", "438", "FAIL" -> Unit
+            else -> return event
+        }
+        return outboundLock.withLock {
+            val ready = _state.value as? IrcClientState.Ready ?: return@withLock event
+            val preferred = ready.preferredNickToRegain
+            if (preferred == null && event !is IrcEvent.MonitorLimitExceeded) return@withLock event
+            if (transport !== t) return@withLock event
+            val target = preferred?.let(isupport::normalize)
+
+            fun matches(nick: String): Boolean = isupport.normalize(nick) == target
+            if (event is IrcEvent.StandardReply) {
+                if (event.commandName.equals("NICK", ignoreCase = true) && (event.context.isEmpty() || matches(event.context.first()))) {
+                    regainPending = false
+                }
+                return@withLock event
+            }
+            val recipient = msg.params.firstOrNull() ?: return@withLock event
+            val monitorBroadcast = recipient == "*" && (msg.command == "730" || msg.command == "731" || msg.command == "734")
+            if (!monitorBroadcast && isupport.normalize(recipient) != isupport.normalize(ready.nick)) {
+                return@withLock event
+            }
+            when (event) {
+                is IrcEvent.MonitorOnline -> {
+                    if (regainWatchRequested && event.identities.any { matches(it.nick) }) regainOfflineOpportunity = 0L
+                }
+
+                is IrcEvent.MonitorOffline -> {
+                    if (regainWatchRequested && event.nicks.any(::matches)) {
+                        if (regainOfflineOpportunity == 0L) {
+                            regainOfflineOpportunity = if (regainPending) CONSUMED_REGAIN_OPPORTUNITY else ++nextRegainOpportunity
+                        }
+                        if (regainOfflineOpportunity > 0L) return@withLock event.copy(regainOpportunity = regainOfflineOpportunity)
+                    }
+                }
+
+                is IrcEvent.MonitorLimitExceeded -> {
+                    val revision =
+                        when {
+                            preferred == null || event.targets.none(::matches) -> 0L
+                            regainWatchRequested -> regainWatchRevision
+                            else -> -regainWatchRevision
+                        }
+                    if (revision > 0L) {
+                        regainWatchRequested = false
+                        if (regainOfflineOpportunity > 0L) regainOfflineOpportunity = 0L
+                    }
+                    return@withLock event.copy(confirmedForSelf = true, regainWatchRevision = revision)
+                }
+
+                is IrcEvent.ServerError -> {
+                    if (msg.params.getOrNull(1)?.let(::matches) == true) regainPending = false
+                }
+
+                else -> {
+                    Unit
+                }
+            }
+            event
+        }
     }
 
     /** Emit an event, accumulating bouncer-network snapshots as a side effect. */
@@ -1296,17 +1396,21 @@ class IrcClient(
     }
 
     private fun updateReadyCaps(caps: Set<String>) {
-        val current = _state.value
-        if (current is IrcClientState.Ready) {
-            _state.value = current.copy(caps = caps)
-        }
+        _state.update { if (it is IrcClientState.Ready) it.copy(caps = caps) else it }
     }
+
+    private fun supportsRegainMonitor(snapshot: Map<String, String>): Boolean =
+        when (monitorSupport(snapshot)) {
+            MonitorSupport.Unlimited, is MonitorSupport.Limited -> true
+            MonitorSupport.Unsupported, MonitorSupport.Malformed -> false
+        }
 
     private suspend fun updateRuntimeIsupport(
         msg: IrcMessage,
         criticalEvents: Channel<IrcEvent>,
     ) {
         val isupport = _isupport.get()
+        if (!msg.addressesNick(selfNick.get(), isupport)) return
         val priorPrefix = isupport["PREFIX"]
         val priorCaseMapping = isupport.identityRules.caseMapping
         isupport.update(msg.params.drop(1).dropLast(1))
@@ -1316,7 +1420,20 @@ class IrcClient(
         channelBanSession.get()?.updateMapping(isupport.identityRules.caseMapping)
         val current = _state.value as? IrcClientState.Ready ?: return
         val snapshot = isupportToMap(isupport)
-        _state.value = current.copy(isupport = snapshot, removedIsupport = removedIsupport)
+        outboundLock.withLock {
+            if (criticalEvents !== criticalEventChannel) return
+            if ((regainMonitorSupported || current.preferredNickToRegain != null) &&
+                (current.isupport["MONITOR"] != snapshot["MONITOR"] || priorCaseMapping != isupport.identityRules.caseMapping)
+            ) {
+                regainMonitorSupported = supportsRegainMonitor(snapshot)
+                if (!regainMonitorSupported) {
+                    regainWatchRequested = false
+                    regainWatchRevision++
+                }
+                if (regainOfflineOpportunity > 0L) regainOfflineOpportunity = 0L
+            }
+            _state.update { if (it is IrcClientState.Ready) it.copy(isupport = snapshot, removedIsupport = removedIsupport) else it }
+        }
         publish(criticalEvents, IrcEvent.Registered(current.nick, current.caps, snapshot, removedIsupport, startsSession = false))
     }
 
@@ -1353,46 +1470,96 @@ class IrcClient(
             return sendUnlabeledWhois(session, msg, rawLabel = unlabeledWhoisLabel ?: msg.tags["label"], onWrite = onWrite)
         }
         val line = msg.serialize()
-        if (msg.command.equals("JOIN", ignoreCase = true)) {
-            outboundLock.withLock {
-                val session = joinRejections.get()?.takeIf { it.transport === t }
-                if (session != null) {
-                    val label = msg.tags["label"].takeIf { hasCap("labeled-response") }
-                    msg.params.firstOrNull()?.split(',')?.forEach { channel ->
-                        if (channel.isNotEmpty() && channel != "0") session.sent(channel, label, requestId = null)
+        return outboundLock.withLock {
+            var addingRegainWatch = false
+            when {
+                msg.command.equals("NICK", ignoreCase = true) && !msg.params.firstOrNull().isNullOrBlank() -> {
+                    if (transport !== t) return@withLock false
+                    regainDisarmed = true
+                    _state.update { if (it is IrcClientState.Ready) it.copy(preferredNickToRegain = null) else it }
+                }
+
+                msg.command.equals("MONITOR", ignoreCase = true) -> {
+                    if (transport !== t) return@withLock false
+                    if (regainMonitorSupported) {
+                        val operation = msg.params.firstOrNull()
+                        val preferred = isupport.normalize(config.nick)
+                        val changesTargets = operation == "+" || operation == "-"
+                        val targets = msg.params.getOrNull(1)
+                        if (operation.equals("C", ignoreCase = true) ||
+                            (changesTargets && targets != null && targets.splitToSequence(',').any { isupport.normalize(it) == preferred })
+                        ) {
+                            regainWatchRevision++
+                            regainWatchRequested = false
+                            addingRegainWatch = operation == "+"
+                            if (regainOfflineOpportunity > 0L) regainOfflineOpportunity = 0L
+                        }
                     }
                 }
-                onWrite?.invoke()
-                t.send(line)
-            }
-            return true
-        }
-        if (!msg.command.equals("MODE", ignoreCase = true) || msg.params.getOrNull(1)?.contains('b') != true) {
-            sendSerialized(t, line, onWrite)
-            return true
-        }
-        outboundLock.withLock {
-            if ("label" !in msg.tags || !hasCap("labeled-response")) {
-                channelBanSession.get()?.takeIf { it.transport === t }?.rawMode(msg, isupport)
+
+                msg.command.equals("JOIN", ignoreCase = true) -> {
+                    val session = joinRejections.get()?.takeIf { it.transport === t }
+                    if (session != null) {
+                        val label = msg.tags["label"].takeIf { hasCap("labeled-response") }
+                        msg.params.firstOrNull()?.split(',')?.forEach { channel ->
+                            if (channel.isNotEmpty() && channel != "0") session.sent(channel, label, requestId = null)
+                        }
+                    }
+                }
+
+                msg.command.equals("MODE", ignoreCase = true) && msg.params.getOrNull(1)?.contains('b') == true &&
+                    ("label" !in msg.tags || !hasCap("labeled-response")) -> {
+                    channelBanSession.get()?.takeIf { it.transport === t }?.rawMode(msg, isupport)
+                }
             }
             onWrite?.invoke()
             t.send(line)
+            if (addingRegainWatch) regainWatchRequested = true
+            true
         }
-        return true
     }
 
     private suspend fun sendSerialized(
         t: IrcTransport,
         line: String,
-        onWrite: (() -> Unit)? = null,
     ) {
-        outboundLock.withLock {
-            onWrite?.invoke()
-            t.send(line)
-        }
+        outboundLock.withLock { t.send(line) }
     }
 
     // -- public send API --
+
+    fun isCurrentRegainWatch(rejection: IrcEvent.MonitorLimitExceeded): Boolean {
+        val revision = rejection.regainWatchRevision
+        return revision > 0L && revision == regainWatchRevision && transport != null && _state.value is IrcClientState.Ready
+    }
+
+    suspend fun tryRegainPreferredNick(
+        preferredNick: String,
+        regainOpportunity: Long,
+        stillEligible: () -> Boolean,
+    ): Boolean {
+        val t = transport ?: return false
+        return outboundLock.withLock {
+            val ready = _state.value as? IrcClientState.Ready ?: return@withLock false
+            if (transport !== t || ready.preferredNickToRegain != preferredNick || !regainWatchRequested || regainPending ||
+                regainOpportunity <= 0L || regainOpportunity != regainOfflineOpportunity || !stillEligible()
+            ) {
+                return@withLock false
+            }
+            val line = IrcMessage(command = "NICK", params = listOf(preferredNick)).serialize()
+            regainOfflineOpportunity = CONSUMED_REGAIN_OPPORTUNITY
+            regainPending = true
+            try {
+                t.send(line)
+                true
+            } catch (e: Throwable) {
+                regainPending = false
+                _state.update { if (it is IrcClientState.Ready) it.copy(preferredNickToRegain = null) else it }
+                if (e is CancellationException) throw e
+                false
+            }
+        }
+    }
 
     suspend fun send(msg: IrcMessage) {
         transport?.let { sendSerialized(it, msg) }
@@ -2787,6 +2954,7 @@ class IrcClient(
     }
 
     private companion object {
+        const val CONSUMED_REGAIN_OPPORTUNITY = -1L
         const val LABEL_TIMEOUT_MS = 30_000L
 
         // Generous enough that a slow link answering a PING is not mistaken for a dead bouncer.

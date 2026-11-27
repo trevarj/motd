@@ -31,6 +31,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -140,6 +141,7 @@ fun NetworkSettingsScreen(
         onObfsLinkChange = viewModel::editObfsLink,
         onServerChange = viewModel::editServer,
         onAuthChange = viewModel::editAuth,
+        onSetAutoRegainPreferredNick = viewModel::setAutoRegainPreferredNick,
         onZncLoginChange = viewModel::editZncLogin,
         onSave = { viewModel.save(onBack) },
         onCancelBouncerIdentityChange = viewModel::cancelBouncerIdentityChange,
@@ -176,6 +178,7 @@ fun NetworkSettingsContent(
     onObfsLinkChange: (String) -> Unit = {},
     onServerChange: (ServerForm) -> Unit,
     onAuthChange: (AuthForm) -> Unit,
+    onSetAutoRegainPreferredNick: (Boolean) -> Unit = {},
     onZncLoginChange: (ZncLoginForm) -> Unit = {},
     onSave: () -> Unit,
     onCancelBouncerIdentityChange: () -> Unit = {},
@@ -322,6 +325,16 @@ fun NetworkSettingsContent(
                                 soju = state.entity?.role == NetworkRole.BOUNCER_ROOT,
                             )
                         }
+                    }
+                    if (state.entity?.role == NetworkRole.DIRECT && !state.isZnc) {
+                        SwitchRow(
+                            title = stringResource(R.string.network_auto_regain_preferred_nick),
+                            subtitle = stringResource(R.string.network_auto_regain_preferred_nick_desc),
+                            checked = state.autoRegainPreferredNick,
+                            onCheckedChange = onSetAutoRegainPreferredNick,
+                            switchTag = "network_auto_regain_preferred_nick",
+                            icon = Icons.Outlined.Person,
+                        )
                     }
                 }
             }
