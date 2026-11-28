@@ -5120,6 +5120,7 @@ class ComposerSendClearUiTest {
     }
 
     @Test
+    @Config(qualifiers = "w411dp-h891dp-keysexposed-qwerty")
     fun keyboardCommandsUseTheFocusedChatAndRespectComposerTools() {
         val actions = mutableListOf<ChatKeyboardAction>()
         val persisted = mutableListOf<String>()
@@ -5167,6 +5168,19 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_keyboard_shortcuts").performClick()
         compose.onNodeWithTag("chat_keyboard_previous").performClick()
         compose.runOnIdle { assertEquals(listOf(ChatKeyboardAction.NEXT_UNREAD, ChatKeyboardAction.PREVIOUS), actions) }
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h891dp-nokeys")
+    fun conversationOverflowHidesKeyboardShortcutsWithoutPhysicalKeyboard() {
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            onKeyboardNavigate = { _, _ -> error("No keyboard shortcut was selected") },
+        ) { _, _ -> }
+
+        compose.onNodeWithTag("chat_overflow").performClick()
+        compose.onNodeWithTag("chat_overflow_menu").assertIsDisplayed()
+        compose.onNodeWithTag("chat_keyboard_shortcuts").assertDoesNotExist()
     }
 
     @Test

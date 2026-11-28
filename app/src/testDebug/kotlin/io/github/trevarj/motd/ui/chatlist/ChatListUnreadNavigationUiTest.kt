@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.chatlist
 
+import android.content.Context
+import android.hardware.input.InputManager
+import android.view.InputDevice
 import androidx.compose.foundation.focusable
 import androidx.compose.material3.Text
 import androidx.compose.runtime.mutableFloatStateOf
@@ -14,6 +17,7 @@ import androidx.compose.ui.platform.LocalInputModeManager
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
@@ -63,12 +67,15 @@ import io.github.trevarj.motd.ui.nav.openKeyboardChat
 import io.github.trevarj.motd.ui.theme.MotdTheme
 import kotlinx.coroutines.flow.flowOf
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import org.robolectric.shadows.InputDeviceBuilder
 import android.view.KeyEvent as AndroidKeyEvent
 
 @RunWith(RobolectricTestRunner::class)
@@ -128,12 +135,49 @@ class ChatListUnreadNavigationUiTest {
     }
 
     @Test
-    @Config(qualifiers = "w411dp-h891dp")
+    @Config(qualifiers = "w411dp-h891dp-keysexposed-qwerty")
     fun keyboardSwitchesPhoneDetailsWithoutStacking() = exerciseKeyboardSwitching()
 
     @Test
-    @Config(qualifiers = "w840dp-h900dp")
+    @Config(qualifiers = "w840dp-h900dp-keysexposed-qwerty")
     fun keyboardSwitchesSplitDetailsWithoutStacking() = exerciseKeyboardSwitching()
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h891dp-nokeys")
+    fun overflowHidesShortcutsForNumpadAndOnlyDividesVisibleViews() {
+        attachKeypad(AndroidKeyEvent.KEYCODE_NUMPAD_1)
+        launchList()
+        val more = compose.onNodeWithTag("chatlist_more")
+        val menu = compose.onNodeWithTag("chatlist_more_menu")
+        val shortcuts = compose.onNodeWithTag("chatlist_keyboard_shortcuts")
+        val unread = compose.onNodeWithTag("chatlist_show_unread")
+        val divider = compose.onNodeWithTag("chatlist_more_views_divider")
+        val activity = compose.onNodeWithTag("chatlist_network_activity")
+        more.performClick()
+        menu.assertIsDisplayed()
+        shortcuts.assertDoesNotExist()
+        val unreadTop = unread.assertIsDisplayed().getUnclippedBoundsInRoot().top
+        val dividerTop = divider.assertIsDisplayed().getUnclippedBoundsInRoot().top
+        val activityTop = activity.assertIsDisplayed().getUnclippedBoundsInRoot().top
+        assertTrue(unreadTop < dividerTop && dividerTop < activityTop)
+
+        unread.performClick()
+        assertUnread()
+        more.performClick()
+        activity.assertIsDisplayed()
+        unread.assertDoesNotExist()
+        divider.assertDoesNotExist()
+    }
+
+    @Test
+    @Config(sdk = [35], qualifiers = "w411dp-h891dp-nokeys")
+    fun overflowShowsShortcutsForNonAlphabeticShortcutPad() {
+        attachKeypad(AndroidKeyEvent.KEYCODE_CTRL_RIGHT, AndroidKeyEvent.KEYCODE_F8)
+        launchList()
+
+        compose.onNodeWithTag("chatlist_more").performClick()
+        compose.onNodeWithTag("chatlist_keyboard_shortcuts").assertIsDisplayed()
+    }
 
     private fun exerciseKeyboardSwitching() {
         buffers.chats.value =
@@ -269,6 +313,21 @@ class ChatListUnreadNavigationUiTest {
     private fun assertUnread() {
         compose.onNodeWithTag("chatlist_unread_chip").assertIsDisplayed()
         compose.onNodeWithTag("chatlist_row_3").assertDoesNotExist()
+    }
+
+    private fun attachKeypad(vararg keys: Int) {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val input = shadowOf(context.getSystemService(InputManager::class.java))
+        val keypad =
+            InputDeviceBuilder
+                .newBuilder()
+                .setId(1)
+                .setName("Test keypad")
+                .setSources(InputDevice.SOURCE_KEYBOARD)
+                .setKeyboardType(InputDevice.KEYBOARD_TYPE_NON_ALPHABETIC)
+                .build()
+        input.addInputDevice(keypad)
+        input.addInputDeviceKeys(keypad.id, keys)
     }
 
     private fun launchList() {

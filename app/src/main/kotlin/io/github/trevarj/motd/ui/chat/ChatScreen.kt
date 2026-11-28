@@ -313,6 +313,7 @@ import io.github.trevarj.motd.ui.nav.ChatKeyboardNavigate
 import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsDialog
 import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsIcon
 import io.github.trevarj.motd.ui.nav.chatKeyboardAction
+import io.github.trevarj.motd.ui.nav.hasPhysicalKeyboard
 import io.github.trevarj.motd.ui.profile.ircIdentityLabels
 import io.github.trevarj.motd.ui.profile.rememberIrcProfile
 import io.github.trevarj.motd.ui.profile.rememberProfileMetadataSupported
@@ -3968,7 +3969,7 @@ internal fun ChatContent(
         }
         val conversationActionsMenu: @Composable () -> Unit = {
             DropdownMenu(expanded = overflowOpen, onDismissRequest = { overflowOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chat_overflow_menu")) {
-                if (onKeyboardNavigate != null) {
+                if (onKeyboardNavigate != null && hasPhysicalKeyboard()) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_keyboard_shortcuts"),
                         text = { Text(stringResource(R.string.chat_keyboard_shortcuts)) },

@@ -103,6 +103,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
@@ -229,6 +230,7 @@ import io.github.trevarj.motd.ui.nav.ChatKeyboardNavigate
 import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsDialog
 import io.github.trevarj.motd.ui.nav.ChatKeyboardShortcutsIcon
 import io.github.trevarj.motd.ui.nav.chatKeyboardAction
+import io.github.trevarj.motd.ui.nav.hasPhysicalKeyboard
 import io.github.trevarj.motd.ui.theme.LocalChatCardCornerStyle
 import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.LocalSpacing
@@ -980,6 +982,7 @@ internal fun ChatListContent(
                                                             overflowOpen = false
                                                             inspectNetworkActivity()
                                                         }
+                                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
                                                     }
                                                     if (dottedSelectedRows.isNotEmpty()) {
                                                         DropdownMenuItem(
@@ -1079,18 +1082,8 @@ internal fun ChatListContent(
                                                     }
                                                 }
                                                 DropdownMenu(moreOpen, { moreOpen = false }, containerColor = MaterialTheme.colorScheme.surfaceContainerLow, modifier = Modifier.semantics { testTagsAsResourceId = true }.testTag("chatlist_more_menu")) {
-                                                    if (onKeyboardNavigate != null) {
-                                                        DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.chat_keyboard_shortcuts)) },
-                                                            leadingIcon = { ChatKeyboardShortcutsIcon() },
-                                                            modifier = Modifier.testTag("chatlist_keyboard_shortcuts"),
-                                                            onClick = {
-                                                                moreOpen = false
-                                                                showShortcuts = true
-                                                            },
-                                                        )
-                                                    }
-                                                    if (!state.loading && !unreadOnly && scopedRows.any(::isUnreadChat)) {
+                                                    val showUnread = !state.loading && !unreadOnly && scopedRows.any(::isUnreadChat)
+                                                    if (showUnread) {
                                                         DropdownMenuItem(
                                                             text = { Text(stringResource(R.string.chatlist_show_unread)) },
                                                             leadingIcon = { Icon(Icons.Outlined.MarkChatUnread, contentDescription = null) },
@@ -1123,6 +1116,20 @@ internal fun ChatListContent(
                                                             },
                                                         )
                                                     }
+                                                    if (state.globalFeedEnabled) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.chatlist_feed)) },
+                                                            leadingIcon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                onOpenFeed()
+                                                            },
+                                                            modifier = Modifier.testTag("chatlist_open_feed"),
+                                                        )
+                                                    }
+                                                    if (showUnread || onOpenScheduledMessages != null || onOpenSavedMessages != null || state.globalFeedEnabled) {
+                                                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp).testTag("chatlist_more_views_divider"))
+                                                    }
                                                     NetworkActivityMenuItem(showNewNetworkActivity) {
                                                         moreOpen = false
                                                         inspectNetworkActivity()
@@ -1136,17 +1143,6 @@ internal fun ChatListContent(
                                                         },
                                                         modifier = Modifier.testTag("chatlist_manage_folders"),
                                                     )
-                                                    if (state.globalFeedEnabled) {
-                                                        DropdownMenuItem(
-                                                            text = { Text(stringResource(R.string.chatlist_feed)) },
-                                                            leadingIcon = { Icon(Icons.Outlined.DynamicFeed, contentDescription = null) },
-                                                            onClick = {
-                                                                moreOpen = false
-                                                                onOpenFeed()
-                                                            },
-                                                            modifier = Modifier.testTag("chatlist_open_feed"),
-                                                        )
-                                                    }
                                                     DropdownMenuItem(
                                                         text = { Text(stringResource(R.string.chatlist_settings)) },
                                                         leadingIcon = { Icon(Icons.Outlined.Settings, contentDescription = null) },
@@ -1156,6 +1152,17 @@ internal fun ChatListContent(
                                                         },
                                                         modifier = Modifier.testTag("chatlist_open_settings"),
                                                     )
+                                                    if (onKeyboardNavigate != null && hasPhysicalKeyboard()) {
+                                                        DropdownMenuItem(
+                                                            text = { Text(stringResource(R.string.chat_keyboard_shortcuts)) },
+                                                            leadingIcon = { ChatKeyboardShortcutsIcon() },
+                                                            modifier = Modifier.testTag("chatlist_keyboard_shortcuts"),
+                                                            onClick = {
+                                                                moreOpen = false
+                                                                showShortcuts = true
+                                                            },
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }

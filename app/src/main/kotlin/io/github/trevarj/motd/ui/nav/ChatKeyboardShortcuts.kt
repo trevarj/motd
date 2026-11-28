@@ -1,5 +1,8 @@
 package io.github.trevarj.motd.ui.nav
 
+import android.content.res.Configuration
+import android.hardware.input.InputManager
+import android.view.InputDevice
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -13,6 +16,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
@@ -23,6 +27,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.KeyEvent
 import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.semantics
@@ -113,6 +119,43 @@ internal fun ChatKeyboardAction.target(
     }
     return null
 }
+
+@Composable
+internal fun hasPhysicalKeyboard(): Boolean {
+    if (LocalConfiguration.current.keyboard == Configuration.KEYBOARD_QWERTY) return true
+    val input = LocalContext.current.getSystemService(InputManager::class.java) ?: return false
+    return produceState(false, input) {
+        val listener =
+            object : InputManager.InputDeviceListener {
+                override fun onInputDeviceAdded(deviceId: Int) = refresh()
+
+                override fun onInputDeviceChanged(deviceId: Int) = refresh()
+
+                override fun onInputDeviceRemoved(deviceId: Int) = refresh()
+
+                fun refresh() {
+                    value = input.hasShortcutKeypad()
+                }
+            }
+        input.registerInputDeviceListener(listener, null)
+        listener.refresh()
+        awaitDispose { input.unregisterInputDeviceListener(listener) }
+    }.value
+}
+
+private fun InputManager.hasShortcutKeypad(): Boolean =
+    inputDeviceIds.any { id ->
+        val device = getInputDevice(id) ?: return@any false
+        if (device.isVirtual || !device.supportsSource(InputDevice.SOURCE_KEYBOARD)) return@any false
+        val keys =
+            device.hasKeys(
+                AndroidKeyEvent.KEYCODE_CTRL_LEFT,
+                AndroidKeyEvent.KEYCODE_CTRL_RIGHT,
+                AndroidKeyEvent.KEYCODE_F7,
+                AndroidKeyEvent.KEYCODE_F8,
+            )
+        (keys[0] || keys[1]) && (keys[2] || keys[3])
+    }
 
 @Composable
 internal fun ChatKeyboardShortcutsIcon() {
