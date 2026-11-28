@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
@@ -99,7 +100,12 @@ internal fun ConversationLinksSheet(
             modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp),
         )
         LazyColumn(
-            modifier = Modifier.fillMaxWidth().heightIn(max = 480.dp).testTag("chat_links_list"),
+            modifier =
+                Modifier
+                    .fillMaxWidth()
+                    .navigationBarsPadding()
+                    .heightIn(max = 480.dp)
+                    .testTag("chat_links_list"),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {

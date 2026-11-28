@@ -1,3 +1,4 @@
 - Group chat-list menu actions and show keyboard shortcut help only when a hardware keyboard is connected.
 - Hide User profile in channel menus when the IRC network does not support profile metadata.
 - Browse conversation links as cards with sender colors and muted timestamps. Tap the arrow to jump to the original message.
+- Keep link cards clear of Android's navigation buttons.
