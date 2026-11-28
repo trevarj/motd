@@ -181,7 +181,9 @@ doesn't set IRC Away.
 
 **Channel info → Channel profile** shows the shared avatar and display name.
 Channel operators and higher ranks can edit them when the server permits it.
-Both profile settings are disabled until the network negotiates IRCv3 metadata.
+The channel overflow hides **User profile** unless the network negotiates IRCv3
+metadata. Network Settings and Channel Info still show disabled profile settings
+with an explanation when metadata is unavailable.
 The chat avatar editor still sets a device-only override. **Settings → Chat**
 lets you choose whether the real IRC name or the display name is shown first.
 Mentions and commands always use the real IRC identity.

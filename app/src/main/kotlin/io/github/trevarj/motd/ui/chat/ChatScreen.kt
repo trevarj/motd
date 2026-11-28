@@ -4012,28 +4012,15 @@ internal fun ChatContent(
                         },
                     )
                 }
-                if (onOpenUserProfile != null && buffer?.type == BufferType.CHANNEL && !activeDickordChannel) {
-                    val profileEnabled = rememberProfileMetadataSupported(buffer.networkId)
+                if (onOpenUserProfile != null &&
+                    buffer?.type == BufferType.CHANNEL &&
+                    !activeDickordChannel &&
+                    rememberProfileMetadataSupported(buffer.networkId)
+                ) {
                     DropdownMenuItem(
                         modifier = Modifier.testTag("chat_user_profile"),
-                        text = {
-                            Column {
-                                Text(stringResource(R.string.profile_user_title))
-                                if (!profileEnabled) {
-                                    Text(
-                                        stringResource(R.string.profile_entry_unavailable),
-                                        color =
-                                            MaterialTheme.colorScheme.readableForeground(
-                                                MaterialTheme.colorScheme.onSurfaceVariant,
-                                                MaterialTheme.colorScheme.surfaceContainerLow,
-                                            ),
-                                        style = MaterialTheme.typography.labelSmall,
-                                    )
-                                }
-                            }
-                        },
+                        text = { Text(stringResource(R.string.profile_user_title)) },
                         leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
-                        enabled = profileEnabled,
                         onClick = {
                             overflowOpen = false
                             onOpenUserProfile(buffer.networkId)

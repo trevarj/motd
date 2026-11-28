@@ -510,6 +510,7 @@ class ComposerSendClearUiTest {
         nickSheet: @Composable () -> Unit = {},
         onOpenSearch: (Long) -> Unit = {},
         onOpenConversationLinks: (() -> Unit)? = null,
+        onOpenUserProfile: ((Long) -> Unit)? = null,
         parted: Boolean = false,
         onInviteUser: () -> Unit = {},
         replyTo: () -> MessageEntity? = { null },
@@ -618,6 +619,7 @@ class ComposerSendClearUiTest {
                             onSaveDccToDownloads = onSaveDccToDownloads,
                             onOpenSearch = onOpenSearch,
                             onOpenConversationLinks = onOpenConversationLinks,
+                            onOpenUserProfile = onOpenUserProfile,
                             onOpenMedia = { _, _ -> },
                             onOpenPalette = { _, _ -> },
                             onInviteUser = onInviteUser,
@@ -5181,6 +5183,18 @@ class ComposerSendClearUiTest {
         compose.onNodeWithTag("chat_overflow").performClick()
         compose.onNodeWithTag("chat_overflow_menu").assertIsDisplayed()
         compose.onNodeWithTag("chat_keyboard_shortcuts").assertDoesNotExist()
+    }
+
+    @Test
+    fun conversationOverflowHidesUserProfileWithoutNegotiatedMetadata() {
+        setContent(
+            draft = { ComposerDraftState(hydrated = true) },
+            onOpenUserProfile = { error("This network has not negotiated profile metadata") },
+        ) { _, _ -> }
+
+        compose.onNodeWithTag("chat_overflow").performClick()
+        compose.onNodeWithTag("chat_overflow_menu").assertIsDisplayed()
+        compose.onNodeWithTag("chat_user_profile").assertDoesNotExist()
     }
 
     @Test
