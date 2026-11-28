@@ -5,13 +5,19 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertCountEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.v2.createComposeRule
 import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.dp
 import coil.Coil
 import coil.EventListener
 import coil.decode.DataSource
@@ -80,7 +86,14 @@ class ConversationLinksSheetUiTest {
         }
 
         compose.onNodeWithTag("chat_links_title").assertIsDisplayed()
-        compose.onNodeWithTag("chat_links_url_42_0").assertIsDisplayed().performClick()
+        val link = compose.onNodeWithTag("chat_links_url_42_0")
+        val jump = compose.onNodeWithTag("chat_links_jump_42_0")
+        jump.assertIsDisplayed().assertContentDescriptionEquals("Jump to message")
+        compose.onNodeWithText("Jump to message").assertDoesNotExist()
+        val cardBounds = link.getUnclippedBoundsInRoot()
+        val jumpBounds = jump.getUnclippedBoundsInRoot()
+        assertTrue(jumpBounds.left > (cardBounds.left + cardBounds.right) / 2f && jumpBounds.right <= cardBounds.right)
+        link.performTouchInput { click(Offset(width - 28.dp.toPx(), 8.dp.toPx())) }
         compose.onNodeWithTag("link_action_sheet").assertIsDisplayed()
         compose.runOnIdle {
             assertTrue(opened.isEmpty())
@@ -104,7 +117,7 @@ class ConversationLinksSheetUiTest {
         compose.onNodeWithTag("link_action_sheet").assertDoesNotExist()
         compose.onNodeWithTag("chat_links_url_42_0").assertDoesNotExist()
         compose.onNodeWithText("alice ·", substring = true).assertIsDisplayed()
-        compose.onNodeWithTag("chat_links_jump_42_1").performClick()
+        compose.onNodeWithTag("chat_links_jump_42_1").performTouchInput { click() }
         compose.onNodeWithTag("chat_links_sheet").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf(second), jumped) }
     }

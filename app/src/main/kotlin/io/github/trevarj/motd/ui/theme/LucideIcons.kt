@@ -141,6 +141,17 @@ internal enum class LucideIcon(
             horizontalLineTo(5.0f)
         }
     }),
+    ARROW_RIGHT({
+        stroke {
+            moveTo(5.0f, 12.0f)
+            horizontalLineToRelative(14.0f)
+        }
+        stroke {
+            moveToRelative(12.0f, 5.0f)
+            lineToRelative(7.0f, 7.0f)
+            lineToRelative(-7.0f, 7.0f)
+        }
+    }),
     ARROW_UP({
         stroke {
             moveToRelative(5.0f, 12.0f)

@@ -93,6 +93,9 @@ internal fun resolveUiIcon(
             "AutoMirrored.Outlined.ArrowBack",
             -> LucideIcon.ARROW_LEFT
 
+            "AutoMirrored.Filled.ArrowForward",
+            -> LucideIcon.ARROW_RIGHT
+
             "Filled.ArrowUpward",
             "Outlined.ArrowUpward",
             -> LucideIcon.ARROW_UP

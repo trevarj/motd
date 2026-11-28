@@ -2,6 +2,7 @@ package io.github.trevarj.motd.ui.theme
 
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.ArrowForwardIos
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Reply
@@ -195,6 +196,7 @@ class UiIconsTest {
         listOf(
             Icons.Outlined.Anchor,
             Icons.AutoMirrored.Filled.ArrowBack,
+            Icons.AutoMirrored.Filled.ArrowForward,
             Icons.AutoMirrored.Filled.ArrowForwardIos,
             Icons.AutoMirrored.Filled.Login,
             Icons.AutoMirrored.Filled.Reply,
