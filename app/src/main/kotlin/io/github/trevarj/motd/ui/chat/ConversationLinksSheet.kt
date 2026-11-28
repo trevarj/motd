@@ -58,6 +58,7 @@ import io.github.trevarj.motd.ui.components.EffectModalBottomSheet
 import io.github.trevarj.motd.ui.components.LinkActionsSheet
 import io.github.trevarj.motd.ui.components.routedRemoteMediaData
 import io.github.trevarj.motd.ui.theme.LocalMediaCornerStyle
+import io.github.trevarj.motd.ui.theme.LocalNickColors
 import io.github.trevarj.motd.ui.theme.SheetSystemBars
 import io.github.trevarj.motd.ui.theme.cornerRadius
 import io.github.trevarj.motd.ui.theme.readableForeground
@@ -161,7 +162,7 @@ private fun ConversationLinkCard(
         DateUtils.formatDateTime(
             context,
             occurrence.serverTime,
-            DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_SHOW_TIME,
+            DateUtils.FORMAT_SHOW_DATE or DateUtils.FORMAT_SHOW_YEAR or DateUtils.FORMAT_SHOW_TIME or DateUtils.FORMAT_ABBREV_MONTH,
         )
     val rowId = "${occurrence.eventId}_${occurrence.urlIndex}"
     val actionsLabel = stringResource(R.string.chat_link_actions)
@@ -205,9 +206,14 @@ private fun ConversationLinkCard(
                     Text(it, style = MaterialTheme.typography.bodySmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 }
                 Text(
-                    stringResource(R.string.chat_links_source, occurrence.sender, time),
+                    occurrence.sender,
                     style = MaterialTheme.typography.labelMedium,
-                    color = scheme.onSurfaceVariant,
+                    color = LocalNickColors.current.nick(occurrence.sender, scheme.onSurface),
+                )
+                Text(
+                    time,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = scheme.readableForeground(lerp(scheme.onSurfaceVariant, scheme.surfaceContainerLow, 0.18f), scheme.surfaceContainerLow),
                 )
             }
             FilledTonalIconButton(onClick = onJump, modifier = Modifier.testTag("chat_links_jump_$rowId")) {

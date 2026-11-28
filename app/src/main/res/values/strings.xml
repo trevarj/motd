@@ -1130,7 +1130,6 @@
     <string name="chat_links_empty_page">No links found so far. You can check older saved messages.</string>
     <string name="chat_links_failed">Couldn’t read saved links.</string>
     <string name="chat_links_load_older">Load older links</string>
-    <string name="chat_links_source">%1$s · %2$s</string>
     <string name="chat_links_jump">Jump to message</string>
     <string name="chat_links_message_unavailable">The message for this link is no longer available.</string>
     <string name="chat_jump_to_newest">Jump to newest</string>

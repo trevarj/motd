@@ -116,7 +116,7 @@ class ConversationLinksSheetUiTest {
         compose.runOnIdle { links = ConversationLinksState(listOf(second)) }
         compose.onNodeWithTag("link_action_sheet").assertDoesNotExist()
         compose.onNodeWithTag("chat_links_url_42_0").assertDoesNotExist()
-        compose.onNodeWithText("alice ·", substring = true).assertIsDisplayed()
+        compose.onNodeWithText("alice").assertIsDisplayed()
         compose.onNodeWithTag("chat_links_jump_42_1").performTouchInput { click() }
         compose.onNodeWithTag("chat_links_sheet").assertDoesNotExist()
         compose.runOnIdle { assertEquals(listOf(second), jumped) }
